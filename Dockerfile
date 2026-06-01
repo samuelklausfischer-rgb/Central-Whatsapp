@@ -15,17 +15,12 @@ ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
 ENV VITE_SUPABASE_PUBLISHABLE_KEY=$VITE_SUPABASE_PUBLISHABLE_KEY
 
 RUN npm run build
+RUN node -e "const fs=require('node:fs'); const cfg={VITE_SUPABASE_URL:process.env.VITE_SUPABASE_URL||'',VITE_SUPABASE_PUBLISHABLE_KEY:process.env.VITE_SUPABASE_PUBLISHABLE_KEY||''}; fs.writeFileSync('/app/dist/env-config.js','window.__APP_CONFIG__ = '+JSON.stringify(cfg,null,2)+';\\n');"
 
 FROM nginx:stable-alpine AS production
 
-ENV VITE_SUPABASE_URL=""
-ENV VITE_SUPABASE_PUBLISHABLE_KEY=""
-
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY docker/10-env-config.sh /docker-entrypoint.d/10-env-config.sh
 COPY --from=build /app/dist /usr/share/nginx/html
-
-RUN chmod +x /docker-entrypoint.d/10-env-config.sh
 
 EXPOSE 80
 

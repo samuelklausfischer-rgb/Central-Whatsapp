@@ -30,7 +30,7 @@ VITE_SUPABASE_URL=https://seu-projeto.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_sua_chave_aqui
 ```
 
-As variaveis `VITE_*` tambem sao aceitas em runtime no container Docker. O script `docker/10-env-config.sh` gera `/env-config.js` quando o container inicia.
+No Dockerfile, as variaveis `VITE_*` devem ser enviadas como build args. A build gera `/env-config.js` dentro da imagem com esses valores.
 
 ## Desenvolvimento Local
 
@@ -62,13 +62,10 @@ docker build \
   -t central-whats .
 ```
 
-Run com variaveis em runtime:
+Run da imagem gerada:
 
 ```bash
-docker run --rm -p 8080:80 \
-  -e VITE_SUPABASE_URL=https://seu-projeto.supabase.co \
-  -e VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_sua_chave_aqui \
-  central-whats
+docker run --rm -p 8080:80 central-whats
 ```
 
 Abra `http://localhost:8080`.
@@ -78,14 +75,14 @@ Abra `http://localhost:8080`.
 1. Crie um novo app a partir do repositorio GitHub.
 2. Selecione deploy por `Dockerfile`.
 3. Use porta interna `80`.
-4. Configure as variaveis de ambiente:
+4. Configure as variaveis como build args:
 
 | Variavel | Obrigatoria | Observacao |
 | --- | --- | --- |
 | `VITE_SUPABASE_URL` | Sim | URL do projeto Supabase |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | Sim | Chave publishable/anon do Supabase |
 
-Essas variaveis podem ser configuradas como runtime environment variables no EasyPanel. Se o painel tambem oferecer build args, mantenha os mesmos nomes e valores.
+Essas variaveis precisam estar disponiveis durante o build da imagem. Depois do rebuild, verifique `/env-config.js` no navegador e confirme que os valores nao estao vazios.
 
 ## Backend E Funcoes
 
@@ -102,7 +99,6 @@ src/                  Frontend React
 public/               Assets publicos e env-config.js base
 supabase/functions/   Edge Functions Supabase
 pocketbase/           Hooks/migrations legados do PocketBase
-docker/               Scripts de runtime do container
 Dockerfile            Build e runtime Nginx do frontend
 nginx.conf            Configuracao SPA do Nginx
 ```
