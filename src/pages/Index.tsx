@@ -72,7 +72,7 @@ export default function Index() {
           <h1 className="bg-clip-text text-transparent bg-gradient-to-br from-gray-200 to-gray-600 text-3xl font-bold tracking-tight">
             Visão Geral
           </h1>
-          <p className="text-zinc-400 mt-1">
+          <p className="text-muted-foreground mt-1">
             Resumo das comunicações internas e aparelhos corporativos.
           </p>
         </div>
@@ -89,13 +89,13 @@ export default function Index() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card className="shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-zinc-400">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
               Aparelhos Conectados
             </CardTitle>
             <Smartphone className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-zinc-100">{totalDevices}</div>
+            <div className="text-2xl font-bold text-foreground">{totalDevices}</div>
             <p className="text-xs text-emerald-500 flex items-center mt-1">
               <Activity className="h-3 w-3 mr-1" /> Aparelhos da rede
             </p>
@@ -104,36 +104,36 @@ export default function Index() {
 
         <Card className="shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-zinc-400">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
               Total Mensagens Não Lidas
             </CardTitle>
             <MessageSquareText className="h-4 w-4 text-amber-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-zinc-100">{totalUnreadMessages}</div>
-            <p className="text-xs text-zinc-500 mt-1">Soma de todos os setores</p>
+            <div className="text-2xl font-bold text-foreground">{totalUnreadMessages}</div>
+            <p className="text-xs text-muted-foreground mt-1">Soma de todos os setores</p>
           </CardContent>
         </Card>
 
         <Card className="shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-zinc-400">Tarefas Internas</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Tarefas Internas</CardTitle>
             <ListTodo className="h-4 w-4 text-emerald-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-zinc-100">{activeTasks}</div>
-            <p className="text-xs text-zinc-500 mt-1">Acompanhamentos pendentes</p>
+            <div className="text-2xl font-bold text-foreground">{activeTasks}</div>
+            <p className="text-xs text-muted-foreground mt-1">Acompanhamentos pendentes</p>
           </CardContent>
         </Card>
 
         <Card className="shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-zinc-400">Anotações Gerais</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Anotações Gerais</CardTitle>
             <StickyNote className="h-4 w-4 text-purple-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-zinc-100">{notesCount}</div>
-            <p className="text-xs text-zinc-500 mt-1">Registros recentes</p>
+            <div className="text-2xl font-bold text-foreground">{notesCount}</div>
+            <p className="text-xs text-muted-foreground mt-1">Registros recentes</p>
           </CardContent>
         </Card>
       </div>
@@ -202,17 +202,17 @@ export default function Index() {
                 <div
                   key={device.id}
                   onClick={() => navigate(`/chat?device=${device.id}`)}
-                  className="flex items-center justify-between p-3 rounded-lg border border-white/5 bg-zinc-950/40 hover:bg-zinc-800/40 cursor-pointer transition-colors"
+                  className="flex items-center justify-between p-3 rounded-lg border border-border bg-card hover:bg-accent cursor-pointer transition-colors"
                 >
                   <div className="flex items-center gap-3">
                     <div className="bg-primary/20 p-2 rounded-full">
                       <Smartphone className="h-5 w-5 text-primary" />
                     </div>
                     <div>
-                      <p className="font-medium text-sm text-zinc-100 leading-none">
+                      <p className="font-medium text-sm text-foreground leading-none">
                         {device.name}
                       </p>
-                      <p className="text-xs text-zinc-400 mt-1 flex items-center gap-2">
+                      <p className="text-xs text-muted-foreground mt-1 flex items-center gap-2">
                         <span>{device.department}</span>
                         <span className="flex items-center">
                           {getBatteryIcon(80)}
@@ -230,11 +230,11 @@ export default function Index() {
                         {device.unread_count} não lidas
                       </Badge>
                     ) : (
-                      <Badge variant="outline" className="text-zinc-400 border-white/10">
+                      <Badge variant="outline" className="text-muted-foreground border-border">
                         Em dia
                       </Badge>
                     )}
-                    <span className="flex items-center gap-1 text-[10px] text-zinc-500">
+                    <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
                       <span
                         className={`h-1.5 w-1.5 rounded-full ${device.status === 'online' ? 'bg-emerald-500' : 'bg-slate-500'}`}
                       ></span>

@@ -14,24 +14,29 @@ export function SmartAvatar({
   fallbackClassName,
 }: any) {
   const [imgError, setImgError] = useState(false)
+  const [localAvatarUrl, setLocalAvatarUrl] = useState<string | null>(null)
   const isFetchingRef = useRef(false)
   const fetchedJidRef = useRef<string | null>(null)
 
   const record = isInstance ? deviceRecord : contactRecord
-  const avatarUrl = record?.avatar_url
+  const remoteUrl = record?.avatar_url
+  const avatarUrl = remoteUrl || localAvatarUrl
+  const isGroup = !isInstance && Boolean(jid?.includes('@g.us'))
 
   const isOld =
     !isInstance &&
     (!record?.avatar_updated_at ||
       new Date().getTime() - new Date(record.avatar_updated_at).getTime() > 24 * 60 * 60 * 1000)
   const missingUrl = !isInstance && !avatarUrl
+  const shouldRefreshGroup = isGroup && !record?.nickname
 
+  // Fetch avatar when missing or stale
   useEffect(() => {
     if (
       !isInstance &&
       jid &&
       instanceKey &&
-      (missingUrl || isOld) &&
+      (missingUrl || isOld || shouldRefreshGroup) &&
       !isFetchingRef.current &&
       jid !== 'Unknown Sender' &&
       fetchedJidRef.current !== jid
@@ -39,14 +44,12 @@ export function SmartAvatar({
       isFetchingRef.current = true
       fetchedJidRef.current = jid
       fetchAvatar(jid, instanceKey)
-        .catch(() => {})
-        .finally(() => {
-          // We intentionally do not reset isFetchingRef here.
-          // This prevents the same component from retrying aggressively on every re-render if it fails.
-          // The request deduplication/throttling at the service level will also protect the API.
+        .then((data) => {
+          if (data?.avatar_url) setLocalAvatarUrl(data.avatar_url)
         })
+        .catch(() => {})
     }
-  }, [jid, instanceKey, missingUrl, isOld, isInstance])
+  }, [jid, instanceKey, missingUrl, isOld, isInstance, shouldRefreshGroup])
 
   const handleImageError = () => {
     setImgError(true)
@@ -60,18 +63,24 @@ export function SmartAvatar({
     ) {
       isFetchingRef.current = true
       fetchedJidRef.current = jid
-      fetchAvatar(jid, instanceKey).catch(() => {})
+      fetchAvatar(jid, instanceKey)
+        .then((data) => {
+          if (data?.avatar_url) setLocalAvatarUrl(data.avatar_url)
+        })
+        .catch(() => {})
     }
   }
 
-  // Reset imgError and fetching ref if the url changes externally (e.g. from real-time sync)
+  // When a real remote URL arrives from props (e.g. via real-time sync),
+  // clear local state so we use the persistent URL going forward
   useEffect(() => {
-    if (avatarUrl) {
+    if (remoteUrl) {
       setImgError(false)
-      fetchedJidRef.current = null
+      setLocalAvatarUrl(null)
+      if (!isGroup) fetchedJidRef.current = null
       isFetchingRef.current = false
     }
-  }, [avatarUrl])
+  }, [remoteUrl, isGroup])
 
   const showInitials =
     name && name !== 'Unknown Sender'

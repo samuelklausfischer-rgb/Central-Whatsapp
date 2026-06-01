@@ -105,6 +105,11 @@ export default function oxcDeepUidPlugin() {
         if (!node || typeof node !== 'object') return
 
         if (node.type === 'JSXOpeningElement' && node.name) {
+          if (
+            (node.name.type === 'JSXIdentifier' && node.name.name === 'Fragment') ||
+            (node.name.type === 'JSXMemberExpression' && node.name.property?.name === 'Fragment')
+          ) return
+
           const { line, column } = getLineColumn(lineOffsets, node.start)
           const uniqueId = `${relativeFilename}:${line}:${column}`
 

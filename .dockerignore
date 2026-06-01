@@ -1,0 +1,23 @@
+node_modules/
+.git/
+.gitignore
+.env*
+dist/
+dev-dist/
+dev-server.log
+*.log
+*.md
+
+# Backend and development tooling are kept in Git but not shipped in the frontend image.
+pocketbase/
+supabase/functions/
+evolution-api-mcp/
+Whats/
+opencode.json
+
+# Local/editor artifacts
+.vscode/
+.idea/
+.DS_Store
+.oxlintcache
+core.[0-9]*

@@ -1,18 +1,26 @@
-import pb from '@/lib/pocketbase/client'
+import supabase from '@/lib/supabase/client'
+import type { Note } from '@/lib/supabase/types'
 
-export interface Note {
-  id: string
-  title: string
-  content: string
-  user_id: string
-  created: string
-  updated: string
+export const getNotes = async () => {
+  const { data } = await supabase.from('notes').select('*').order('created_at', { ascending: false })
+  return (data as Note[]) || []
 }
 
-export const getNotes = () => pb.collection('notes').getFullList<Note>({ sort: '-created' })
-export const getNote = (id: string) => pb.collection('notes').getOne<Note>(id)
-export const createNote = (data: { title: string; content: string; user_id: string }) =>
-  pb.collection('notes').create<Note>(data)
-export const updateNote = (id: string, data: Partial<{ title: string; content: string }>) =>
-  pb.collection('notes').update<Note>(id, data)
-export const deleteNote = (id: string) => pb.collection('notes').delete(id)
+export const getNote = async (id: string) => {
+  const { data } = await supabase.from('notes').select('*').eq('id', id).single()
+  return data as Note | null
+}
+
+export const createNote = async (data: { title: string; content: string; user_id: string }) => {
+  const { data: note } = await supabase.from('notes').insert(data).select().single()
+  return note as Note
+}
+
+export const updateNote = async (id: string, data: Partial<{ title: string; content: string }>) => {
+  const { data: note } = await supabase.from('notes').update(data).eq('id', id).select().single()
+  return note as Note
+}
+
+export const deleteNote = async (id: string) => {
+  await supabase.from('notes').delete().eq('id', id)
+}

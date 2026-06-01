@@ -1,23 +1,26 @@
-import pb from '@/lib/pocketbase/client'
+import supabase from '@/lib/supabase/client'
+import type { AiPrompt } from '@/lib/supabase/types'
 
-export interface AiPrompt {
-  id: string
+export const getAiPrompts = async () => {
+  const { data } = await supabase.from('ai_assistant_prompts').select('*').order('created_at')
+  return (data as AiPrompt[]) || []
+}
+
+export const createAiPrompt = async (data: {
   label: string
   action_key: string
   system_prompt: string
-  is_active: boolean
   user_id: string
-  created: string
-  updated: string
+}) => {
+  const { data: prompt } = await supabase.from('ai_assistant_prompts').insert(data).select().single()
+  return prompt as AiPrompt
 }
 
-export const getAiPrompts = () =>
-  pb.collection('ai_assistant_prompts').getFullList<AiPrompt>({ sort: 'created' })
+export const updateAiPrompt = async (id: string, data: Partial<AiPrompt>) => {
+  const { data: prompt } = await supabase.from('ai_assistant_prompts').update(data).eq('id', id).select().single()
+  return prompt as AiPrompt
+}
 
-export const createAiPrompt = (data: Partial<AiPrompt>) =>
-  pb.collection('ai_assistant_prompts').create<AiPrompt>(data)
-
-export const updateAiPrompt = (id: string, data: Partial<AiPrompt>) =>
-  pb.collection('ai_assistant_prompts').update<AiPrompt>(id, data)
-
-export const deleteAiPrompt = (id: string) => pb.collection('ai_assistant_prompts').delete(id)
+export const deleteAiPrompt = async (id: string) => {
+  await supabase.from('ai_assistant_prompts').delete().eq('id', id)
+}

@@ -1,21 +1,24 @@
-import pb from '@/lib/pocketbase/client'
+import supabase from '@/lib/supabase/client'
+import type { MessageTrigger } from '@/lib/supabase/types'
 
-export interface MessageTrigger {
-  id: string
-  title: string
-  content: string
-  user_id: string
-  created: string
-  updated: string
+export const getTriggers = async () => {
+  const { data } = await supabase
+    .from('message_triggers')
+    .select('*')
+    .order('created_at', { ascending: false })
+  return (data as MessageTrigger[]) || []
 }
 
-export const getTriggers = () =>
-  pb.collection('message_triggers').getFullList<MessageTrigger>({ sort: '-created' })
+export const createTrigger = async (data: { title: string; content: string; user_id: string }) => {
+  const { data: trigger } = await supabase.from('message_triggers').insert(data).select().single()
+  return trigger as MessageTrigger
+}
 
-export const createTrigger = (data: { title: string; content: string; user_id: string }) =>
-  pb.collection('message_triggers').create<MessageTrigger>(data)
+export const updateTrigger = async (id: string, data: Partial<{ title: string; content: string }>) => {
+  const { data: trigger } = await supabase.from('message_triggers').update(data).eq('id', id).select().single()
+  return trigger as MessageTrigger
+}
 
-export const updateTrigger = (id: string, data: Partial<{ title: string; content: string }>) =>
-  pb.collection('message_triggers').update<MessageTrigger>(id, data)
-
-export const deleteTrigger = (id: string) => pb.collection('message_triggers').delete(id)
+export const deleteTrigger = async (id: string) => {
+  await supabase.from('message_triggers').delete().eq('id', id)
+}

@@ -13,7 +13,7 @@ export default function Layout() {
       <div className="relative flex h-screen w-full overflow-hidden text-foreground">
         <GridBackground />
         <AppSidebar />
-        <div className="relative z-10 flex flex-col w-full flex-1 overflow-hidden transition-all duration-300 ease-in-out bg-zinc-950/30 backdrop-blur-md">
+        <div className="relative z-10 flex flex-col w-full flex-1 overflow-hidden transition-all duration-300 ease-in-out bg-background backdrop-blur-md">
           <Header />
           <main
             className={`flex-1 animate-fade-in-up flex flex-col ${isChat ? 'overflow-hidden' : 'overflow-y-auto p-4 md:p-6 lg:p-8'}`}

@@ -41,13 +41,13 @@ export function AppSidebar() {
   const isSettingsActive = location.pathname.startsWith('/settings')
 
   return (
-    <Sidebar className="border-r border-white/5 bg-zinc-950/40 backdrop-blur-2xl">
-      <SidebarHeader className="px-4 py-0 border-b border-white/5 h-16 flex flex-col justify-center">
+    <Sidebar className="border-r border-border bg-sidebar backdrop-blur-2xl">
+      <SidebarHeader className="px-4 py-0 border-b border-border h-16 flex flex-col justify-center">
         <div className="flex items-center gap-3">
           <div className="h-9 w-9 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center shadow-[inset_0_0_10px_rgba(30,64,175,0.4)]">
             <Smartphone className="h-5 w-5 text-blue-400" />
           </div>
-          <span className="text-xl font-display font-bold tracking-tight text-white">
+          <span className="text-xl font-display font-bold tracking-tight text-sidebar-foreground">
             CentralCell
           </span>
         </div>
@@ -62,7 +62,7 @@ export function AppSidebar() {
                   asChild
                   isActive={isActive}
                   tooltip={item.title}
-                  className={`py-5 transition-all duration-300 relative group ${isActive ? 'bg-white/5 text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)]' : 'hover:bg-white/5'}`}
+                  className={`py-5 transition-all duration-300 relative group ${isActive ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'hover:bg-sidebar-accent'}`}
                 >
                   <Link to={item.url} className="flex items-center gap-3 w-full">
                     {isActive && (
@@ -84,7 +84,7 @@ export function AppSidebar() {
                 asChild
                 isActive={location.pathname === '/admin'}
                 tooltip="Gestão de Equipe"
-                className={`py-5 transition-all duration-300 relative group ${location.pathname === '/admin' ? 'bg-white/5 text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)]' : 'hover:bg-white/5'}`}
+                className={`py-5 transition-all duration-300 relative group ${location.pathname === '/admin' ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'hover:bg-sidebar-accent'}`}
               >
                 <Link to="/admin" className="flex items-center gap-3 w-full">
                   {location.pathname === '/admin' && (
@@ -99,7 +99,7 @@ export function AppSidebar() {
             </SidebarMenuItem>
           )}
 
-          <div className="my-4 mx-2 h-px bg-white/10" />
+          <div className="my-4 mx-2 h-px bg-sidebar-accent" />
 
           <Collapsible defaultOpen={isSettingsActive} className="group/collapsible">
             <SidebarMenuItem>
@@ -111,7 +111,7 @@ export function AppSidebar() {
                 >
                   <Settings className="h-5 w-5" />
                   <span className="text-sm">Configurações</span>
-                  <ChevronRight className="ml-auto h-4 w-4 text-gray-500 transition-transform group-data-[state=open]/collapsible:rotate-90" />
+                  <ChevronRight className="ml-auto h-4 w-4 text-sidebar-foreground/60 transition-transform group-data-[state=open]/collapsible:rotate-90" />
                 </SidebarMenuButton>
               </CollapsibleTrigger>
               <CollapsibleContent className="mt-1">

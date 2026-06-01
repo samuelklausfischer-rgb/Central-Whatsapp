@@ -29,7 +29,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Pencil, Trash2, Plus, Loader2 } from 'lucide-react'
-import { extractFieldErrors } from '@/lib/pocketbase/errors'
+import { extractFieldErrors } from '@/lib/errors'
 
 export default function AiAssistantSettings() {
   const { user } = useAuth()

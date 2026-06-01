@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { GripVertical, Trash2 } from 'lucide-react'
-import pb from '@/lib/pocketbase/client'
+import supabase from '@/lib/supabase/client'
+import type { Task, Contact } from '@/lib/supabase/types'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,37 +17,46 @@ import { useRealtime } from '@/hooks/use-realtime'
 import { useToast } from '@/hooks/use-toast'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 
-interface Task {
-  id: string
-  title: string
-  description: string
-  status: 'pending' | 'in_progress' | 'completed'
-  contact_id: string
-  expand?: {
-    contact_id: {
-      name?: string
-      nickname?: string
-      remote_jid: string
-      avatar_url?: string
-    }
-  }
-  created: string
+interface TaskWithContact extends Task {
+  contact?: Contact
 }
 
 export default function CRM() {
   const { user } = useAuth()
   const { toast } = useToast()
-  const [tasks, setTasks] = useState<Task[]>([])
+  const [tasks, setTasks] = useState<TaskWithContact[]>([])
   const [loading, setLoading] = useState(true)
   const [taskToDelete, setTaskToDelete] = useState<string | null>(null)
 
   const fetchTasks = async () => {
     try {
-      const records = await pb.collection('tasks').getFullList<Task>({
-        sort: '-created',
-        expand: 'contact_id',
-      })
-      setTasks(records)
+      const { data: taskData } = await supabase
+        .from('tasks')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      if (!taskData) {
+        setTasks([])
+        return
+      }
+
+      // Fetch contacts separately
+      const contactIds = [...new Set(taskData.map((t: Task) => t.contact_id))]
+      const { data: contactsData } = await supabase
+        .from('contacts')
+        .select('*')
+        .in('id', contactIds)
+
+      const contactMap = new Map<string, Contact>()
+      if (contactsData) {
+        (contactsData as Contact[]).forEach((c) => contactMap.set(c.id, c))
+      }
+
+      const tasksWithContacts = (taskData as Task[]).map((t) => ({
+        ...t,
+        contact: contactMap.get(t.contact_id),
+      }))
+      setTasks(tasksWithContacts)
     } catch (err) {
       console.error(err)
     } finally {
@@ -69,7 +79,7 @@ export default function CRM() {
     const id = taskToDelete
     setTaskToDelete(null)
     try {
-      await pb.collection('tasks').delete(id)
+      await supabase.from('tasks').delete().eq('id', id)
       setTasks((prev) => prev.filter((t) => t.id !== id))
       toast({ title: 'Task deleted successfully' })
     } catch (err) {
@@ -79,7 +89,7 @@ export default function CRM() {
 
   const updateTaskStatus = async (taskId: string, newStatus: Task['status']) => {
     try {
-      await pb.collection('tasks').update(taskId, { status: newStatus })
+      await supabase.from('tasks').update({ status: newStatus }).eq('id', taskId)
     } catch (err) {
       toast({ title: 'Erro ao mover tarefa', variant: 'destructive' })
       fetchTasks()
@@ -130,9 +140,9 @@ export default function CRM() {
   ] as const
 
   return (
-    <div className="flex-1 h-full flex flex-col min-w-0 bg-zinc-950/50 relative overflow-hidden">
+    <div className="flex-1 h-full flex flex-col min-w-0 bg-card relative overflow-hidden">
       <div className="p-6 pb-2">
-        <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+        <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
           Tarefas e Kanban
         </h1>
         <p className="text-muted-foreground text-sm mt-1">
@@ -146,32 +156,32 @@ export default function CRM() {
           return (
             <div
               key={col.id}
-              className="flex-shrink-0 w-80 bg-black/20 border border-white/5 rounded-xl flex flex-col overflow-hidden"
+              className="flex-shrink-0 w-80 bg-muted border border-border rounded-xl flex flex-col overflow-hidden"
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, col.id)}
             >
               <div
-                className={`px-4 py-3 border-b border-white/5 flex items-center justify-between ${col.color.split(' ')[0]}`}
+                className={`px-4 py-3 border-b border-border flex items-center justify-between ${col.color.split(' ')[0]}`}
               >
                 <h3 className={`font-semibold text-sm ${col.color.split(' ')[2]}`}>{col.title}</h3>
-                <span className="text-xs bg-black/40 px-2 py-0.5 rounded-full text-foreground/70">
+                <span className="text-xs bg-muted px-2 py-0.5 rounded-full text-foreground/70">
                   {columnTasks.length}
                 </span>
               </div>
               <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
                 {columnTasks.map((task) => {
                   const contactName =
-                    task.expand?.contact_id?.nickname ||
-                    task.expand?.contact_id?.name ||
-                    `+${task.expand?.contact_id?.remote_jid}`
-                  const avatarUrl = task.expand?.contact_id?.avatar_url
+                    task.contact?.nickname ||
+                    task.contact?.name ||
+                    `+${task.contact?.remote_jid}`
+                  const avatarUrl = task.contact?.avatar_url
                   return (
                     <div
                       key={task.id}
                       draggable
                       onDragStart={(e) => handleDragStart(e, task.id)}
                       onDragEnd={handleDragEnd}
-                      className="bg-white/5 border border-white/10 p-3 rounded-lg cursor-grab active:cursor-grabbing hover:bg-white/10 transition-colors group"
+                      className="bg-accent border border-border p-3 rounded-lg cursor-grab active:cursor-grabbing hover:bg-accent transition-colors group"
                     >
                       <div className="flex items-start justify-between gap-2 mb-2">
                         <h4 className="font-medium text-sm text-foreground/90 leading-tight">
@@ -198,10 +208,10 @@ export default function CRM() {
                           {task.description}
                         </p>
                       )}
-                      <div className="flex items-center justify-between mt-auto pt-3 border-t border-white/5">
+                      <div className="flex items-center justify-between mt-auto pt-3 border-t border-border">
                         <div className="flex items-center gap-2 max-w-[70%]">
-                          <Avatar className="h-5 w-5 border border-white/10">
-                            <AvatarImage src={avatarUrl} />
+                          <Avatar className="h-5 w-5 border border-border">
+                            <AvatarImage src={avatarUrl || ''} />
                             <AvatarFallback className="text-[9px] bg-blue-500/20 text-blue-400">
                               {contactName?.charAt(0)?.toUpperCase()}
                             </AvatarFallback>
@@ -215,16 +225,16 @@ export default function CRM() {
                         </div>
                         <span
                           className="text-[10px] text-muted-foreground/60"
-                          title={new Date(task.created).toLocaleString()}
+                          title={new Date(task.created_at).toLocaleString()}
                         >
-                          {new Date(task.created).toLocaleDateString()}
+                          {new Date(task.created_at).toLocaleDateString()}
                         </span>
                       </div>
                     </div>
                   )
                 })}
                 {columnTasks.length === 0 && !loading && (
-                  <div className="h-24 flex items-center justify-center text-sm text-muted-foreground/50 border border-dashed border-white/10 rounded-lg">
+                  <div className="h-24 flex items-center justify-center text-sm text-muted-foreground/50 border border-dashed border-border rounded-lg">
                     Vazio
                   </div>
                 )}
@@ -235,20 +245,20 @@ export default function CRM() {
       </div>
 
       <AlertDialog open={!!taskToDelete} onOpenChange={(open) => !open && setTaskToDelete(null)}>
-        <AlertDialogContent className="bg-zinc-950 border-white/10 text-white">
+        <AlertDialogContent className="bg-card border-border text-foreground">
           <AlertDialogHeader>
             <AlertDialogTitle>Are you sure you want to delete this task?</AlertDialogTitle>
-            <AlertDialogDescription className="text-zinc-400">
+            <AlertDialogDescription className="text-muted-foreground">
               This action cannot be undone. This will permanently delete the task.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="bg-transparent border-white/10 text-white hover:bg-white/10 hover:text-white">
+            <AlertDialogCancel className="bg-transparent border-border text-foreground hover:bg-accent hover:text-accent-foreground">
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={confirmDeleteTask}
-              className="bg-red-500 text-white hover:bg-red-600"
+              className="bg-red-500 text-foreground hover:bg-red-600"
             >
               Delete
             </AlertDialogAction>

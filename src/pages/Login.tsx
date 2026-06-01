@@ -35,13 +35,13 @@ export default function Login() {
       <GridBackground />
       <form
         onSubmit={handleLogin}
-        className="relative z-10 p-8 bg-black/40 backdrop-blur-xl rounded-xl shadow-2xl border border-white/10 space-y-6 w-[400px]"
+        className="relative z-10 p-8 bg-card backdrop-blur-xl rounded-xl shadow-2xl border border-border space-y-6 w-[400px]"
       >
         <div className="text-center space-y-2">
           <h1 className="text-4xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-br from-gray-200 to-gray-600">
             CentralCell
           </h1>
-          <p className="text-sm text-gray-400">Faça login com suas credenciais corporativas.</p>
+          <p className="text-sm text-muted-foreground">Faça login com suas credenciais corporativas.</p>
         </div>
         <div className="space-y-4">
           <Input

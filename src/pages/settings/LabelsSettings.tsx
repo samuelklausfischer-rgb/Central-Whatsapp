@@ -59,7 +59,7 @@ export default function LabelsSettings() {
 
   return (
     <div className="space-y-6">
-      <div className="bg-black/20 border border-white/10 rounded-2xl p-6 backdrop-blur-xl">
+      <div className="bg-muted border border-border rounded-2xl p-6 backdrop-blur-xl">
         <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
           <Tag className="w-5 h-5 text-blue-400" /> Nova Etiqueta
         </h2>
@@ -70,13 +70,13 @@ export default function LabelsSettings() {
               value={newLabelName}
               onChange={(e) => setNewLabelName(e.target.value)}
               placeholder="Ex: Pausa, Atendimento..."
-              className="bg-black/40 border-white/10"
+              className="bg-muted border-border"
               required
             />
           </div>
           <div className="w-24 space-y-2">
             <label className="text-sm font-medium text-foreground/80">Cor</label>
-            <div className="relative h-10 w-full rounded-md border border-white/10 overflow-hidden">
+            <div className="relative h-10 w-full rounded-md border border-border overflow-hidden">
               <input
                 type="color"
                 value={newLabelColor}
@@ -95,7 +95,7 @@ export default function LabelsSettings() {
         </form>
       </div>
 
-      <div className="bg-black/20 border border-white/10 rounded-2xl p-6 backdrop-blur-xl">
+      <div className="bg-muted border border-border rounded-2xl p-6 backdrop-blur-xl">
         <h2 className="text-xl font-semibold mb-4">Etiquetas Cadastradas</h2>
         {labels.length === 0 ? (
           <p className="text-muted-foreground text-sm">Nenhuma etiqueta cadastrada.</p>
@@ -104,7 +104,7 @@ export default function LabelsSettings() {
             {labels.map((label) => (
               <div
                 key={label.id}
-                className="flex items-center justify-between p-3 rounded-lg border border-white/5 bg-white/5"
+                className="flex items-center justify-between p-3 rounded-lg border border-border bg-accent"
               >
                 <div className="flex items-center gap-3">
                   <div
@@ -116,7 +116,7 @@ export default function LabelsSettings() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="text-muted-foreground hover:text-red-400 hover:bg-white/5 h-8 w-8"
+                  className="text-muted-foreground hover:text-red-400 hover:bg-accent h-8 w-8"
                   onClick={() => handleDelete(label.id)}
                 >
                   <Trash2 className="w-4 h-4" />

@@ -8,10 +8,12 @@ import {
 } from '@/components/ui/select'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { SmartAvatar } from '@/components/chat/SmartAvatar'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { format } from 'date-fns'
-import { Check, CheckCheck, Smartphone, Search, X } from 'lucide-react'
+import { Check, CheckCheck, Smartphone, Search, X, MessageCircle } from 'lucide-react'
+import { resolveContact } from '@/services/contacts'
 
 export interface ChatListProps {
   devices: any[]
@@ -22,6 +24,16 @@ export interface ChatListProps {
   selectedContact: string | null
   onSelectContact: (id: string) => void
   isMobile: boolean
+}
+
+const isGroupJid = (jid?: string) => Boolean(jid?.includes('@g.us'))
+
+const getConversationName = (conv: any, contact: any) => {
+  if (isGroupJid(conv.remote_sender)) {
+    return contact?.nickname || contact?.name || conv.remote_sender
+  }
+
+  return contact?.nickname || conv.sender_name || contact?.name || conv.remote_sender
 }
 
 export function ChatList({
@@ -35,43 +47,60 @@ export function ChatList({
   isMobile,
 }: ChatListProps) {
   const [searchQuery, setSearchQuery] = useState('')
+  const [showUnrespondedOnly, setShowUnrespondedOnly] = useState(false)
+  const [resolvedLocally, setResolvedLocally] = useState<Set<string>>(new Set())
+
+  const selectedDevice = useMemo(
+    () => devices.find((d) => d.id === selectedDeviceId),
+    [devices, selectedDeviceId],
+  )
 
   const filteredConversations = useMemo(() => {
-    if (!searchQuery.trim()) return conversations
+    let filtered = conversations
+    if (showUnrespondedOnly) {
+      filtered = filtered.filter((conv) => conv.pendingReply)
+    }
+    if (searchQuery.trim()) {
+      const lowerQuery = searchQuery.toLowerCase()
+      filtered = filtered.filter((conv) => {
+        const contact = contacts.find((c) => c.remote_jid === conv.remote_sender)
+        const name = getConversationName(conv, contact)
+        return name.toLowerCase().includes(lowerQuery)
+      })
+    }
+    return filtered
+  }, [searchQuery, showUnrespondedOnly, conversations, contacts])
 
-    const lowerQuery = searchQuery.toLowerCase()
-    return conversations.filter((conv) => {
-      const contact = contacts.find((c) => c.remote_jid === conv.remote_sender)
-      const name = contact?.nickname || contact?.name || conv.sender_name || conv.remote_sender
-      return name.toLowerCase().includes(lowerQuery)
-    })
-  }, [searchQuery, conversations, contacts])
+  const handleResolve = (jid: string) => {
+    setResolvedLocally((prev) => new Set(prev).add(jid))
+    resolveContact(jid)
+  }
 
   return (
     <div
       className={cn(
-        'flex flex-col h-full bg-zinc-950/50 border-r border-white/10',
+        'flex flex-col h-full bg-card border-r border-border',
         isMobile ? 'w-full' : 'w-80 lg:w-96',
       )}
     >
-      <div className="p-4 border-b border-white/10 flex flex-col gap-4 shrink-0">
-        <h2 className="text-xl font-semibold text-white">Mensagens</h2>
+      <div className="p-4 border-b border-border flex flex-col gap-4 shrink-0">
+        <h2 className="text-xl font-semibold text-foreground">Mensagens</h2>
         <Select value={selectedDeviceId || undefined} onValueChange={onSelectDevice}>
-          <SelectTrigger className="w-full bg-zinc-900 border-white/10 h-14">
+          <SelectTrigger className="w-full bg-card border-border h-14">
             <SelectValue placeholder="Selecione um dispositivo..." />
           </SelectTrigger>
           <SelectContent>
             {devices.map((device) => (
               <SelectItem key={device.id} value={device.id} className="py-3">
                 <div className="flex items-center gap-3">
-                  <Avatar className="h-8 w-8 bg-zinc-800">
+                  <Avatar className="h-8 w-8 bg-card">
                     <AvatarImage src={device.avatar_url} />
                     <AvatarFallback>
                       <Smartphone className="h-4 w-4 text-muted-foreground" />
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex flex-col text-left">
-                    <span className="text-sm font-medium leading-none text-zinc-100">
+                    <span className="text-sm font-medium leading-none text-foreground">
                       {device.name}
                     </span>
                     {device.department && (
@@ -92,17 +121,32 @@ export function ChatList({
             placeholder="Procurar contatos..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9 pr-9 bg-zinc-900 border-white/10 text-white placeholder:text-muted-foreground h-10"
+            className="pl-9 pr-9 bg-card border-border text-foreground placeholder:text-muted-foreground h-10"
           />
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-white transition-colors"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-accent-foreground transition-colors"
               title="Limpar busca"
             >
               <X className="h-4 w-4" />
             </button>
           )}
+        </div>
+
+        <div className="flex items-center gap-2 px-1">
+          <button
+            onClick={() => setShowUnrespondedOnly(!showUnrespondedOnly)}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all',
+              showUnrespondedOnly
+                ? 'bg-primary/15 text-primary border border-primary/30'
+                : 'bg-muted text-muted-foreground border border-transparent hover:bg-accent',
+            )}
+          >
+            <MessageCircle className="h-3.5 w-3.5" />
+            Não respondidas
+          </button>
         </div>
       </div>
 
@@ -111,30 +155,33 @@ export function ChatList({
           {filteredConversations.map((conv) => {
             const contact = contacts.find((c) => c.remote_jid === conv.remote_sender)
             const isSelected = selectedContact === conv.remote_sender
-            const name =
-              contact?.nickname || contact?.name || conv.sender_name || conv.remote_sender
+            const name = getConversationName(conv, contact)
+            const isPendingReply = conv.pendingReply && !resolvedLocally.has(conv.remote_sender)
 
             return (
               <button
                 key={conv.remote_sender}
                 onClick={() => onSelectContact(conv.remote_sender)}
                 className={cn(
-                  'flex items-center gap-3 p-3 rounded-xl transition-all duration-200 text-left w-full hover:bg-white/5',
-                  isSelected ? 'bg-white/10' : '',
+                  'flex items-center gap-3 p-3 rounded-xl transition-all duration-200 text-left w-full hover:bg-accent border-l-2 border-transparent',
+                  isSelected ? 'bg-accent' : '',
+                  isPendingReply ? 'border-primary/40 animate-pulse-border' : '',
                 )}
               >
-                <Avatar className="h-12 w-12 border border-white/10 bg-zinc-800">
-                  <AvatarImage src={contact?.avatar_url} />
-                  <AvatarFallback className="text-zinc-400">
-                    {name.substring(0, 2).toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
+                <SmartAvatar
+                  jid={conv.remote_sender}
+                  name={name}
+                  instanceKey={selectedDevice?.instance_key}
+                  contactRecord={contact}
+                  className="h-12 w-12 border border-border bg-card"
+                  fallbackClassName="text-muted-foreground"
+                />
 
                 <div className="flex-1 overflow-hidden">
                   <div className="flex justify-between items-baseline mb-1">
-                    <h3 className="font-medium text-zinc-100 truncate pr-2">{name}</h3>
-                    <span className="text-xs text-zinc-500 whitespace-nowrap">
-                      {format(new Date(conv.lastMessage.created), 'HH:mm')}
+                    <h3 className="font-medium text-foreground truncate pr-2">{name}</h3>
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">
+                      {format(new Date(conv.lastMessage.created_at), 'HH:mm')}
                     </span>
                   </div>
 
@@ -143,20 +190,36 @@ export function ChatList({
                       (conv.lastMessage.is_read ? (
                         <CheckCheck className="h-3 w-3 text-blue-400 shrink-0" />
                       ) : (
-                        <Check className="h-3 w-3 text-zinc-500 shrink-0" />
+                        <Check className="h-3 w-3 text-muted-foreground shrink-0" />
                       ))}
                     <p
                       className={cn(
                         'text-sm truncate',
-                        conv.unread_count > 0 ? 'text-zinc-100 font-medium' : 'text-zinc-400',
+                        conv.unread_count > 0 ? 'text-foreground font-medium' : 'text-muted-foreground',
                       )}
                     >
                       {conv.lastMessage.content}
                     </p>
+                    {isPendingReply && (
+                      <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse shrink-0 inline-block" />
+                    )}
                   </div>
                 </div>
 
-                {conv.unread_count > 0 && (
+                {isPendingReply ? (
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleResolve(conv.remote_sender)
+                    }}
+                    className="h-8 w-8 rounded-full bg-green-500/20 border border-green-500/40 flex items-center justify-center hover:bg-green-500/30 shrink-0 cursor-pointer transition-colors"
+                    title="Marcar como respondido"
+                  >
+                    <CheckCheck className="h-4 w-4 text-green-500" />
+                  </div>
+                ) : null}
+
+                {!isPendingReply && conv.unread_count > 0 && (
                   <div className="h-5 min-w-5 rounded-full bg-primary flex items-center justify-center px-1.5 shrink-0">
                     <span className="text-[10px] font-bold text-primary-foreground">
                       {conv.unread_count}

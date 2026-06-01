@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
+import { ThemeProvider } from 'next-themes'
 import { Toaster } from '@/components/ui/toaster'
 import { Toaster as Sonner } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -38,9 +39,10 @@ const AdminRoute = () => {
 
 const App = () => (
   <BrowserRouter future={{ v7_startTransition: false, v7_relativeSplatPath: false }}>
-    <AuthProvider>
-      <AppProvider>
-        <TooltipProvider>
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+      <AuthProvider>
+        <AppProvider>
+          <TooltipProvider>
           <Toaster />
           <Sonner />
           <Routes>
@@ -71,6 +73,7 @@ const App = () => (
         </TooltipProvider>
       </AppProvider>
     </AuthProvider>
+    </ThemeProvider>
   </BrowserRouter>
 )
 

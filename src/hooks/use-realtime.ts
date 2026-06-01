@@ -1,22 +1,17 @@
 import { useEffect, useRef } from 'react'
-import type { RecordModel, RecordSubscription } from 'pocketbase'
+import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js'
+import supabase from '@/lib/supabase/client'
 
-import pb from '@/lib/pocketbase/client'
+export interface RecordSubscription<T> {
+  action: 'create' | 'update' | 'delete'
+  record: T
+}
 
-/**
- * Hook for real-time subscriptions to a PocketBase collection.
- * ALWAYS use this hook instead of subscribing inline.
- * Uses the per-listener UnsubscribeFunc so multiple components
- * can safely subscribe to the same collection without conflicts.
- *
- * Generic over the record type: pass your collection's interface as
- * `useRealtime<MyRecord>(...)` to get a typed subscription payload
- * instead of `unknown`.
- */
-export function useRealtime<TRecord extends RecordModel = RecordModel>(
-  collectionName: string,
-  callback: (data: RecordSubscription<TRecord>) => void,
+export function useRealtime<T extends Record<string, unknown>>(
+  tableName: string,
+  callback: (data: RecordSubscription<T>) => void,
   enabled: boolean = true,
+  filter?: string,
 ) {
   const callbackRef = useRef(callback)
   callbackRef.current = callback
@@ -24,29 +19,36 @@ export function useRealtime<TRecord extends RecordModel = RecordModel>(
   useEffect(() => {
     if (!enabled) return
 
-    let unsubscribeFn: (() => Promise<void>) | undefined
-    let cancelled = false
+    const channelName = `${tableName}-changes-${Math.random().toString(36).slice(2)}`
 
-    pb.collection<TRecord>(collectionName)
-      .subscribe('*', (e) => {
-        callbackRef.current(e)
-      })
-      .then((fn) => {
-        if (cancelled) {
-          fn().catch(() => {})
-        } else {
-          unsubscribeFn = fn
-        }
-      })
-      .catch(() => {})
+    const channel = supabase
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: tableName,
+          ...(filter ? { filter } : {}),
+        },
+        (payload: RealtimePostgresChangesPayload<T>) => {
+          const eventMap: Record<string, 'create' | 'update' | 'delete'> = {
+            INSERT: 'create',
+            UPDATE: 'update',
+            DELETE: 'delete',
+          }
+          callbackRef.current({
+            action: eventMap[payload.eventType] || 'update',
+            record: (payload.new || payload.old) as T,
+          })
+        },
+      )
+      .subscribe()
 
     return () => {
-      cancelled = true
-      if (unsubscribeFn) {
-        unsubscribeFn().catch(() => {})
-      }
+      supabase.removeChannel(channel)
     }
-  }, [collectionName, enabled])
+  }, [tableName, enabled, filter])
 }
 
 export default useRealtime

@@ -20,7 +20,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { useRealtime } from '@/hooks/use-realtime'
-import { extractFieldErrors } from '@/lib/pocketbase/errors'
+import { extractFieldErrors } from '@/lib/errors'
 
 export default function Triggers() {
   const { user } = useAuth()
@@ -106,7 +106,7 @@ export default function Triggers() {
       <div className="max-w-4xl mx-auto space-y-6">
         <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight text-white flex items-center gap-3">
+            <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center gap-3">
               <div className="h-10 w-10 rounded-xl bg-blue-500/20 border border-blue-500/30 flex items-center justify-center">
                 <Zap className="h-5 w-5 text-blue-400" />
               </div>
@@ -121,7 +121,7 @@ export default function Triggers() {
           </Button>
         </div>
 
-        <div className="flex items-center gap-2 bg-black/20 border border-white/10 rounded-xl px-4 py-2 backdrop-blur-xl">
+        <div className="flex items-center gap-2 bg-muted border border-border rounded-xl px-4 py-2 backdrop-blur-xl">
           <Search className="h-5 w-5 text-muted-foreground" />
           <input
             className="flex-1 bg-transparent border-none text-sm text-foreground focus:outline-none"
@@ -134,7 +134,7 @@ export default function Triggers() {
         {loading ? (
           <div className="text-center py-10 text-muted-foreground">Carregando...</div>
         ) : filtered.length === 0 ? (
-          <div className="text-center py-20 bg-black/20 border border-white/5 rounded-2xl">
+          <div className="text-center py-20 bg-muted border border-border rounded-2xl">
             <MessageSquare className="h-12 w-12 text-muted-foreground/30 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-foreground">Nenhum gatilho encontrado</h3>
             <p className="text-sm text-muted-foreground mt-1">
@@ -146,10 +146,10 @@ export default function Triggers() {
             {filtered.map((t) => (
               <div
                 key={t.id}
-                className="bg-black/20 border border-white/10 rounded-xl p-5 backdrop-blur-sm flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between group hover:border-white/20 transition-colors"
+                className="bg-muted border border-border rounded-xl p-5 backdrop-blur-sm flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between group hover:border-ring/50 transition-colors"
               >
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold text-lg text-white truncate">{t.title}</h3>
+                  <h3 className="font-semibold text-lg text-foreground truncate">{t.title}</h3>
                   <p className="text-sm text-muted-foreground mt-1 line-clamp-2 whitespace-pre-wrap">
                     {t.content}
                   </p>
@@ -179,7 +179,7 @@ export default function Triggers() {
       </div>
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-md bg-zinc-950 border-white/10">
+        <DialogContent className="sm:max-w-md bg-card border-border">
           <DialogHeader>
             <DialogTitle>{editingId ? 'Editar Gatilho' : 'Novo Gatilho'}</DialogTitle>
           </DialogHeader>
@@ -190,7 +190,7 @@ export default function Triggers() {
                 placeholder="Ex: Saudação Inicial"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                className="bg-black/40 border-white/10"
+                className="bg-muted border-border"
               />
               {errors.title && <p className="text-xs text-red-500">{errors.title}</p>}
             </div>
@@ -200,7 +200,7 @@ export default function Triggers() {
                 placeholder="Escreva a mensagem (suporta formatação do WhatsApp como *negrito*, _itálico_...)"
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
-                className="min-h-[150px] bg-black/40 border-white/10 resize-none leading-relaxed"
+                className="min-h-[150px] bg-muted border-border resize-none leading-relaxed"
               />
               {errors.content && <p className="text-xs text-red-500">{errors.content}</p>}
             </div>

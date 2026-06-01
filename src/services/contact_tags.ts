@@ -1,25 +1,32 @@
-import pb from '@/lib/pocketbase/client'
+import supabase from '@/lib/supabase/client'
+import type { ContactTag } from '@/lib/supabase/types'
 
-export const getContactTags = (deviceId: string) =>
-  pb.collection('contact_tags').getFullList({
-    filter: `device_id = '${deviceId}'`,
-    expand: 'label_id',
-  })
+export const getContactTags = async (deviceId: string) => {
+  const { data } = await supabase
+    .from('contact_tags')
+    .select('*, label_id(*)')
+    .eq('device_id', deviceId)
+  return (data as unknown as ContactTag[]) || []
+}
 
 export const toggleContactTag = async (deviceId: string, remoteSender: string, labelId: string) => {
-  const existing = await pb.collection('contact_tags').getList(1, 1, {
-    filter: `device_id = '${deviceId}' && remote_sender = '${remoteSender}' && label_id = '${labelId}'`,
-  })
+  const { data: existing } = await supabase
+    .from('contact_tags')
+    .select('id')
+    .eq('device_id', deviceId)
+    .eq('remote_sender', remoteSender)
+    .eq('label_id', labelId)
+    .maybeSingle()
 
-  if (existing.items.length > 0) {
-    await pb.collection('contact_tags').delete(existing.items[0].id)
-    return { action: 'removed', id: existing.items[0].id }
-  } else {
-    const created = await pb.collection('contact_tags').create({
-      device_id: deviceId,
-      remote_sender: remoteSender,
-      label_id: labelId,
-    })
-    return { action: 'added', id: created.id }
+  if (existing) {
+    await supabase.from('contact_tags').delete().eq('id', existing.id)
+    return { action: 'removed' as const, id: existing.id }
   }
+
+  const { data: created } = await supabase
+    .from('contact_tags')
+    .insert({ device_id: deviceId, remote_sender: remoteSender, label_id: labelId })
+    .select()
+    .single()
+  return { action: 'added' as const, id: created.id }
 }

@@ -83,13 +83,13 @@ export default function Notes() {
           <h1 className="bg-clip-text text-transparent bg-gradient-to-br from-gray-200 to-gray-600 text-3xl font-bold tracking-tight">
             Anotações
           </h1>
-          <p className="text-zinc-400 mt-1">
+          <p className="text-muted-foreground mt-1">
             Gerencie anotações rápidas e informações importantes.
           </p>
         </div>
         <div className="flex gap-3 w-full sm:w-auto">
           <div className="relative flex-1 sm:w-64">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-zinc-400" />
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Buscar anotações..."
               className="pl-9"
@@ -103,7 +103,7 @@ export default function Notes() {
                 <Plus className="h-4 w-4" /> Novo Registro
               </Button>
             </DialogTrigger>
-            <DialogContent className="bg-zinc-950 border-white/10 text-zinc-100">
+            <DialogContent className="bg-card border-border text-foreground">
               <DialogHeader>
                 <DialogTitle>Criar Registro Interno</DialogTitle>
               </DialogHeader>
@@ -148,18 +148,18 @@ export default function Notes() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="absolute top-4 right-4 h-8 w-8 text-zinc-400 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute top-4 right-4 h-8 w-8 text-muted-foreground hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
                 onClick={() => handleDelete(note.id)}
               >
                 <Trash2 className="h-4 w-4" />
               </Button>
             </CardHeader>
             <CardContent className="space-y-4">
-              <p className="text-sm text-zinc-400 whitespace-pre-wrap leading-relaxed line-clamp-6">
+              <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed line-clamp-6">
                 {note.content}
               </p>
-              <div className="text-[10px] text-zinc-500 pt-2 border-t border-white/5">
-                {new Date(note.created).toLocaleDateString('pt-BR')}
+              <div className="text-[10px] text-muted-foreground pt-2 border-t border-border">
+                {new Date(note.created_at).toLocaleDateString('pt-BR')}
               </div>
             </CardContent>
           </Card>
@@ -167,7 +167,7 @@ export default function Notes() {
       </div>
 
       {filteredNotes.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-20 text-zinc-500 border border-white/10 border-dashed rounded-xl bg-zinc-950/30 backdrop-blur-sm">
+        <div className="flex flex-col items-center justify-center py-20 text-muted-foreground border border-border border-dashed rounded-xl bg-card backdrop-blur-sm">
           <StickyNote className="h-12 w-12 mb-4 opacity-20" />
           <p>Nenhuma anotação encontrada.</p>
         </div>

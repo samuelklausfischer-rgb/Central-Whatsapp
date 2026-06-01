@@ -34,6 +34,11 @@ screenshot.png
 
 # Environment variables
 .env*
+!.env.example
+
+# Local agent/MCP configuration may contain private API keys.
+opencode.json
+Whats/
 
 # Linux kernel core dumps (e.g. when oxfmt or pnpm crash)
 core.[0-9]*

@@ -115,10 +115,10 @@ export default function ScheduledMessages() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-black/5 p-8">
+    <div className="flex-1 overflow-y-auto bg-muted p-8">
       <div className="max-w-6xl mx-auto space-y-6">
         <div className="flex flex-col gap-2">
-          <h1 className="text-3xl font-display font-bold text-white tracking-tight flex items-center gap-3">
+          <h1 className="text-3xl font-display font-bold text-foreground tracking-tight flex items-center gap-3">
             <CalendarClock className="w-8 h-8 text-blue-500" />
             Mensagens Agendadas
           </h1>
@@ -127,7 +127,7 @@ export default function ScheduledMessages() {
           </p>
         </div>
 
-        <Card className="bg-zinc-950/50 border-white/10 backdrop-blur-xl">
+        <Card className="bg-card border-border backdrop-blur-xl">
           <CardHeader>
             <CardTitle>Histórico de Agendamentos</CardTitle>
             <CardDescription>
@@ -143,10 +143,10 @@ export default function ScheduledMessages() {
                 <p>Nenhuma mensagem agendada encontrada.</p>
               </div>
             ) : (
-              <div className="rounded-md border border-white/10 overflow-hidden">
+              <div className="rounded-md border border-border overflow-hidden">
                 <Table>
-                  <TableHeader className="bg-white/5">
-                    <TableRow className="border-white/10 hover:bg-transparent">
+                  <TableHeader className="bg-accent">
+                    <TableRow className="border-border hover:bg-transparent">
                       <TableHead>Contato</TableHead>
                       <TableHead>Dispositivo</TableHead>
                       <TableHead>Mensagem</TableHead>
@@ -159,7 +159,7 @@ export default function ScheduledMessages() {
                     {messages.map((msg) => (
                       <TableRow
                         key={msg.id}
-                        className="border-white/10 hover:bg-white/5 transition-colors"
+                        className="border-border hover:bg-accent transition-colors"
                       >
                         <TableCell className="font-medium">+{msg.remote_sender}</TableCell>
                         <TableCell>
@@ -196,7 +196,7 @@ export default function ScheduledMessages() {
                             <Button
                               variant="outline"
                               size="sm"
-                              className="h-8 bg-transparent border-white/10 hover:bg-white/5"
+                              className="h-8 bg-transparent border-border hover:bg-accent"
                               onClick={() => handleCancel(msg.id!)}
                             >
                               Cancelar
