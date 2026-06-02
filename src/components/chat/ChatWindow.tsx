@@ -60,6 +60,7 @@ import { Label } from '@/components/ui/label'
 import { createScheduledMessage, type CreateScheduledMessageInput } from '@/services/scheduled_messages'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { SmartAvatar } from '@/components/chat/SmartAvatar'
+import { AudioMessage } from '@/components/chat/AudioMessage'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -960,10 +961,8 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                       : 'bg-chat-bubble-in text-chat-text rounded-bl-sm'
                   }`}
                 >
-                  <div className="text-[11px] font-medium mb-1 flex items-center justify-between">
-                    {isMe ? (
-                      <span className="text-chat-muted/70">{user?.name || 'Você'}</span>
-                    ) : (
+                  {!isMe && (
+                    <div className="text-[11px] font-medium mb-1">
                       <span className="text-chat-muted/70">
                         {(() => {
                           const msgContactRecord = contacts?.find(
@@ -980,8 +979,8 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                                   : `+${msg.remote_sender}`
                         })()}
                       </span>
-                    )}
-                  </div>
+                    </div>
+                  )}
                   {!msg.deleted_at && msg.reply_to_snapshot && (
                     <div className="flex items-start gap-2 mb-2 pl-2 border-l-2 border-chat-text/20">
                       <div className="flex-1 min-w-0">
@@ -998,29 +997,13 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                      <div className="flex flex-col gap-2 mb-2">
                        {messageAttachments.map((att: any, idx: number) => {
                          if (typeof att === 'object' && att.url) {
-                           if (att.type === 'audio') {
-                            return (
-                              <div
-                                key={idx}
-                                className="flex items-center gap-3 p-2 pr-4 rounded-full border border-chat-text/20 max-w-[300px] bg-chat-text/10"
-                              >
-                                <div
-                                  className={`rounded-full p-2.5 flex-shrink-0 ${
-                                    isMe
-                                      ? 'bg-blue-500/20 text-blue-400'
-                                      : 'bg-blue-500/20 text-blue-400'
-                                  }`}
-                                >
-                                  <Mic className="h-4 w-4" />
-                                </div>
-                                <audio
-                                  controls
-                                  src={att.url}
-                                  className="h-9 flex-1 min-w-0 [&::-webkit-media-controls-panel]:bg-transparent [&::-webkit-media-controls-current-time-display]:text-foreground/80 [&::-webkit-media-controls-time-remaining-display]:text-foreground/80"
-                                />
-                              </div>
-                             )
-                           }
+                            if (att.type === 'audio') {
+                             return (
+                               <div key={idx}>
+                                 <AudioMessage src={att.url} isMe={isMe} msgId={msg.id} />
+                               </div>
+                              )
+                            }
                           if (att.type === 'video') {
                             return (
                               <div
@@ -1095,14 +1078,8 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                         const isSticker = /\.(webp)$/i.test(filename)
                         if (isAudio) {
                           return (
-                            <div
-                              key={idx}
-                              className="flex items-center gap-3 p-2 pr-4 rounded-full border border-chat-text/20 max-w-[300px] bg-chat-text/10"
-                            >
-                              <div className="rounded-full p-2.5 flex-shrink-0 bg-blue-500/20 text-blue-400">
-                                <Mic className="h-4 w-4" />
-                              </div>
-                              <audio controls src={url} className="h-9 flex-1 min-w-0" />
+                            <div key={idx}>
+                              <AudioMessage src={url} isMe={isMe} msgId={msg.id} />
                             </div>
                           )
                         }
