@@ -11,6 +11,7 @@ export const createAiPrompt = async (data: {
   action_key: string
   system_prompt: string
   user_id: string
+  is_global?: boolean
 }) => {
   const { data: prompt } = await supabase.from('ai_assistant_prompts').insert(data).select().single()
   return prompt as AiPrompt

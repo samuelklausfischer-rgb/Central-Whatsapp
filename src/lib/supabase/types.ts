@@ -130,6 +130,7 @@ export interface AiPrompt {
   system_prompt: string
   user_id: string
   is_active: boolean
+  is_global: boolean
   created_at: string
   updated_at: string
 }

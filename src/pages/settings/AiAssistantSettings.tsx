@@ -41,11 +41,14 @@ export default function AiAssistantSettings() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
 
+  const isAdmin = user?.is_admin ?? false
+
   const [formData, setFormData] = useState({
     label: '',
     action_key: '',
     system_prompt: '',
     is_active: true,
+    is_global: false,
   })
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
 
@@ -74,10 +77,11 @@ export default function AiAssistantSettings() {
         action_key: p.action_key,
         system_prompt: p.system_prompt,
         is_active: p.is_active,
+        is_global: p.is_global,
       })
     } else {
       setEditingId(null)
-      setFormData({ label: '', action_key: '', system_prompt: '', is_active: true })
+      setFormData({ label: '', action_key: '', system_prompt: '', is_active: true, is_global: false })
     }
     setIsModalOpen(true)
   }
@@ -87,10 +91,11 @@ export default function AiAssistantSettings() {
     setFormErrors({})
     try {
       if (editingId) {
-        await updateAiPrompt(editingId, formData)
+        const updateData = isAdmin ? formData : Object.fromEntries(Object.entries(formData).filter(([k]) => k !== 'is_global'))
+        await updateAiPrompt(editingId, updateData)
         toast({ title: 'Ação atualizada com sucesso' })
       } else {
-        await createAiPrompt({ ...formData, user_id: user.id })
+        await createAiPrompt({ ...formData, user_id: user.id, is_global: isAdmin ? formData.is_global : undefined })
         toast({ title: 'Ação criada com sucesso' })
       }
       setIsModalOpen(false)
@@ -135,20 +140,21 @@ export default function AiAssistantSettings() {
               <TableHead>Label (Exibição)</TableHead>
               <TableHead>Chave (Técnica)</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead className="hidden sm:table-cell">Tipo</TableHead>
               <TableHead className="w-[120px] text-right">Ações</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
                   <Loader2 className="h-6 w-6 animate-spin mx-auto" />
                 </TableCell>
               </TableRow>
             ) : prompts.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
-                  Nenhuma ação configurada.
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                    Nenhuma ação configurada.
                 </TableCell>
               </TableRow>
             ) : (
@@ -163,6 +169,13 @@ export default function AiAssistantSettings() {
                       <span className="text-green-500 text-xs font-medium">Ativo</span>
                     ) : (
                       <span className="text-red-500 text-xs font-medium">Inativo</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="hidden sm:table-cell">
+                    {p.is_global ? (
+                      <span className="text-xs font-medium text-blue-500 bg-blue-500/10 px-1.5 py-0.5 rounded">Global</span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">Pessoal</span>
                     )}
                   </TableCell>
                   <TableCell className="text-right">
@@ -249,6 +262,20 @@ export default function AiAssistantSettings() {
                 onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
               />
             </div>
+            {isAdmin && (
+              <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border border-border border-blue-500/20">
+                <div className="space-y-0.5">
+                  <Label>Disponível para toda equipe</Label>
+                  <p className="text-[12px] text-muted-foreground">
+                    Usuários de todos os setores poderão usar esta ação.
+                  </p>
+                </div>
+                <Switch
+                  checked={formData.is_global}
+                  onCheckedChange={(checked) => setFormData({ ...formData, is_global: checked })}
+                />
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsModalOpen(false)}>
