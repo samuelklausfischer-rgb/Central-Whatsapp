@@ -1,6 +1,7 @@
 ﻿import React, { useState, useEffect, useRef, Fragment } from 'react'
 import {
   ArrowLeft,
+  Plus,
   Send,
   Paperclip,
   Smile,
@@ -268,7 +269,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
 
   const [triggers, setTriggers] = useState<any[]>([])
   const [searchTrigger, setSearchTrigger] = useState('')
-  const [isTriggerOpen, setIsTriggerOpen] = useState(false)
+  const [isPlusOpen, setIsPlusOpen] = useState(false)
 
   const [labels, setLabels] = useState<any[]>([])
   const [contactTags, setContactTags] = useState<any[]>([])
@@ -278,6 +279,8 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
   const [scheduleDate, setScheduleDate] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const mediaInputRef = useRef<HTMLInputElement>(null)
+  const documentInputRef = useRef<HTMLInputElement>(null)
 
   const [isSending, setIsSending] = useState(false)
   const [isScheduling, setIsScheduling] = useState(false)
@@ -693,7 +696,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
 
   const handleSelectTrigger = (content: string) => {
     setMsgText((prev) => (prev ? prev + '\n\n' + content : content))
-    setIsTriggerOpen(false)
+    setIsPlusOpen(false)
     setSearchTrigger('')
   }
 
@@ -1427,7 +1430,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
             </div>
           )}
           <div className="flex items-end gap-3 w-full">
-            <Popover open={isTriggerOpen} onOpenChange={setIsTriggerOpen}>
+            <Popover open={isPlusOpen} onOpenChange={setIsPlusOpen}>
               <PopoverTrigger asChild>
                 <Button
                   type="button"
@@ -1435,27 +1438,57 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                   size="icon"
                   className="text-chat-muted hover:text-blue-400 hover:bg-chat-hover h-11 w-11 rounded-full flex-shrink-0 transition-all duration-300 hover:scale-105 active:scale-95"
                 >
-                  <Zap className="h-5 w-5" />
+                  <Plus className="h-5 w-5" />
                 </Button>
               </PopoverTrigger>
               <PopoverContent
-                className="w-80 p-0 mb-2 border-chat-border bg-chat-panel backdrop-blur-xl"
+                className="w-64 p-2 mb-2 border-chat-border bg-chat-panel backdrop-blur-xl"
                 align="start"
                 side="top"
                 sideOffset={10}
               >
-                <div className="p-3 border-b border-chat-border">
-                  <h4 className="font-medium text-sm mb-2 text-chat-text/90">Gatilhos Rápidos</h4>
+                <div className="text-[11px] font-semibold text-chat-muted uppercase tracking-wider px-2 pb-1.5 pt-0.5">
+                  Anexos
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { mediaInputRef.current?.click(); setIsPlusOpen(false) }}
+                  className="w-full flex items-center gap-3 px-2 py-2 rounded-md hover:bg-chat-hover transition-colors text-sm text-chat-text"
+                >
+                  <ImageIcon className="h-4 w-4 text-chat-muted" />
+                  Foto ou vídeo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { documentInputRef.current?.click(); setIsPlusOpen(false) }}
+                  className="w-full flex items-center gap-3 px-2 py-2 rounded-md hover:bg-chat-hover transition-colors text-sm text-chat-text"
+                >
+                  <FileIcon className="h-4 w-4 text-chat-muted" />
+                  Documento
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { fileInputRef.current?.click(); setIsPlusOpen(false) }}
+                  className="w-full flex items-center gap-3 px-2 py-2 rounded-md hover:bg-chat-hover transition-colors text-sm text-chat-text"
+                >
+                  <Paperclip className="h-4 w-4 text-chat-muted" />
+                  Arquivo
+                </button>
+                <div className="border-t border-chat-border my-2" />
+                <div className="text-[11px] font-semibold text-chat-muted uppercase tracking-wider px-2 pb-1.5 pt-0.5">
+                  Gatilhos Rápidos
+                </div>
+                <div className="px-2 pb-1.5">
                   <input
-                    className="w-full bg-chat-panel border border-chat-border rounded-md px-3 py-1.5 text-sm text-chat-text placeholder:text-chat-muted focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+                    className="w-full bg-chat-panel border border-chat-border rounded-md px-2.5 py-1.5 text-sm text-chat-text placeholder:text-chat-muted focus:outline-none focus:ring-1 focus:ring-blue-500/50"
                     placeholder="Buscar gatilho..."
                     value={searchTrigger}
                     onChange={(e) => setSearchTrigger(e.target.value)}
                   />
                 </div>
-                <div className="max-h-60 overflow-y-auto p-2">
+                <div className="max-h-40 overflow-y-auto space-y-0.5 px-1 pb-1">
                   {filteredTriggers.length === 0 ? (
-                    <div className="p-3 text-center text-sm text-chat-muted">
+                    <div className="p-2 text-center text-xs text-chat-muted">
                       Nenhum gatilho encontrado.
                     </div>
                   ) : (
@@ -1463,13 +1496,13 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                       <button
                         key={t.id}
                         type="button"
-                        className="w-full text-left p-2 rounded-md hover:bg-chat-hover transition-colors group mb-1 last:mb-0"
-                        onClick={() => handleSelectTrigger(t.content)}
+                        className="w-full text-left px-2 py-1.5 rounded-md hover:bg-chat-hover transition-colors text-sm"
+                        onClick={() => { handleSelectTrigger(t.content) }}
                       >
-                        <div className="font-medium text-sm text-chat-text/90 group-hover:text-blue-400 transition-colors truncate">
+                        <div className="font-medium text-chat-text/90 truncate">
                           {t.title}
                         </div>
-                        <div className="text-xs text-chat-muted truncate mt-0.5">
+                        <div className="text-xs text-chat-muted truncate">
                           {t.content}
                         </div>
                       </button>
@@ -1486,15 +1519,22 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
               multiple
               accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain"
             />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={() => fileInputRef.current?.click()}
-              className="text-chat-muted hover:text-chat-text hover:bg-chat-hover h-11 w-11 rounded-full flex-shrink-0 transition-all duration-300 hover:scale-105 active:scale-95"
-            >
-              <Paperclip className="h-5 w-5" />
-            </Button>
+            <input
+              type="file"
+              ref={mediaInputRef}
+              onChange={handleFileSelect}
+              className="hidden"
+              multiple
+              accept="image/*,video/*"
+            />
+            <input
+              type="file"
+              ref={documentInputRef}
+              onChange={handleFileSelect}
+              className="hidden"
+              multiple
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"
+            />
             {isRecording || audioUrl ? (
               <div className="flex-1 bg-chat-panel border border-chat-border rounded-2xl flex items-center min-h-[48px] px-4 overflow-hidden">
                 {audioUrl ? (
