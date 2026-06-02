@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Settings2 } from 'lucide-react'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { ChatList } from '@/components/chat/ChatList'
 import { ChatWindow } from '@/components/chat/ChatWindow'
@@ -8,8 +7,6 @@ import { syncDeviceAvatar } from '@/services/devices'
 import { getMessages } from '@/services/messages'
 import { getContacts } from '@/services/contacts'
 import { useRealtime } from '@/hooks/use-realtime'
-import { Button } from '@/components/ui/button'
-import { SignatureManagerDialog } from '@/components/SignatureManagerDialog'
 import { useAuth } from '@/hooks/use-auth'
 
 const SIDEBAR_MIN = 300
@@ -208,8 +205,6 @@ export default function ChatHub() {
     return conversations.find((c) => c.remote_sender === selectedContact)
   }, [conversations, selectedContact])
 
-  const [isSignaturesModalOpen, setIsSignaturesModalOpen] = useState(false)
-
   const containerRef = useRef<HTMLDivElement>(null)
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT)
   const sidebarWidthRef = useRef(sidebarWidth)
@@ -269,23 +264,6 @@ export default function ChatHub() {
 
   return (
     <div ref={containerRef} className="h-full w-full relative bg-chat-app backdrop-blur-2xl border-chat-border flex rounded-none md:rounded-2xl border overflow-hidden shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
-      {(!isMobile || !selectedContact) && (
-        <Button
-          variant="outline"
-          size="icon"
-          className="absolute bottom-6 left-6 z-50 h-12 w-12 rounded-full shadow-chat bg-chat-panel border-chat-border backdrop-blur-xl hover:bg-chat-hover transition-all hover:scale-105"
-          onClick={() => setIsSignaturesModalOpen(true)}
-          title="Gerenciar Assinaturas de Dispositivos"
-        >
-          <Settings2 className="h-5 w-5 text-chat-text" />
-        </Button>
-      )}
-
-      <SignatureManagerDialog
-        open={isSignaturesModalOpen}
-        onOpenChange={setIsSignaturesModalOpen}
-        devices={devices}
-      />
 
       {(!isMobile || !selectedContact) && (
         isMobile ? (
