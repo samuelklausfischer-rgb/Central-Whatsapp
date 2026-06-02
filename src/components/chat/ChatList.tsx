@@ -37,6 +37,7 @@ const getConversationName = (conv: any, contact: any) => {
 }
 
 function previewLabel(content: string): string {
+  const cleaned = content.replace(/[\u0080-\u009F]/g, '')
   const labels: Record<string, string> = {
     '[Áudio]': 'Voz',
     '[Ãudio]': 'Voz',
@@ -47,8 +48,8 @@ function previewLabel(content: string): string {
     '[Figurinha]': 'Figurinha',
     '[Mensagem de mídia]': 'Mídia',
   }
-  if (content.startsWith('[Documento:')) return 'Documento'
-  return labels[content] || content
+  if (cleaned.startsWith('[Documento:')) return 'Documento'
+  return labels[cleaned] || content
 }
 
 export function ChatList({

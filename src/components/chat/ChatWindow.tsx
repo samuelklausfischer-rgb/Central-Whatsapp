@@ -133,18 +133,20 @@ const formatInline = (text: string, isMe: boolean): React.ReactNode => {
 
 const isMediaPlaceholder = (content?: string) => {
   if (!content) return false
+  const cleaned = content.trim().replace(/[\u0080-\u009F]/g, '')
   return (
     ['[Anexo]', '[Imagem]', '[Vídeo]', '[Áudio]', '[Ãudio]', '[Música]', '[Figurinha]', '[Mensagem de mídia]'].includes(
-      content,
-    ) || content.startsWith('[Documento:')
+      cleaned,
+    ) || cleaned.startsWith('[Documento:')
   )
 }
 
 const isTechnicalPlaceholder = (content?: string) => {
   if (!content) return false
-  const normalized = content.trim().toLowerCase()
+  const trimmed = content.trim()
+  if (isMediaPlaceholder(trimmed)) return true
+  const normalized = trimmed.toLowerCase().replace(/[\u0080-\u009F]/g, '')
   return (
-    isMediaPlaceholder(content.trim()) ||
     ['[audio]', '[áudio]', '[ãudio]', 'audio', 'áudio', 'ãudio', 'mensagem de audio', 'mensagem de áudio'].includes(
       normalized,
     )
@@ -384,7 +386,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
     e.preventDefault()
     if ((!msgText.trim() && attachments.length === 0 && !audioBlob) || !device || !user || !contact) return
 
-    const content = msgText.trim() ? msgText.trim() : (audioBlob ? '[Ãudio]' : attachments.length > 0 ? '[Anexo]' : '')
+    const content = msgText.trim() ? msgText.trim() : (audioBlob ? '[Áudio]' : attachments.length > 0 ? '[Anexo]' : '')
 
     setIsSending(true)
     try {
@@ -998,9 +1000,9 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                         <div className="text-[11px] font-semibold text-chat-muted/90">
                           {msg.reply_to_snapshot.sender_name || 'Mensagem original'}
                         </div>
-                        <div className="text-[12px] truncate text-chat-muted/70">
-                          {msg.reply_to_snapshot.content || ''}
-                        </div>
+                          <div className="text-[12px] truncate text-chat-muted/70">
+                            {isTechnicalPlaceholder(msg.reply_to_snapshot.content) ? 'Voz' : msg.reply_to_snapshot.content || ''}
+                          </div>
                       </div>
                     </div>
                   )}
@@ -1409,7 +1411,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                       Respondendo a {replyingTo.sender_name || user?.name || 'contato'}
                     </div>
                     <div className="text-[12px] text-chat-muted truncate">
-                      {replyingTo.reply_to_snapshot?.content || replyingTo.content || ''}
+                      {(replyingTo.reply_to_snapshot?.content || replyingTo.content) && isTechnicalPlaceholder(replyingTo.reply_to_snapshot?.content || replyingTo.content) ? 'Voz' : replyingTo.reply_to_snapshot?.content || replyingTo.content || ''}
                     </div>
                   </>
                 )}
