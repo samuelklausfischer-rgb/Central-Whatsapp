@@ -181,7 +181,7 @@ export default function ScheduledMessages() {
                               </AvatarFallback>
                             </Avatar>
                             <span className="text-xs text-muted-foreground">
-                              {msg.expand?.device_id?.name || 'Desconhecido'}
+                              {msg.device_name || 'Desconhecido'}
                             </span>
                           </div>
                         </TableCell>

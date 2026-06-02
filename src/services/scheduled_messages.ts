@@ -13,6 +13,7 @@ export type CreateScheduledMessageInput = {
 
 export type ScheduledMessageWithContact = ScheduledMessage & {
   contact_name?: string | null
+  device_name?: string | null
 }
 
 export const getScheduledMessages = async () => {
@@ -66,9 +67,23 @@ export const getScheduledMessages = async () => {
     }
   }
 
+  const deviceIds = [...new Set(messages.map((m) => m.device_id))]
+  const { data: devices } = await supabase
+    .from('devices')
+    .select('id, name')
+    .in('id', deviceIds)
+
+  const deviceNameMap: Record<string, string | null> = {}
+  if (devices) {
+    for (const d of devices) {
+      deviceNameMap[d.id] = d.name || null
+    }
+  }
+
   return messages.map((msg) => ({
     ...msg,
     contact_name: nameMap[msg.remote_sender] ?? null,
+    device_name: deviceNameMap[msg.device_id] ?? null,
   })) as ScheduledMessageWithContact[]
 }
 
