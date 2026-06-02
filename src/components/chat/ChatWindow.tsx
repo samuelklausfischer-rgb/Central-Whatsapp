@@ -11,7 +11,6 @@ import {
   MessageSquare,
   Info,
   User,
-  Zap,
   Tags,
   Check,
   CalendarClock,
