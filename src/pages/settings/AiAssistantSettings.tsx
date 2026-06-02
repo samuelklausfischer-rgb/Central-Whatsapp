@@ -81,7 +81,7 @@ export default function AiAssistantSettings() {
       })
     } else {
       setEditingId(null)
-      setFormData({ label: '', action_key: '', system_prompt: '', is_active: true, is_global: false })
+      setFormData({ label: '', action_key: '', system_prompt: '', is_active: true, is_global: isAdmin ? true : false })
     }
     setIsModalOpen(true)
   }
