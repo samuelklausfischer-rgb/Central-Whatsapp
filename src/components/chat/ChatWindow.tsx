@@ -56,7 +56,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { createScheduledMessage } from '@/services/scheduled_messages'
+import { createScheduledMessage, type CreateScheduledMessageInput } from '@/services/scheduled_messages'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { SmartAvatar } from '@/components/chat/SmartAvatar'
 import { Button } from '@/components/ui/button'
@@ -269,6 +269,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [isSending, setIsSending] = useState(false)
+  const [isScheduling, setIsScheduling] = useState(false)
 
   const [isRecording, setIsRecording] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
@@ -522,7 +523,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
   const handleSchedule = async (e: React.FormEvent) => {
     e.preventDefault()
     if (
-      (!msgText.trim() && attachments.length === 0) ||
+      (!msgText.trim() && attachments.length === 0 && !audioBlob) ||
       !device ||
       !user ||
       !contact ||
@@ -530,9 +531,23 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
     )
       return
 
-    const content = msgText.trim() ? msgText.trim() : '[Anexo]'
+    const content = msgText.trim() ? msgText.trim() : (audioBlob ? '[Áudio]' : '[Anexo]')
 
+    setIsScheduling(true)
     try {
+      const { uploadAudio, uploadFile } = await import('@/services/storage')
+      const scheduledAttachments: CreateScheduledMessageInput['attachments'] = []
+
+      if (audioBlob) {
+        const mediaUrl = await uploadAudio(audioBlob, user.id)
+        scheduledAttachments.push({ url: mediaUrl, type: 'audio', name: 'audio.webm' })
+      } else if (attachments.length > 0) {
+        const uploaded = await Promise.all(
+          attachments.map((file) => uploadFile(file, user.id)),
+        )
+        scheduledAttachments.push(...uploaded)
+      }
+
       await createScheduledMessage({
         content,
         scheduled_at: new Date(scheduleDate).toISOString(),
@@ -540,15 +555,21 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
         device_id: device.id,
         remote_sender: contact,
         user_id: user.id,
-        attachments: attachments.length > 0 ? attachments : undefined,
+        attachments: scheduledAttachments.length > 0 ? scheduledAttachments : null,
       })
       toast({ title: 'Mensagem agendada com sucesso' })
       setMsgText('')
       setAttachments([])
+      discardAudio()
       setIsScheduleOpen(false)
       setScheduleDate('')
     } catch (err) {
-      toast({ title: 'Erro ao agendar mensagem', variant: 'destructive' })
+      toast({
+        title: err instanceof Error ? err.message : 'Erro ao agendar mensagem',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsScheduling(false)
     }
   }
 
@@ -1666,14 +1687,20 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                     <Label>Mensagem</Label>
                     <div className="rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground min-h-[60px] max-h-[120px] overflow-y-auto whitespace-pre-wrap">
                       {msgText ||
-                        (attachments.length > 0
-                          ? '[Apenas Anexos]'
-                          : 'Nenhuma mensagem digitada...')}
+                        (audioBlob
+                          ? '[Áudio gravado]'
+                          : attachments.length > 0
+                            ? '[Apenas Anexos]'
+                            : 'Nenhuma mensagem digitada...')}
                     </div>
                   </div>
                   <div className="grid gap-2">
                     <Label>Anexos</Label>
-                    {attachments.length > 0 ? (
+                    {audioBlob ? (
+                      <div className="text-sm text-muted-foreground mb-2">
+                        Áudio gravado ({formatTime(recordingTime)})
+                      </div>
+                    ) : attachments.length > 0 ? (
                       <div className="text-sm text-muted-foreground mb-2">
                         {attachments.length} arquivo(s) selecionado(s)
                       </div>
@@ -1695,15 +1722,17 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                   <Button
                     variant="outline"
                     onClick={() => setIsScheduleOpen(false)}
+                    disabled={isScheduling}
                     className="bg-transparent border-border hover:bg-accent"
                   >
                     Cancelar
                   </Button>
                   <Button
                     onClick={handleSchedule}
-                    disabled={!scheduleDate || (!msgText.trim() && attachments.length === 0 && !audioBlob)}
+                    disabled={isScheduling || !scheduleDate || (!msgText.trim() && attachments.length === 0 && !audioBlob)}
                   >
-                    Confirmar Agendamento
+                    {isScheduling && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    {isScheduling ? 'Agendando...' : 'Confirmar Agendamento'}
                   </Button>
                 </DialogFooter>
               </DialogContent>

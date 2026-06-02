@@ -87,6 +87,12 @@ export default function ScheduledMessages() {
             <CheckCircle className="w-3.5 h-3.5" /> Enviada
           </Badge>
         )
+      case 'processing':
+        return (
+          <Badge className="bg-blue-500/20 text-blue-500 border-blue-500/30 gap-1.5 flex items-center">
+            <Clock className="w-3.5 h-3.5" /> Processando
+          </Badge>
+        )
       case 'failed':
         return (
           <Badge className="bg-red-500/20 text-red-500 border-red-500/30 gap-1.5 flex items-center">
@@ -190,7 +196,16 @@ export default function ScheduledMessages() {
                         <TableCell className="text-sm whitespace-nowrap">
                           {formatDateTime(msg.scheduled_at)}
                         </TableCell>
-                        <TableCell>{getStatusBadge(msg.status)}</TableCell>
+                        <TableCell>
+                          <div className="space-y-1">
+                            {getStatusBadge(msg.status)}
+                            {msg.status === 'failed' && msg.error_message && (
+                              <p className="text-xs text-red-400 max-w-[220px] truncate" title={msg.error_message}>
+                                {msg.error_message}
+                              </p>
+                            )}
+                          </div>
+                        </TableCell>
                         <TableCell className="text-right whitespace-nowrap space-x-2">
                           {msg.status === 'pending' && (
                             <Button

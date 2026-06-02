@@ -105,13 +105,22 @@ export interface ScheduledMessage {
   id: string
   content: string
   scheduled_at: string
-  status: 'pending' | 'sent' | 'failed' | 'cancelled'
+  status: 'pending' | 'processing' | 'sent' | 'failed' | 'cancelled'
   device_id: string
   remote_sender: string
   user_id: string
-  attachments: Record<string, unknown> | null
+  attachments: ScheduledAttachment[] | null
+  processed_at: string | null
+  error_message: string | null
+  sent_message_ids: string[]
   created_at: string
   updated_at: string
+}
+
+export interface ScheduledAttachment {
+  url: string
+  type: string
+  name: string
 }
 
 export interface AiPrompt {
