@@ -12,8 +12,9 @@ import { SmartAvatar } from '@/components/chat/SmartAvatar'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { format } from 'date-fns'
-import { Check, CheckCheck, Smartphone, Search, X, MessageCircle } from 'lucide-react'
+import { Check, CheckCheck, Smartphone, Search, X, MessageCircle, Mail } from 'lucide-react'
 import { resolveContact } from '@/services/contacts'
+import { markConversationUnread } from '@/services/conversation_states'
 
 export interface ChatListProps {
   devices: any[]
@@ -179,7 +180,7 @@ export function ChatList({
                 key={conv.remote_sender}
                 onClick={() => onSelectContact(conv.remote_sender)}
                 className={cn(
-                  'flex items-center gap-3 px-2.5 py-2.5 rounded-md transition-colors duration-150 text-left w-full hover:bg-chat-hover',
+                  'group flex items-center gap-3 px-2.5 py-2.5 rounded-md transition-colors duration-150 text-left w-full hover:bg-chat-hover',
                   isSelected ? 'bg-chat-active' : '',
                   isPendingReply ? 'border-l-2 border-chat-text/10' : '',
                 )}
@@ -241,6 +242,20 @@ export function ChatList({
                       {conv.unread_count}
                     </span>
                   </div>
+                )}
+                {!isPendingReply && conv.unread_count === 0 && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (selectedDeviceId) {
+                        markConversationUnread(selectedDeviceId, conv.remote_sender)
+                      }
+                    }}
+                    className="h-8 w-8 rounded-full flex items-center justify-center hover:bg-chat-hover shrink-0 transition-colors opacity-0 group-hover:opacity-100"
+                    title="Marcar como não lida"
+                  >
+                    <Mail className="h-4 w-4 text-chat-muted" />
+                  </button>
                 )}
               </button>
             )

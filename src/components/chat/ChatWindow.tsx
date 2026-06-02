@@ -71,6 +71,7 @@ import { useRealtime } from '@/hooks/use-realtime'
 import { useAuth } from '@/hooks/use-auth'
 import { sendMessage, reactToMessage, deleteMessage, editMessage } from '@/services/messages'
 import { updateContactByJid } from '@/services/contacts'
+import { markConversationRead, getConversationViewers, type ConversationViewer } from '@/services/conversation_states'
 import supabase from '@/lib/supabase/client'
 import useAppStore from '@/stores/useAppStore'
 import { useToast } from '@/hooks/use-toast'
@@ -304,6 +305,8 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
   const [replyingTo, setReplyingTo] = useState<any>(null)
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [deleteConfirmMsg, setDeleteConfirmMsg] = useState<any>(null)
+  const [viewers, setViewers] = useState<ConversationViewer[]>([])
+  const [isSheetOpen, setIsSheetOpen] = useState(false)
 
   const messages = conversation?.messages || []
 
@@ -371,18 +374,16 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
   }, [messages])
 
   useEffect(() => {
-    if (conversation && conversation.unread_count > 0 && device) {
-      const unreadMsgs = messages.filter((m: any) => !m.is_read && m.direction === 'inbound')
-      unreadMsgs.forEach((m: any) => {
-        supabase
-          .from('messages')
-          .update({ is_read: true })
-          .eq('id', m.id)
-          .then()
-          .catch(() => {})
-      })
+    if (conversation && conversation.unread_count > 0 && device && contact) {
+      markConversationRead(device.id, contact)
     }
   }, [contact, conversation?.unread_count, device])
+
+  useEffect(() => {
+    if (isSheetOpen && device && contact) {
+      getConversationViewers(device.id, contact).then(setViewers)
+    }
+  }, [isSheetOpen, device, contact])
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -853,7 +854,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
               )}
             </PopoverContent>
           </Popover>
-          <Sheet>
+          <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
             <SheetTrigger asChild>
               <Button
                 variant="ghost"
@@ -918,6 +919,34 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                 >
                   <StickyNote className="mr-3 h-5 w-5 text-purple-400" /> Adicionar Anotação
                 </Button>
+                {device && contact && (
+                  <div className="pt-4 border-t border-chat-border">
+                    <h4 className="text-sm font-semibold text-chat-text mb-3 flex items-center gap-2">
+                      <Info className="h-4 w-4 text-chat-muted" /> Dados da conversa
+                    </h4>
+                    {viewers.length === 0 ? (
+                      <p className="text-xs text-chat-muted">
+                        Nenhum usuário visualizou esta conversa ainda.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {viewers.map((v) => (
+                          <div
+                            key={v.user_id}
+                            className="flex items-center justify-between px-3 py-2 rounded-md bg-chat-hover border border-chat-border"
+                          >
+                            <span className="text-sm text-chat-text truncate">{v.user_name}</span>
+                            <span className="text-[11px] text-chat-muted shrink-0 ml-2">
+                              {v.last_opened_at
+                                ? format(new Date(v.last_opened_at), 'dd/MM HH:mm')
+                                : '—'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </SheetContent>
           </Sheet>

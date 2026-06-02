@@ -6,6 +6,7 @@ import { ChatWindow } from '@/components/chat/ChatWindow'
 import { syncDeviceAvatar } from '@/services/devices'
 import { getMessages } from '@/services/messages'
 import { getContacts } from '@/services/contacts'
+import { getMyStates, type ConversationUserState } from '@/services/conversation_states'
 import { useRealtime } from '@/hooks/use-realtime'
 import { useAuth } from '@/hooks/use-auth'
 
@@ -52,11 +53,16 @@ export default function ChatHub() {
   const [messages, setMessages] = useState<any[]>([])
   const [contacts, setContacts] = useState<any[]>([])
   const [selectedContact, setSelectedContact] = useState<string | null>(null)
+  const [userStates, setUserStates] = useState<ConversationUserState[]>([])
 
   useEffect(() => {
     getContacts()
       .then(setContacts)
       .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    getMyStates().then(setUserStates)
   }, [])
 
   useEffect(() => {
@@ -160,6 +166,23 @@ export default function ChatHub() {
     }
   })
 
+  useRealtime('conversation_user_states', (e) => {
+    if (e.record.user_id !== user?.id) return
+    if (e.action === 'create' || e.action === 'update') {
+      setUserStates((prev) => {
+        const idx = prev.findIndex((s) => s.id === e.record.id)
+        if (idx >= 0) {
+          const next = [...prev]
+          next[idx] = e.record as ConversationUserState
+          return next
+        }
+        return [...prev, e.record as ConversationUserState]
+      })
+    } else if (e.action === 'delete') {
+      setUserStates((prev) => prev.filter((s) => s.id !== e.record.id))
+    }
+  })
+
   const conversations = useMemo(() => {
     const map = new Map<string, any>()
     messages.forEach((m) => {
@@ -181,12 +204,26 @@ export default function ChatHub() {
       if (new Date(m.created_at) > new Date(conv.lastMessage.created_at)) {
         conv.lastMessage = m
       }
-      if (!m.is_read && m.direction === 'inbound') {
-        conv.unread_count += 1
-      }
     })
     return Array.from(map.values())
       .map((conv) => {
+        const state = userStates.find(
+          (s) => s.device_id === selectedDeviceId && s.remote_sender === conv.remote_sender,
+        )
+
+        if (state?.manual_unread) {
+          conv.unread_count = Math.max(1, conv.messages.filter(
+            (m: any) => m.direction === 'inbound' && (!state.last_read_at || new Date(m.created_at) > new Date(state.last_read_at)),
+          ).length)
+        } else if (state?.last_read_at) {
+          const lastRead = new Date(state.last_read_at)
+          conv.unread_count = conv.messages.filter(
+            (m: any) => m.direction === 'inbound' && new Date(m.created_at) > lastRead,
+          ).length
+        } else {
+          conv.unread_count = 0
+        }
+
         if (conv.lastMessage?.sender_name && conv.lastMessage.direction === 'inbound') {
           conv.sender_name = conv.lastMessage.sender_name
         }
@@ -197,7 +234,7 @@ export default function ChatHub() {
         (a, b) =>
           new Date(b.lastMessage.created_at).getTime() - new Date(a.lastMessage.created_at).getTime(),
       )
-  }, [messages])
+  }, [messages, userStates, selectedDeviceId])
 
   const selectedDevice = devices.find((d) => d.id === selectedDeviceId)
 
