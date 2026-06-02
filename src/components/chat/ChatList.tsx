@@ -36,6 +36,21 @@ const getConversationName = (conv: any, contact: any) => {
   return contact?.nickname || conv.sender_name || contact?.name || conv.remote_sender
 }
 
+function previewLabel(content: string): string {
+  const labels: Record<string, string> = {
+    '[Áudio]': 'Áudio',
+    '[Ãudio]': 'Áudio',
+    '[Anexo]': 'Anexo',
+    '[Imagem]': 'Imagem',
+    '[Vídeo]': 'Vídeo',
+    '[Música]': 'Música',
+    '[Figurinha]': 'Figurinha',
+    '[Mensagem de mídia]': 'Mídia',
+  }
+  if (content.startsWith('[Documento:')) return 'Documento'
+  return labels[content] || content
+}
+
 export function ChatList({
   devices,
   selectedDeviceId,
@@ -198,7 +213,7 @@ export function ChatList({
                         conv.unread_count > 0 ? 'text-chat-text font-medium' : 'text-chat-muted',
                       )}
                     >
-                      {conv.lastMessage.content}
+                      {previewLabel(conv.lastMessage.content)}
                     </p>
                     {isPendingReply && (
                       <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse shrink-0 inline-block" />
