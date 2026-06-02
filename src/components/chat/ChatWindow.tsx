@@ -140,6 +140,17 @@ const isMediaPlaceholder = (content?: string) => {
   )
 }
 
+const isTechnicalPlaceholder = (content?: string) => {
+  if (!content) return false
+  const normalized = content.trim().toLowerCase()
+  return (
+    isMediaPlaceholder(content.trim()) ||
+    ['[audio]', '[áudio]', '[ãudio]', 'audio', 'áudio', 'ãudio', 'mensagem de audio', 'mensagem de áudio'].includes(
+      normalized,
+    )
+  )
+}
+
 const renderMessage = (content: string, isMe: boolean) => {
   if (!content) return null
   const parts = content.split(/(```[\s\S]*?```)/g)
@@ -1151,7 +1162,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                     <div className="text-[13px] italic text-chat-muted/60">
                       [Mensagem apagada]
                     </div>
-                  ) : msg.content !== '[Anexo]' && msg.content !== '[Áudio]' && msg.content !== '[Ãudio]' && !(messageAttachments.length > 0 && isMediaPlaceholder(msg.content)) ? (
+                  ) : msg.content?.trim() && !isTechnicalPlaceholder(msg.content) ? (
                     <div className="text-[15px] leading-relaxed break-words">
                       {renderMessage(msg.content, isMe)}
                     </div>
@@ -1490,7 +1501,13 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
               <div className="flex-1 bg-chat-panel border border-chat-border rounded-2xl flex items-center min-h-[56px] px-4 overflow-hidden">
                 {audioUrl ? (
                   <div className="flex items-center gap-3 w-full">
-                    <audio controls src={audioUrl} className="h-10 flex-1 min-w-0" />
+                    <AudioMessage
+                      src={audioUrl}
+                      isMe={true}
+                      msgId="composer-audio-preview"
+                      showDownload={false}
+                      compact
+                    />
                     <button
                       type="button"
                       onClick={discardAudio}

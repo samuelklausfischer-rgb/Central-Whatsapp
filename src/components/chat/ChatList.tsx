@@ -38,8 +38,8 @@ const getConversationName = (conv: any, contact: any) => {
 
 function previewLabel(content: string): string {
   const labels: Record<string, string> = {
-    '[Áudio]': 'Áudio',
-    '[Ãudio]': 'Áudio',
+    '[Áudio]': 'Voz',
+    '[Ãudio]': 'Voz',
     '[Anexo]': 'Anexo',
     '[Imagem]': 'Imagem',
     '[Vídeo]': 'Vídeo',

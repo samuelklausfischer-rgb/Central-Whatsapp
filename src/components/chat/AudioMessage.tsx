@@ -1,69 +1,39 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react'
-import { Play, Pause } from 'lucide-react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { Play, Pause, Download } from 'lucide-react'
 
 interface AudioMessageProps {
   src: string
   isMe: boolean
   msgId?: string
+  showDownload?: boolean
+  compact?: boolean
+  downloadName?: string
 }
 
-const waveformCache = new Map<string, number[]>()
-
 let currentPlayingAudio: { pause: () => void; msgId?: string } | null = null
+const PLAYBACK_RATES = [1, 1.25, 1.5, 2] as const
 
 function formatTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '0:00'
   const m = Math.floor(seconds / 60)
   const s = Math.floor(seconds % 60)
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-async function generateWaveformData(url: string): Promise<number[]> {
-  const response = await fetch(url)
-  const arrayBuffer = await response.arrayBuffer()
-  const audioCtx = new AudioContext()
-  const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
-  const channelData = audioBuffer.getChannelData(0)
-  const numBars = 40
-  const chunkSize = Math.floor(channelData.length / numBars)
-  const waveform: number[] = []
-  for (let i = 0; i < numBars; i++) {
-    let sum = 0
-    for (let j = i * chunkSize; j < (i + 1) * chunkSize && j < channelData.length; j++) {
-      sum += Math.abs(channelData[j])
-    }
-    const avg = sum / chunkSize
-    waveform.push(avg)
-  }
-  const max = Math.max(...waveform)
-  return waveform.map(v => (v / max) * 0.9 + 0.1)
-}
-
-export function AudioMessage({ src, isMe, msgId }: AudioMessageProps) {
+export function AudioMessage({
+  src,
+  isMe,
+  msgId,
+  showDownload = true,
+  compact = false,
+  downloadName = 'audio-message.webm',
+}: AudioMessageProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
-  const [waveform, setWaveform] = useState<number[]>([])
-  const [waveformLoading, setWaveformLoading] = useState(true)
-
-  useEffect(() => {
-    if (waveformCache.has(src)) {
-      setWaveform(waveformCache.get(src)!)
-      setWaveformLoading(false)
-    } else {
-      generateWaveformData(src)
-        .then(data => {
-          waveformCache.set(src, data)
-          setWaveform(data)
-          setWaveformLoading(false)
-        })
-        .catch(() => {
-          const fallback = Array.from({ length: 40 }, () => 0.4)
-          setWaveform(fallback)
-          setWaveformLoading(false)
-        })
-    }
-  }, [src])
+  const [playbackRate, setPlaybackRate] = useState<(typeof PLAYBACK_RATES)[number]>(1)
+  const [timelineFocused, setTimelineFocused] = useState(false)
 
   const handlePlayPause = useCallback(() => {
     const audio = audioRef.current
@@ -72,32 +42,80 @@ export function AudioMessage({ src, isMe, msgId }: AudioMessageProps) {
     if (isPlaying) {
       audio.pause()
     } else {
+      if (audio.ended) {
+        audio.currentTime = 0
+        setCurrentTime(0)
+      }
       if (currentPlayingAudio && currentPlayingAudio.msgId !== msgId) {
         currentPlayingAudio.pause()
       }
-      audio.play()
+      audio.playbackRate = playbackRate
+      void audio.play().catch(() => {
+        setIsPlaying(false)
+      })
       currentPlayingAudio = { pause: () => audio.pause(), msgId }
     }
-  }, [isPlaying, msgId])
+  }, [isPlaying, msgId, playbackRate])
+
+  const handleSeek = (value: number) => {
+    const audio = audioRef.current
+    if (!audio || !Number.isFinite(duration) || duration <= 0) return
+    audio.currentTime = value
+    setCurrentTime(value)
+  }
+
+  const cyclePlaybackRate = () => {
+    const currentIndex = PLAYBACK_RATES.indexOf(playbackRate)
+    const nextRate = PLAYBACK_RATES[(currentIndex + 1) % PLAYBACK_RATES.length]
+    setPlaybackRate(nextRate)
+    if (audioRef.current) audioRef.current.playbackRate = nextRate
+  }
+
+  const handleDownload = async () => {
+    try {
+      const response = await fetch(src)
+      if (!response.ok) throw new Error('Download indisponivel')
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = downloadName
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      const opened = window.open(src, '_blank', 'noopener,noreferrer')
+      if (opened) opened.opener = null
+    }
+  }
 
   useEffect(() => {
     const audio = audioRef.current
     if (!audio) return
 
+    setIsPlaying(false)
+    setCurrentTime(0)
+    setDuration(0)
+
     const onPlay = () => setIsPlaying(true)
     const onPause = () => setIsPlaying(false)
     const onEnded = () => {
       setIsPlaying(false)
-      setCurrentTime(0)
+      setCurrentTime(Number.isFinite(audio.duration) ? audio.duration : 0)
+      if (currentPlayingAudio?.msgId === msgId) currentPlayingAudio = null
     }
     const onTimeUpdate = () => setCurrentTime(audio.currentTime)
-    const onLoadedMetadata = () => setDuration(audio.duration)
+    const onLoadedMetadata = () => {
+      setDuration(Number.isFinite(audio.duration) ? audio.duration : 0)
+    }
 
     audio.addEventListener('play', onPlay)
     audio.addEventListener('pause', onPause)
     audio.addEventListener('ended', onEnded)
     audio.addEventListener('timeupdate', onTimeUpdate)
     audio.addEventListener('loadedmetadata', onLoadedMetadata)
+    audio.addEventListener('durationchange', onLoadedMetadata)
 
     return () => {
       audio.removeEventListener('play', onPlay)
@@ -105,51 +123,99 @@ export function AudioMessage({ src, isMe, msgId }: AudioMessageProps) {
       audio.removeEventListener('ended', onEnded)
       audio.removeEventListener('timeupdate', onTimeUpdate)
       audio.removeEventListener('loadedmetadata', onLoadedMetadata)
+      audio.removeEventListener('durationchange', onLoadedMetadata)
     }
-  }, [])
+  }, [msgId, src])
+
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.playbackRate = playbackRate
+  }, [playbackRate])
 
   const progress = duration > 0 ? currentTime / duration : 0
+  const progressPercent = Math.min(Math.max(progress * 100, 0), 100)
+  const widthClass = compact
+    ? 'w-full min-w-0'
+    : 'w-[min(420px,72vw)] min-w-[240px] max-w-full'
+  const playButtonClass = isMe
+    ? 'bg-blue-500/20 text-blue-500 hover:bg-blue-500/30'
+    : 'bg-blue-500/15 text-blue-500 hover:bg-blue-500/25'
+  const railClass = isMe ? 'bg-chat-text/15' : 'bg-chat-muted/20'
 
   return (
-    <div className="flex items-center gap-3 w-full select-none">
+    <div className={`select-none ${widthClass}`}>
       <audio ref={audioRef} src={src} preload="metadata" className="hidden" />
-      <button
-        type="button"
-        onClick={handlePlayPause}
-        className="rounded-full w-[38px] h-[38px] flex items-center justify-center flex-shrink-0 transition-all duration-150 active:scale-90 bg-blue-500/20 text-blue-500 hover:bg-blue-500/30"
-        aria-label={isPlaying ? 'Pausar' : 'Tocar'}
-      >
-        {isPlaying ? (
-          <Pause className="h-[18px] w-[18px] ml-0" />
-        ) : (
-          <Play className="h-[18px] w-[18px] ml-0.5" />
-        )}
-      </button>
-      <div className="flex items-center gap-0.5 h-8 flex-1 min-w-0">
-        {waveform.map((height, i) => {
-          const barProgress = i / waveform.length
-          const isPlayed = barProgress <= progress
-          return (
+      <div className="flex items-center gap-2.5 w-full">
+        <button
+          type="button"
+          onClick={handlePlayPause}
+          className={`rounded-full w-10 h-10 flex items-center justify-center flex-shrink-0 transition-all duration-150 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${playButtonClass}`}
+          aria-label={isPlaying ? 'Pausar áudio' : 'Tocar áudio'}
+        >
+          {isPlaying ? (
+            <Pause className="h-[18px] w-[18px]" />
+          ) : (
+            <Play className="h-[18px] w-[18px] ml-0.5" />
+          )}
+        </button>
+
+        <div className="min-w-0 flex-1">
+          <div
+            className={`relative h-7 flex items-center rounded-full transition-all ${
+              timelineFocused ? 'ring-2 ring-blue-500/30' : ''
+            }`}
+          >
+            <div className={`absolute left-0 right-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full ${railClass}`}>
+              <div
+                className="h-full rounded-full bg-blue-500/75 transition-[width] duration-100"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
             <div
-              key={i}
-              className="flex-1 rounded-full transition-all duration-75"
-              style={{
-                height: `${Math.max(height * 28, 3)}px`,
-                backgroundColor: isPlayed
-                  ? isMe
-                    ? 'rgb(59 130 246 / 0.7)'
-                    : 'rgb(59 130 246 / 0.7)'
-                  : isMe
-                    ? 'rgb(59 130 246 / 0.25)'
-                    : 'rgb(107 114 128 / 0.3)',
-              }}
+              className="pointer-events-none absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-500 shadow-sm transition-[left] duration-100"
+              style={{ left: `${progressPercent}%` }}
             />
-          )
-        })}
+            <input
+              type="range"
+              min={0}
+              max={duration || 0}
+              step={0.01}
+              value={Math.min(currentTime, duration || 0)}
+              onChange={(event) => handleSeek(Number(event.currentTarget.value))}
+              onFocus={() => setTimelineFocused(true)}
+              onBlur={() => setTimelineFocused(false)}
+              disabled={!duration}
+              aria-label="Linha do tempo do áudio"
+              aria-valuetext={`${formatTime(currentTime)} de ${formatTime(duration)}`}
+              className="absolute inset-0 h-full w-full cursor-pointer appearance-none bg-transparent opacity-0 disabled:cursor-default"
+            />
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={cyclePlaybackRate}
+          className="h-8 min-w-10 rounded-full px-2 text-[11px] font-semibold tabular-nums text-chat-muted hover:text-chat-text hover:bg-chat-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
+          aria-label={`Velocidade atual ${playbackRate}x`}
+          title="Alterar velocidade"
+        >
+          {playbackRate}x
+        </button>
+
+        {showDownload && (
+          <button
+            type="button"
+            onClick={handleDownload}
+            className="h-8 w-8 rounded-full flex items-center justify-center text-chat-muted hover:text-chat-text hover:bg-chat-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
+            aria-label="Baixar áudio"
+            title="Baixar áudio"
+          >
+            <Download className="h-4 w-4" />
+          </button>
+        )}
       </div>
-      <span className="text-xs tabular-nums text-chat-muted/70 flex-shrink-0 w-[36px] text-right">
-        {formatTime(currentTime)}
-      </span>
+      <div className="mt-1 flex items-center justify-between text-[11px] tabular-nums text-chat-muted/70">
+        <span>{formatTime(currentTime)} / {formatTime(duration)}</span>
+      </div>
     </div>
   )
 }
