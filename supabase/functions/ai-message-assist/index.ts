@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || ''
+const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
 const GROQ_KEY = Deno.env.get('GROQ_KEY') || ''
 
 const corsHeaders = {
@@ -25,6 +26,10 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: 'method not allowed' }, 405)
   }
 
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+    return jsonResponse({ error: 'Supabase credentials not configured' }, 500)
+  }
+
   if (!GROQ_KEY) {
     return jsonResponse({ error: 'GROQ_KEY not configured' }, 500)
   }
@@ -36,11 +41,23 @@ Deno.serve(async (req: Request) => {
 
   const { action, text, conversationContext } = body
 
-  const authHeader = req.headers.get('Authorization') || ''
+  const sbHeaders = {
+    apikey: SUPABASE_SERVICE_KEY,
+    Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+  }
   const promptResp = await fetch(
     `${SUPABASE_URL}/rest/v1/ai_assistant_prompts?action_key=eq.${encodeURIComponent(action)}&is_active=is.true&select=system_prompt`,
-    { headers: { Authorization: authHeader } }
+    { headers: sbHeaders }
   )
+
+  if (!promptResp.ok) {
+    const errBody = await promptResp.text()
+    return jsonResponse({
+      error: 'Falha ao buscar prompt',
+      detail: `HTTP ${promptResp.status}: ${errBody}`,
+    }, 502)
+  }
+
   const prompts = await promptResp.json()
   const promptRecord = Array.isArray(prompts) ? prompts[0] : null
 
