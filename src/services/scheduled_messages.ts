@@ -33,9 +33,36 @@ export const getScheduledMessages = async () => {
     .in('remote_jid', remoteSenders)
 
   const nameMap: Record<string, string | null> = {}
+  const missingSenders: string[] = []
   if (contacts) {
     for (const c of contacts) {
-      nameMap[c.remote_jid] = c.name || null
+      if (c.name) {
+        nameMap[c.remote_jid] = c.name
+      } else {
+        missingSenders.push(c.remote_jid)
+      }
+    }
+  }
+
+  const sendersWithoutContact = remoteSenders.filter((s) => !(s in nameMap))
+  missingSenders.push(...sendersWithoutContact)
+
+  if (missingSenders.length > 0) {
+    const { data: msgNames } = await supabase
+      .from('messages')
+      .select('remote_sender, sender_name')
+      .in('remote_sender', missingSenders)
+      .not('sender_name', 'is', null)
+      .order('created_at', { ascending: false })
+
+    if (msgNames) {
+      const seen = new Set<string>()
+      for (const m of msgNames) {
+        if (m.sender_name && !seen.has(m.remote_sender) && !nameMap[m.remote_sender]) {
+          nameMap[m.remote_sender] = m.sender_name
+          seen.add(m.remote_sender)
+        }
+      }
     }
   }
 
