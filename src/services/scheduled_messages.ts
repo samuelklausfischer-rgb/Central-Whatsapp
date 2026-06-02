@@ -11,13 +11,38 @@ export type CreateScheduledMessageInput = {
   attachments?: ScheduledAttachment[] | null
 }
 
+export type ScheduledMessageWithContact = ScheduledMessage & {
+  contact_name?: string | null
+}
+
 export const getScheduledMessages = async () => {
   const { data, error } = await supabase
     .from('scheduled_messages')
     .select('*')
     .order('scheduled_at', { ascending: false })
   if (error) throw new Error(error.message)
-  return (data as ScheduledMessage[]) || []
+  const messages = (data as ScheduledMessage[]) || []
+
+  if (messages.length === 0) return messages
+
+  const remoteSenders = [...new Set(messages.map((m) => m.remote_sender))]
+
+  const { data: contacts } = await supabase
+    .from('contacts')
+    .select('remote_jid, name')
+    .in('remote_jid', remoteSenders)
+
+  const nameMap: Record<string, string | null> = {}
+  if (contacts) {
+    for (const c of contacts) {
+      nameMap[c.remote_jid] = c.name || null
+    }
+  }
+
+  return messages.map((msg) => ({
+    ...msg,
+    contact_name: nameMap[msg.remote_sender] ?? null,
+  })) as ScheduledMessageWithContact[]
 }
 
 export const createScheduledMessage = async (data: CreateScheduledMessageInput) => {

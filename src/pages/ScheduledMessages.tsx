@@ -14,7 +14,7 @@ import {
   getScheduledMessages,
   deleteScheduledMessage,
   updateScheduledMessage,
-  ScheduledMessage,
+  type ScheduledMessageWithContact,
 } from '@/services/scheduled_messages'
 import { useRealtime } from '@/hooks/use-realtime'
 import { useToast } from '@/hooks/use-toast'
@@ -32,7 +32,7 @@ import {
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 
 export default function ScheduledMessages() {
-  const [messages, setMessages] = useState<ScheduledMessage[]>([])
+  const [messages, setMessages] = useState<ScheduledMessageWithContact[]>([])
   const [loading, setLoading] = useState(true)
   const { toast } = useToast()
 
@@ -167,7 +167,12 @@ export default function ScheduledMessages() {
                         key={msg.id}
                         className="border-border hover:bg-accent transition-colors"
                       >
-                        <TableCell className="font-medium">+{msg.remote_sender}</TableCell>
+                        <TableCell className="font-medium">
+                          <span>{msg.contact_name || msg.remote_sender}</span>
+                          {msg.contact_name && (
+                            <span className="block text-xs text-muted-foreground font-normal">{msg.remote_sender}</span>
+                          )}
+                        </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
                             <Avatar className="h-6 w-6 rounded-md bg-blue-500/20 border border-blue-500/30">
