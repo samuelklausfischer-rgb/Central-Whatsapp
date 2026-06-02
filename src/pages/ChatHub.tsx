@@ -54,6 +54,8 @@ export default function ChatHub() {
   const [contacts, setContacts] = useState<any[]>([])
   const [selectedContact, setSelectedContact] = useState<string | null>(null)
   const [userStates, setUserStates] = useState<ConversationUserState[]>([])
+  const [showArchived, setShowArchived] = useState(false)
+  const [isSheetOpen, setIsSheetOpen] = useState(false)
 
   useEffect(() => {
     getContacts()
@@ -183,6 +185,11 @@ export default function ChatHub() {
     }
   })
 
+  const handleOpenInfo = useCallback((deviceId: string, remoteSender: string) => {
+    setSelectedContact(remoteSender)
+    setIsSheetOpen(true)
+  }, [])
+
   const conversations = useMemo(() => {
     const map = new Map<string, any>()
     messages.forEach((m) => {
@@ -224,16 +231,19 @@ export default function ChatHub() {
           conv.unread_count = 0
         }
 
+        conv.pinned = state?.pinned ?? false
+        conv.archived = state?.archived ?? false
+
         if (conv.lastMessage?.sender_name && conv.lastMessage.direction === 'inbound') {
           conv.sender_name = conv.lastMessage.sender_name
         }
         conv.pendingReply = conv.lastMessage?.direction === 'inbound'
         return conv
       })
-      .sort(
-        (a, b) =>
-          new Date(b.lastMessage.created_at).getTime() - new Date(a.lastMessage.created_at).getTime(),
-      )
+      .sort((a, b) => {
+        if (a.pinned !== b.pinned) return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)
+        return new Date(b.lastMessage.created_at).getTime() - new Date(a.lastMessage.created_at).getTime()
+      })
   }, [messages, userStates, selectedDeviceId])
 
   const selectedDevice = devices.find((d) => d.id === selectedDeviceId)
@@ -313,6 +323,10 @@ export default function ChatHub() {
             selectedContact={selectedContact}
             onSelectContact={setSelectedContact}
             isMobile={true}
+            conversationStates={userStates}
+            onOpenInfo={handleOpenInfo}
+            showArchived={showArchived}
+            onToggleArchived={() => setShowArchived(!showArchived)}
           />
         ) : (
           <div
@@ -328,6 +342,10 @@ export default function ChatHub() {
               selectedContact={selectedContact}
               onSelectContact={setSelectedContact}
               isMobile={false}
+              conversationStates={userStates}
+              onOpenInfo={handleOpenInfo}
+              showArchived={showArchived}
+              onToggleArchived={() => setShowArchived(!showArchived)}
             />
             <div
               className="absolute right-0 top-0 bottom-0 w-4 cursor-col-resize z-20 -mr-2"
@@ -346,6 +364,8 @@ export default function ChatHub() {
           contacts={contacts}
           onBack={() => setSelectedContact(null)}
           isMobile={isMobile}
+          sheetOpen={isSheetOpen}
+          onSheetOpenChange={setIsSheetOpen}
         />
       )}
     </div>

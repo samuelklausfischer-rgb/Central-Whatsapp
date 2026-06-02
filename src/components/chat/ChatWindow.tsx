@@ -253,7 +253,7 @@ const renderMessage = (content: string, isMe: boolean) => {
   })
 }
 
-export function ChatWindow({ device, contact, conversation, contacts, onBack, isMobile }: any) {
+export function ChatWindow({ device, contact, conversation, contacts, onBack, isMobile, sheetOpen, onSheetOpenChange }: any) {
   const { user } = useAuth()
   const { addTask } = useAppStore()
   const { toast } = useToast()
@@ -306,7 +306,6 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [deleteConfirmMsg, setDeleteConfirmMsg] = useState<any>(null)
   const [viewers, setViewers] = useState<ConversationViewer[]>([])
-  const [isSheetOpen, setIsSheetOpen] = useState(false)
 
   const messages = conversation?.messages || []
 
@@ -380,10 +379,10 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
   }, [contact, conversation?.unread_count, device])
 
   useEffect(() => {
-    if (isSheetOpen && device && contact) {
+    if (sheetOpen && device && contact) {
       getConversationViewers(device.id, contact).then(setViewers)
     }
-  }, [isSheetOpen, device, contact])
+  }, [sheetOpen, device, contact])
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -854,7 +853,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
               )}
             </PopoverContent>
           </Popover>
-          <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
+          <Sheet open={sheetOpen} onOpenChange={onSheetOpenChange}>
             <SheetTrigger asChild>
               <Button
                 variant="ghost"

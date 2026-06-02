@@ -12,9 +12,10 @@ import { SmartAvatar } from '@/components/chat/SmartAvatar'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { format } from 'date-fns'
-import { Check, CheckCheck, Smartphone, Search, X, MessageCircle, Mail } from 'lucide-react'
+import { Check, CheckCheck, Smartphone, Search, X, MessageCircle, Pin, Archive } from 'lucide-react'
 import { resolveContact } from '@/services/contacts'
-import { markConversationUnread } from '@/services/conversation_states'
+import { ConversationActionsMenu } from '@/components/chat/ConversationActionsMenu'
+import type { ConversationUserState } from '@/services/conversation_states'
 
 export interface ChatListProps {
   devices: any[]
@@ -25,6 +26,10 @@ export interface ChatListProps {
   selectedContact: string | null
   onSelectContact: (id: string) => void
   isMobile: boolean
+  conversationStates: ConversationUserState[]
+  onOpenInfo: (deviceId: string, remoteSender: string) => void
+  showArchived: boolean
+  onToggleArchived: () => void
 }
 
 const isGroupJid = (jid?: string) => Boolean(jid?.includes('@g.us'))
@@ -62,6 +67,10 @@ export function ChatList({
   selectedContact,
   onSelectContact,
   isMobile,
+  conversationStates,
+  onOpenInfo,
+  showArchived,
+  onToggleArchived,
 }: ChatListProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [showUnrespondedOnly, setShowUnrespondedOnly] = useState(false)
@@ -72,8 +81,22 @@ export function ChatList({
     [devices, selectedDeviceId],
   )
 
+  const statesByKey = useMemo(() => {
+    const map = new Map<string, ConversationUserState>()
+    conversationStates.forEach((s) => {
+      map.set(`${s.device_id}:${s.remote_sender}`, s)
+    })
+    return map
+  }, [conversationStates])
+
   const filteredConversations = useMemo(() => {
     let filtered = conversations
+    if (!showArchived) {
+      filtered = filtered.filter((conv) => {
+        const state = selectedDeviceId ? statesByKey.get(`${selectedDeviceId}:${conv.remote_sender}`) : undefined
+        return !state?.archived
+      })
+    }
     if (showUnrespondedOnly) {
       filtered = filtered.filter((conv) => conv.pendingReply)
     }
@@ -86,7 +109,7 @@ export function ChatList({
       })
     }
     return filtered
-  }, [searchQuery, showUnrespondedOnly, conversations, contacts])
+  }, [searchQuery, showUnrespondedOnly, showArchived, conversations, contacts, statesByKey, selectedDeviceId])
 
   const handleResolve = (jid: string) => {
     setResolvedLocally((prev) => new Set(prev).add(jid))
@@ -164,6 +187,18 @@ export function ChatList({
             <MessageCircle className="h-3.5 w-3.5" />
             Não respondidas
           </button>
+          <button
+            onClick={onToggleArchived}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all',
+              showArchived
+                ? 'bg-chat-active text-chat-text border border-chat-border'
+                : 'text-chat-muted border border-transparent hover:bg-chat-hover',
+            )}
+          >
+            <Archive className="h-3.5 w-3.5" />
+            Arquivadas
+          </button>
         </div>
       </div>
 
@@ -174,17 +209,31 @@ export function ChatList({
             const isSelected = selectedContact === conv.remote_sender
             const name = getConversationName(conv, contact)
             const isPendingReply = conv.pendingReply && !resolvedLocally.has(conv.remote_sender)
+            const convState = selectedDeviceId
+              ? statesByKey.get(`${selectedDeviceId}:${conv.remote_sender}`)
+              : undefined
 
             return (
-              <button
+              <div
                 key={conv.remote_sender}
+                role="button"
+                tabIndex={0}
                 onClick={() => onSelectContact(conv.remote_sender)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    onSelectContact(conv.remote_sender)
+                  }
+                }}
                 className={cn(
-                  'group flex items-center gap-3 px-2.5 py-2.5 rounded-md transition-colors duration-150 text-left w-full hover:bg-chat-hover',
+                  'group flex items-center gap-3 px-2.5 py-2.5 rounded-md transition-colors duration-150 text-left w-full hover:bg-chat-hover cursor-pointer',
                   isSelected ? 'bg-chat-active' : '',
                   isPendingReply ? 'border-l-2 border-chat-text/10' : '',
                 )}
               >
+                {convState?.pinned && (
+                  <Pin className="h-3.5 w-3.5 text-chat-muted shrink-0 fill-chat-muted/30" />
+                )}
                 <SmartAvatar
                   jid={conv.remote_sender}
                   name={name}
@@ -223,41 +272,36 @@ export function ChatList({
                   </div>
                 </div>
 
-                {isPendingReply ? (
-                  <div
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleResolve(conv.remote_sender)
-                    }}
-                    className="h-8 w-8 rounded-full bg-green-500/20 border border-green-500/40 flex items-center justify-center hover:bg-green-500/30 shrink-0 cursor-pointer transition-colors"
-                    title="Marcar como respondido"
-                  >
-                    <CheckCheck className="h-4 w-4 text-green-500" />
-                  </div>
-                ) : null}
-
-                {!isPendingReply && conv.unread_count > 0 && (
-                  <div className="h-5 min-w-5 rounded-full bg-primary flex items-center justify-center px-1.5 shrink-0">
-                    <span className="text-[10px] font-bold text-primary-foreground">
-                      {conv.unread_count}
-                    </span>
-                  </div>
-                )}
-                {!isPendingReply && conv.unread_count === 0 && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      if (selectedDeviceId) {
-                        markConversationUnread(selectedDeviceId, conv.remote_sender)
-                      }
-                    }}
-                    className="h-8 w-8 rounded-full flex items-center justify-center hover:bg-chat-hover shrink-0 transition-colors opacity-0 group-hover:opacity-100"
-                    title="Marcar como não lida"
-                  >
-                    <Mail className="h-4 w-4 text-chat-muted" />
-                  </button>
-                )}
-              </button>
+                <div className="flex items-center gap-1 shrink-0">
+                  {isPendingReply ? (
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleResolve(conv.remote_sender)
+                      }}
+                      className="h-8 w-8 rounded-full bg-green-500/20 border border-green-500/40 flex items-center justify-center hover:bg-green-500/30 shrink-0 cursor-pointer transition-colors"
+                      title="Marcar como respondido"
+                    >
+                      <CheckCheck className="h-4 w-4 text-green-500" />
+                    </div>
+                  ) : conv.unread_count > 0 ? (
+                    <div className="h-5 min-w-5 rounded-full bg-primary flex items-center justify-center px-1.5 shrink-0">
+                      <span className="text-[10px] font-bold text-primary-foreground">
+                        {conv.unread_count}
+                      </span>
+                    </div>
+                  ) : null}
+                  {selectedDeviceId && (
+                    <ConversationActionsMenu
+                      deviceId={selectedDeviceId}
+                      remoteSender={conv.remote_sender}
+                      state={convState}
+                      unreadCount={conv.unread_count}
+                      onOpenInfo={onOpenInfo}
+                    />
+                  )}
+                </div>
+              </div>
             )
           })}
           {filteredConversations.length === 0 && searchQuery && (

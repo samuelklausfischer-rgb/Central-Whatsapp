@@ -11,6 +11,10 @@ export interface ConversationUserState {
   manual_unread: boolean
   manual_unread_at: string | null
   marked_unread_by_user_id: string | null
+  pinned: boolean
+  pinned_at: string | null
+  archived: boolean
+  archived_at: string | null
   created_at: string
   updated_at: string
 }
@@ -67,6 +71,34 @@ export async function markConversationUnread(deviceId: string, remoteSender: str
   } catch (err) {
     console.error('Error marking conversation as unread:', err)
   }
+}
+
+async function callRpc<T>(rpcName: string, params: Record<string, unknown>): Promise<T | null> {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || ''
+  const session = await supabase.auth.getSession()
+  const token = session.data.session?.access_token || ''
+  if (!supabaseUrl || !token) return null
+  try {
+    const res = await fetch(`${supabaseUrl}/rest/v1/rpc/${rpcName}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    return data as T
+  } catch (err) {
+    console.error(`Error calling ${rpcName}:`, err)
+    return null
+  }
+}
+
+export async function togglePin(deviceId: string, remoteSender: string): Promise<boolean | null> {
+  return callRpc<boolean>('toggle_conversation_pin', { p_device_id: deviceId, p_remote_sender: remoteSender })
+}
+
+export async function toggleArchive(deviceId: string, remoteSender: string): Promise<boolean | null> {
+  return callRpc<boolean>('toggle_conversation_archive', { p_device_id: deviceId, p_remote_sender: remoteSender })
 }
 
 export interface ConversationViewer {
