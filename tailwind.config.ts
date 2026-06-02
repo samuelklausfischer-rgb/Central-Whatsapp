@@ -90,6 +90,7 @@ export default {
           composer: 'hsl(var(--chat-composer))',
           'bubble-out': 'hsl(var(--chat-bubble-out))',
           'bubble-in': 'hsl(var(--chat-bubble-in))',
+          'bubble-outline': 'hsl(var(--chat-bubble-outline))',
           text: 'hsl(var(--chat-text))',
           muted: 'hsl(var(--chat-muted))',
           border: 'hsl(var(--chat-border))',
