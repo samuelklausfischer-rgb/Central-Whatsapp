@@ -61,6 +61,9 @@
     --chat-shadow: 0 1px 2px rgb(16 24 40 / 0.08);
     --chat-bubble-shadow: 0 1px 0.5px rgb(16 24 40 / 0.12);
     --chat-pattern: radial-gradient(ellipse at 50% -10%, rgba(59, 130, 246, 0.03) 0%, transparent 65%);
+    --chat-conversation-pattern: url('/backgrounds/chat-pattern.webp');
+    --chat-conversation-pattern-opacity: 0.06;
+    --chat-conversation-pattern-size: 360px auto;
   }
 
   .dark {
@@ -118,6 +121,7 @@
     --chat-shadow: 0 1px 2px rgb(0 0 0 / 0.28);
     --chat-bubble-shadow: 0 1px 0.5px rgb(0 0 0 / 0.35);
     --chat-pattern: radial-gradient(ellipse at 50% -10%, rgba(59, 130, 246, 0.045) 0%, transparent 65%);
+    --chat-conversation-pattern-opacity: 0.035;
   }
 
   body {
@@ -130,6 +134,13 @@
 @layer utilities {
   .bg-chat-pattern {
     background-image: var(--chat-pattern);
+  }
+
+  .chat-conversation-bg-layer {
+    background-image: var(--chat-conversation-pattern);
+    background-repeat: repeat;
+    background-size: var(--chat-conversation-pattern-size);
+    opacity: var(--chat-conversation-pattern-opacity);
   }
 
   .scrollbar-hide::-webkit-scrollbar {

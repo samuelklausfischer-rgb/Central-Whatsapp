@@ -922,10 +922,12 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
         </div>
       </div>
 
-      <div
-        className="flex-1 overflow-y-auto px-4 sm:px-8 py-4 space-y-3 bg-chat-conversation bg-chat-pattern custom-scrollbar relative"
-        ref={scrollRef}
-      >
+      <div className="relative flex-1 overflow-hidden bg-chat-conversation">
+        <div className="pointer-events-none absolute inset-0 z-0 chat-conversation-bg-layer" />
+        <div
+          className="relative z-10 h-full overflow-y-auto px-4 sm:px-8 py-4 space-y-3 custom-scrollbar"
+          ref={scrollRef}
+        >
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center px-6">
             <MessageSquare className="h-10 w-10 text-chat-muted/30 mb-3" />
@@ -1308,6 +1310,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
             </div>
           )
         }))}
+        </div>
       </div>
 
       <Dialog open={isTaskModalOpen} onOpenChange={setIsTaskModalOpen}>
