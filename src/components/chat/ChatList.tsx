@@ -95,8 +95,8 @@ export function ChatList({
   return (
     <div
       className={cn(
-        'flex flex-col h-full bg-chat-sidebar border-r border-chat-border',
-        isMobile ? 'w-full' : 'w-80 lg:w-96',
+        'flex flex-col h-full bg-chat-sidebar',
+        isMobile ? 'w-full border-r border-chat-border' : 'w-full',
       )}
     >
       <div className="px-3.5 py-3 border-b border-chat-border flex flex-col gap-3 shrink-0">

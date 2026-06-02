@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Settings2 } from 'lucide-react'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -11,6 +11,12 @@ import { useRealtime } from '@/hooks/use-realtime'
 import { Button } from '@/components/ui/button'
 import { SignatureManagerDialog } from '@/components/SignatureManagerDialog'
 import { useAuth } from '@/hooks/use-auth'
+
+const SIDEBAR_MIN = 300
+const SIDEBAR_MAX = 520
+const SIDEBAR_DEFAULT = 384
+const CHAT_MIN = 420
+const SIDEBAR_STORAGE_KEY = 'central-whats.chatSidebarWidth.v1'
 
 let audioCtx: AudioContext | null = null
 
@@ -204,8 +210,65 @@ export default function ChatHub() {
 
   const [isSignaturesModalOpen, setIsSignaturesModalOpen] = useState(false)
 
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT)
+  const sidebarWidthRef = useRef(sidebarWidth)
+  sidebarWidthRef.current = sidebarWidth
+
+  const clampSidebarWidth = useCallback((width: number, containerWidth?: number) => {
+    let max = SIDEBAR_MAX
+    if (containerWidth) {
+      max = Math.min(SIDEBAR_MAX, containerWidth - CHAT_MIN)
+    }
+    return Math.max(SIDEBAR_MIN, Math.min(width, max))
+  }, [])
+
+  useEffect(() => {
+    const stored = localStorage.getItem(SIDEBAR_STORAGE_KEY)
+    const cw = containerRef.current?.clientWidth
+    if (stored && cw) {
+      const parsed = Number(stored)
+      if (Number.isFinite(parsed)) {
+        setSidebarWidth(clampSidebarWidth(parsed, cw))
+      }
+    }
+  }, [clampSidebarWidth])
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (containerRef.current) {
+        setSidebarWidth((prev) => clampSidebarWidth(prev, containerRef.current!.clientWidth))
+      }
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [clampSidebarWidth])
+
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = sidebarWidthRef.current
+    const containerRect = containerRef.current?.getBoundingClientRect()
+    if (!containerRect) return
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const delta = moveEvent.clientX - startX
+      const newWidth = clampSidebarWidth(startWidth + delta, containerRect.width)
+      setSidebarWidth(newWidth)
+    }
+
+    const handlePointerUp = () => {
+      localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarWidthRef.current))
+      document.removeEventListener('pointermove', handlePointerMove)
+      document.removeEventListener('pointerup', handlePointerUp)
+    }
+
+    document.addEventListener('pointermove', handlePointerMove)
+    document.addEventListener('pointerup', handlePointerUp)
+  }, [clampSidebarWidth])
+
   return (
-    <div className="h-full w-full relative bg-chat-app backdrop-blur-2xl border-chat-border flex rounded-none md:rounded-2xl border overflow-hidden shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
+    <div ref={containerRef} className="h-full w-full relative bg-chat-app backdrop-blur-2xl border-chat-border flex rounded-none md:rounded-2xl border overflow-hidden shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
       {(!isMobile || !selectedContact) && (
         <Button
           variant="outline"
@@ -225,16 +288,40 @@ export default function ChatHub() {
       />
 
       {(!isMobile || !selectedContact) && (
-        <ChatList
-          devices={devices}
-          selectedDeviceId={selectedDeviceId}
-          onSelectDevice={setSelectedDeviceId}
-          conversations={conversations}
-          contacts={contacts}
-          selectedContact={selectedContact}
-          onSelectContact={setSelectedContact}
-          isMobile={isMobile}
-        />
+        isMobile ? (
+          <ChatList
+            devices={devices}
+            selectedDeviceId={selectedDeviceId}
+            onSelectDevice={setSelectedDeviceId}
+            conversations={conversations}
+            contacts={contacts}
+            selectedContact={selectedContact}
+            onSelectContact={setSelectedContact}
+            isMobile={true}
+          />
+        ) : (
+          <div
+            className="flex flex-col h-full bg-chat-sidebar border-r border-chat-border relative flex-shrink-0"
+            style={{ width: sidebarWidth }}
+          >
+            <ChatList
+              devices={devices}
+              selectedDeviceId={selectedDeviceId}
+              onSelectDevice={setSelectedDeviceId}
+              conversations={conversations}
+              contacts={contacts}
+              selectedContact={selectedContact}
+              onSelectContact={setSelectedContact}
+              isMobile={false}
+            />
+            <div
+              className="absolute right-0 top-0 bottom-0 w-4 cursor-col-resize z-20 -mr-2"
+              onPointerDown={handlePointerDown}
+            >
+              <div className="w-1.5 h-full mx-auto hover:bg-blue-400/40 active:bg-blue-500/50 transition-colors rounded-full" />
+            </div>
+          </div>
+        )
       )}
       {(!isMobile || selectedContact) && (
         <ChatWindow
