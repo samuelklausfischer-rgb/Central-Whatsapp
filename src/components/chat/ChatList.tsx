@@ -99,10 +99,10 @@ export function ChatList({
         isMobile ? 'w-full' : 'w-80 lg:w-96',
       )}
     >
-      <div className="p-4 border-b border-chat-border flex flex-col gap-4 shrink-0">
+      <div className="px-3.5 py-3 border-b border-chat-border flex flex-col gap-3 shrink-0">
         <h2 className="text-xl font-semibold text-chat-text">Mensagens</h2>
         <Select value={selectedDeviceId || undefined} onValueChange={onSelectDevice}>
-          <SelectTrigger className="w-full bg-chat-sidebar border-chat-border h-14">
+          <SelectTrigger className="w-full bg-chat-sidebar border-chat-border h-12">
             <SelectValue placeholder="Selecione um dispositivo..." />
           </SelectTrigger>
           <SelectContent>
@@ -167,7 +167,7 @@ export function ChatList({
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="p-2 flex flex-col gap-1">
+        <div className="px-2 py-1 flex flex-col gap-0.5">
           {filteredConversations.map((conv) => {
             const contact = contacts.find((c) => c.remote_jid === conv.remote_sender)
             const isSelected = selectedContact === conv.remote_sender
@@ -179,7 +179,7 @@ export function ChatList({
                 key={conv.remote_sender}
                 onClick={() => onSelectContact(conv.remote_sender)}
                 className={cn(
-                  'flex items-center gap-3 p-3 rounded-lg transition-colors duration-150 text-left w-full hover:bg-chat-hover',
+                  'flex items-center gap-3 px-2.5 py-2.5 rounded-md transition-colors duration-150 text-left w-full hover:bg-chat-hover',
                   isSelected ? 'bg-chat-active' : '',
                   isPendingReply ? 'border-l-2 border-chat-text/10' : '',
                 )}
@@ -189,7 +189,7 @@ export function ChatList({
                   name={name}
                   instanceKey={selectedDevice?.instance_key}
                   contactRecord={contact}
-                  className="h-12 w-12 border border-chat-border bg-chat-sidebar"
+                  className="h-11 w-11 border border-chat-border bg-chat-sidebar"
                   fallbackClassName="text-chat-muted"
                 />
 

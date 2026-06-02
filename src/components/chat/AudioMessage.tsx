@@ -135,7 +135,7 @@ export function AudioMessage({
   const progressPercent = Math.min(Math.max(progress * 100, 0), 100)
   const widthClass = compact
     ? 'w-full min-w-0'
-    : 'w-[min(420px,72vw)] min-w-[240px] max-w-full'
+    : 'w-[min(340px,64vw)] min-w-[210px] max-w-full'
   const playButtonClass = isMe
     ? 'bg-blue-500/20 text-blue-500 hover:bg-blue-500/30'
     : 'bg-blue-500/15 text-blue-500 hover:bg-blue-500/25'
@@ -144,23 +144,23 @@ export function AudioMessage({
   return (
     <div className={`select-none ${widthClass}`}>
       <audio ref={audioRef} src={src} preload="metadata" className="hidden" />
-      <div className="flex items-center gap-2.5 w-full">
+      <div className="flex items-center gap-2 w-full">
         <button
           type="button"
           onClick={handlePlayPause}
-          className={`rounded-full w-10 h-10 flex items-center justify-center flex-shrink-0 transition-all duration-150 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${playButtonClass}`}
+          className={`rounded-full w-9 h-9 flex items-center justify-center flex-shrink-0 transition-all duration-150 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${playButtonClass}`}
           aria-label={isPlaying ? 'Pausar áudio' : 'Tocar áudio'}
         >
           {isPlaying ? (
-            <Pause className="h-[18px] w-[18px]" />
+            <Pause className="h-4 w-4" />
           ) : (
-            <Play className="h-[18px] w-[18px] ml-0.5" />
+            <Play className="h-4 w-4 ml-0.5" />
           )}
         </button>
 
         <div className="min-w-0 flex-1">
           <div
-            className={`relative h-7 flex items-center rounded-full transition-all ${
+            className={`relative h-6 flex items-center rounded-full transition-all ${
               timelineFocused ? 'ring-2 ring-blue-500/30' : ''
             }`}
           >
@@ -194,7 +194,7 @@ export function AudioMessage({
         <button
           type="button"
           onClick={cyclePlaybackRate}
-          className="h-8 min-w-10 rounded-full px-2 text-[11px] font-semibold tabular-nums text-chat-muted hover:text-chat-text hover:bg-chat-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
+          className="h-7 min-w-9 rounded-full px-1.5 text-[10px] font-semibold tabular-nums text-chat-muted hover:text-chat-text hover:bg-chat-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
           aria-label={`Velocidade atual ${playbackRate}x`}
           title="Alterar velocidade"
         >
@@ -205,11 +205,11 @@ export function AudioMessage({
           <button
             type="button"
             onClick={handleDownload}
-            className="h-8 w-8 rounded-full flex items-center justify-center text-chat-muted hover:text-chat-text hover:bg-chat-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
+            className="h-7 w-7 rounded-full flex items-center justify-center text-chat-muted hover:text-chat-text hover:bg-chat-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
             aria-label="Baixar áudio"
             title="Baixar áudio"
           >
-            <Download className="h-4 w-4" />
+            <Download className="h-3.5 w-3.5" />
           </button>
         )}
       </div>

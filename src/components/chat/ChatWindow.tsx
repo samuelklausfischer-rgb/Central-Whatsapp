@@ -763,8 +763,8 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
 
   return (
     <div className="flex flex-col h-full bg-transparent flex-1 relative min-w-0">
-      <div className="h-[72px] border-b border-chat-border bg-chat-header shadow-chat flex items-center justify-between px-6 sticky top-0 z-10 flex-shrink-0">
-        <div className="flex items-center gap-4 min-w-0">
+      <div className="h-[64px] border-b border-chat-border bg-chat-header shadow-chat flex items-center justify-between px-4 sm:px-5 sticky top-0 z-10 flex-shrink-0">
+        <div className="flex items-center gap-3 min-w-0">
           {isMobile && (
             <Button
               variant="ghost"
@@ -780,7 +780,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
             name={displayName}
             instanceKey={device?.instance_key}
             contactRecord={contactRecord}
-            className="h-11 w-11 border border-chat-border shadow-chat flex-shrink-0 transition-transform duration-300 hover:scale-105"
+            className="h-10 w-10 border border-chat-border shadow-chat flex-shrink-0 transition-transform duration-300 hover:scale-105"
             fallbackClassName="bg-chat-panel text-chat-text"
           />
           <div className="min-w-0">
@@ -925,7 +925,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
       <div className="relative flex-1 overflow-hidden bg-chat-conversation">
         <div className="pointer-events-none absolute inset-0 z-0 chat-conversation-bg-layer" />
         <div
-          className="relative z-10 h-full overflow-y-auto px-4 sm:px-8 py-4 space-y-3 custom-scrollbar"
+          className="relative z-10 h-full overflow-y-auto px-5 sm:px-10 lg:px-12 py-4 space-y-3 custom-scrollbar"
           ref={scrollRef}
         >
         {messages.length === 0 ? (
@@ -970,7 +970,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                   />
                 )}
                 <div
-                  className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-2.5 shadow-chat-bubble relative group transition-all duration-150 ${
+                  className={`max-w-[88%] sm:max-w-[78%] rounded-2xl px-3.5 py-2 shadow-chat-bubble relative group transition-all duration-150 ${
                     isMe
                       ? 'bg-chat-bubble-out text-chat-text rounded-br-sm border border-chat-bubble-outline'
                       : 'bg-chat-bubble-in text-chat-text rounded-bl-sm'
@@ -1297,14 +1297,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                    </div>
                 </div>
                 {isMe && (
-                  <SmartAvatar
-                    jid="me"
-                    name={user?.name || 'Você'}
-                    isInstance={true}
-                    deviceRecord={device}
-                    className="h-7 w-7 border border-chat-border shadow-sm flex-shrink-0 mb-1 hidden sm:block"
-                    fallbackClassName="bg-chat-panel text-chat-muted text-xs"
-                  />
+                  <div className="w-7 flex-shrink-0 hidden sm:block" />
                 )}
               </div>
             </div>
@@ -1366,21 +1359,21 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
         </DialogContent>
       </Dialog>
 
-      <div className="flex flex-col bg-chat-composer border-t border-chat-border shadow-chat flex-shrink-0 p-4 z-10 relative">
+      <div className="flex flex-col bg-chat-composer border-t border-chat-border shadow-chat flex-shrink-0 px-4 py-3 z-10 relative">
         {(device?.signature || user?.signature) && (
-          <div className="px-2 pb-3 text-[12px] text-chat-muted flex flex-col gap-1.5">
+          <div className="px-2 pb-2 text-[11px] text-chat-muted/75 flex flex-col gap-1">
             <div className="flex items-center gap-1.5">
-              <Info className="h-3.5 w-3.5 text-chat-muted/45" />
+              <Info className="h-3 w-3 text-chat-muted/35" />
               <span>
-                Você está respondendo como{' '}
-                <span className="font-semibold text-chat-text/80">
+                Enviando como{' '}
+                <span className="font-semibold text-chat-text/70">
                   {device?.signature || user?.signature}
                 </span>
               </span>
             </div>
           </div>
         )}
-        <form onSubmit={handleSend} className="flex flex-col gap-3 max-w-4xl mx-auto w-full">
+        <form onSubmit={handleSend} className="flex flex-col gap-2.5 max-w-4xl mx-auto w-full">
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-2 px-3 py-2 bg-chat-panel border border-chat-border rounded-xl">
               {attachments.map((file, index) => (
@@ -1440,7 +1433,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="text-chat-muted hover:text-blue-400 hover:bg-chat-hover h-[48px] w-[48px] rounded-full flex-shrink-0 transition-all duration-300 hover:scale-105 active:scale-95"
+                  className="text-chat-muted hover:text-blue-400 hover:bg-chat-hover h-11 w-11 rounded-full flex-shrink-0 transition-all duration-300 hover:scale-105 active:scale-95"
                 >
                   <Zap className="h-5 w-5" />
                 </Button>
@@ -1498,12 +1491,12 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
               variant="ghost"
               size="icon"
               onClick={() => fileInputRef.current?.click()}
-              className="text-chat-muted hover:text-chat-text hover:bg-chat-hover h-[48px] w-[48px] rounded-full flex-shrink-0 transition-all duration-300 hover:scale-105 active:scale-95"
+              className="text-chat-muted hover:text-chat-text hover:bg-chat-hover h-11 w-11 rounded-full flex-shrink-0 transition-all duration-300 hover:scale-105 active:scale-95"
             >
               <Paperclip className="h-5 w-5" />
             </Button>
             {isRecording || audioUrl ? (
-              <div className="flex-1 bg-chat-panel border border-chat-border rounded-2xl flex items-center min-h-[56px] px-4 overflow-hidden">
+              <div className="flex-1 bg-chat-panel border border-chat-border rounded-2xl flex items-center min-h-[48px] px-4 overflow-hidden">
                 {audioUrl ? (
                   <div className="flex items-center gap-3 w-full">
                     <AudioMessage
@@ -1556,7 +1549,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
             ) : (
               <div className="flex-1 bg-chat-panel border border-chat-border hover:border-chat-border rounded-2xl flex items-end focus-within:ring-1 focus-within:ring-blue-400/30 focus-within:border-blue-400/30 transition-all duration-300 overflow-hidden shadow-inner group">
                 <textarea
-                  className="flex-1 bg-transparent border-none min-h-[48px] max-h-[120px] px-4 py-3 text-[15px] text-chat-text placeholder:text-chat-muted focus-visible:outline-none resize-none leading-relaxed custom-scrollbar pt-3.5"
+                  className="flex-1 bg-transparent border-none min-h-[44px] max-h-[120px] px-4 py-2.5 text-[15px] text-chat-text placeholder:text-chat-muted focus-visible:outline-none resize-none leading-relaxed custom-scrollbar pt-3"
                   placeholder="Digite uma mensagem..."
                   value={msgText}
                   onChange={(e) => setMsgText(e.target.value)}
@@ -1575,7 +1568,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                       variant="ghost"
                       size="icon"
                       disabled={isAiLoading}
-                      className="text-chat-muted hover:text-blue-400 hover:bg-transparent h-[48px] w-[48px] flex-shrink-0 transition-all duration-300 hover:scale-110 active:scale-95"
+                      className="text-chat-muted hover:text-blue-400 hover:bg-transparent h-11 w-11 flex-shrink-0 transition-all duration-300 hover:scale-110 active:scale-95"
                     >
                       {isAiLoading ? (
                         <Loader2 className="h-5 w-5 animate-spin text-blue-400" />
@@ -1620,7 +1613,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="text-chat-muted hover:text-chat-text hover:bg-transparent h-[48px] w-[48px] flex-shrink-0 transition-all duration-300 hover:scale-110 active:scale-95"
+                  className="text-chat-muted hover:text-chat-text hover:bg-transparent h-11 w-11 flex-shrink-0 transition-all duration-300 hover:scale-110 active:scale-95"
                 >
                   <Smile className="h-5 w-5" />
                 </Button>
@@ -1669,7 +1662,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                   variant="ghost"
                   size="icon"
                   disabled={!msgText.trim() && attachments.length === 0 && !audioBlob}
-                  className="rounded-full flex-shrink-0 h-[48px] w-[48px] bg-transparent text-chat-muted hover:text-chat-text hover:bg-chat-hover transition-all duration-300 hover:scale-105 active:scale-95 disabled:opacity-50 disabled:hover:scale-100"
+                  className="rounded-full flex-shrink-0 h-11 w-11 bg-transparent text-chat-muted hover:text-chat-text hover:bg-chat-hover transition-all duration-300 hover:scale-105 active:scale-95 disabled:opacity-50 disabled:hover:scale-100"
                 >
                   <CalendarClock className="h-5 w-5" />
                 </Button>
@@ -1748,7 +1741,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                 type="submit"
                 size="icon"
                 disabled={isSending || (!msgText.trim() && attachments.length === 0 && !audioBlob)}
-                className="rounded-full flex-shrink-0 h-[48px] w-[48px] bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/30 hover:shadow-blue-600/50 transition-all duration-300 hover:scale-105 active:scale-95 disabled:opacity-50 disabled:shadow-none disabled:hover:scale-100"
+                className="rounded-full flex-shrink-0 h-11 w-11 bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/30 hover:shadow-blue-600/50 transition-all duration-300 hover:scale-105 active:scale-95 disabled:opacity-50 disabled:shadow-none disabled:hover:scale-100"
               >
                 {isSending ? (
                   <Loader2 className="h-5 w-5 animate-spin ml-0.5" />
@@ -1762,7 +1755,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                 size="icon"
                 onClick={startRecording}
                 disabled={isSending}
-                className="rounded-full flex-shrink-0 h-[48px] w-[48px] bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/30 hover:shadow-blue-600/50 transition-all duration-300 hover:scale-105 active:scale-95 disabled:opacity-50 disabled:shadow-none disabled:hover:scale-100"
+                className="rounded-full flex-shrink-0 h-11 w-11 bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/30 hover:shadow-blue-600/50 transition-all duration-300 hover:scale-105 active:scale-95 disabled:opacity-50 disabled:shadow-none disabled:hover:scale-100"
               >
                 <Mic className="h-5 w-5" />
               </Button>

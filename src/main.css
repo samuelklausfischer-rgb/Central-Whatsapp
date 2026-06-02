@@ -45,7 +45,7 @@
     --chat-app: 220 14% 95%;
     --chat-sidebar: 0 0% 100%;
     --chat-panel: 220 20% 98%;
-    --chat-conversation: 38 28% 91%;
+    --chat-conversation: 36 31% 90%;
     --chat-header: 220 14% 95%;
     --chat-composer: 220 14% 95%;
 
@@ -63,7 +63,7 @@
     --chat-bubble-shadow: 0 1px 0.5px rgb(16 24 40 / 0.12);
     --chat-pattern: radial-gradient(ellipse at 50% -10%, rgba(59, 130, 246, 0.03) 0%, transparent 65%);
     --chat-conversation-pattern: url('/backgrounds/chat-pattern.webp');
-    --chat-conversation-pattern-opacity: 0.045;
+    --chat-conversation-pattern-opacity: 0.038;
     --chat-conversation-pattern-size: 360px auto;
   }
 
