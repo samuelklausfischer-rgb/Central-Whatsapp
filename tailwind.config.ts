@@ -81,6 +81,21 @@ export default {
           4: 'hsl(var(--chart-4))',
           5: 'hsl(var(--chart-5))',
         },
+        chat: {
+          app: 'hsl(var(--chat-app))',
+          sidebar: 'hsl(var(--chat-sidebar))',
+          panel: 'hsl(var(--chat-panel))',
+          conversation: 'hsl(var(--chat-conversation))',
+          header: 'hsl(var(--chat-header))',
+          composer: 'hsl(var(--chat-composer))',
+          'bubble-out': 'hsl(var(--chat-bubble-out))',
+          'bubble-in': 'hsl(var(--chat-bubble-in))',
+          text: 'hsl(var(--chat-text))',
+          muted: 'hsl(var(--chat-muted))',
+          border: 'hsl(var(--chat-border))',
+          hover: 'hsl(var(--chat-hover))',
+          active: 'hsl(var(--chat-active))',
+        },
       },
       borderRadius: {
         lg: 'var(--radius)',
@@ -94,6 +109,8 @@ export default {
       boxShadow: {
         subtle: '0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px 0 rgba(0, 0, 0, 0.03)',
         elevation: '0 4px 20px rgba(0, 0, 0, 0.05)',
+        chat: 'var(--chat-shadow)',
+        'chat-bubble': 'var(--chat-bubble-shadow)',
       },
       transitionTimingFunction: {
         apple: 'cubic-bezier(0.42, 0, 0.58, 1)',

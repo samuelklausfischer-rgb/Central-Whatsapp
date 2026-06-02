@@ -205,16 +205,16 @@ export default function ChatHub() {
   const [isSignaturesModalOpen, setIsSignaturesModalOpen] = useState(false)
 
   return (
-    <div className="h-full w-full relative bg-card backdrop-blur-2xl border-border flex rounded-none md:rounded-2xl border overflow-hidden shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
+    <div className="h-full w-full relative bg-chat-app backdrop-blur-2xl border-chat-border flex rounded-none md:rounded-2xl border overflow-hidden shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
       {(!isMobile || !selectedContact) && (
         <Button
           variant="outline"
           size="icon"
-          className="absolute bottom-6 left-6 z-50 h-12 w-12 rounded-full shadow-2xl bg-card border-border backdrop-blur-xl hover:bg-accent transition-all hover:scale-105"
+          className="absolute bottom-6 left-6 z-50 h-12 w-12 rounded-full shadow-chat bg-chat-panel border-chat-border backdrop-blur-xl hover:bg-chat-hover transition-all hover:scale-105"
           onClick={() => setIsSignaturesModalOpen(true)}
           title="Gerenciar Assinaturas de Dispositivos"
         >
-          <Settings2 className="h-5 w-5 text-foreground" />
+          <Settings2 className="h-5 w-5 text-chat-text" />
         </Button>
       )}
 

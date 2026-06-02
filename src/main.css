@@ -41,6 +41,26 @@
     --chart-3: 38 92% 50%;
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
+
+    --chat-app: 220 14% 95%;
+    --chat-sidebar: 0 0% 100%;
+    --chat-panel: 220 20% 98%;
+    --chat-conversation: 220 23% 98%;
+    --chat-header: 0 0% 100%;
+    --chat-composer: 0 0% 100%;
+
+    --chat-bubble-out: 112 87% 91%;
+    --chat-bubble-in: 0 0% 100%;
+
+    --chat-text: 221 39% 11%;
+    --chat-muted: 220 9% 46%;
+    --chat-border: 220 13% 91%;
+    --chat-hover: 220 14% 96%;
+    --chat-active: 145 52% 92%;
+
+    --chat-shadow: 0 1px 2px rgb(16 24 40 / 0.08);
+    --chat-bubble-shadow: 0 1px 0.5px rgb(16 24 40 / 0.12);
+    --chat-pattern: radial-gradient(ellipse at 50% -10%, rgba(59, 130, 246, 0.03) 0%, transparent 65%);
   }
 
   .dark {
@@ -78,6 +98,26 @@
     --chart-3: 38 92% 50%;
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
+
+    --chat-app: 203 31% 10%;
+    --chat-sidebar: 203 31% 10%;
+    --chat-panel: 200 22% 16%;
+    --chat-conversation: 200 19% 12%;
+    --chat-header: 200 22% 16%;
+    --chat-composer: 200 22% 16%;
+
+    --chat-bubble-out: 169 100% 18%;
+    --chat-bubble-in: 200 22% 19%;
+
+    --chat-text: 180 12% 93%;
+    --chat-muted: 196 13% 66%;
+    --chat-border: 199 21% 21%;
+    --chat-hover: 200 19% 19%;
+    --chat-active: 169 70% 20%;
+
+    --chat-shadow: 0 1px 2px rgb(0 0 0 / 0.28);
+    --chat-bubble-shadow: 0 1px 0.5px rgb(0 0 0 / 0.35);
+    --chat-pattern: radial-gradient(ellipse at 50% -10%, rgba(59, 130, 246, 0.045) 0%, transparent 65%);
   }
 
   body {
@@ -88,6 +128,10 @@
 }
 
 @layer utilities {
+  .bg-chat-pattern {
+    background-image: var(--chat-pattern);
+  }
+
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
   }

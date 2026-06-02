@@ -79,32 +79,32 @@ export function ChatList({
   return (
     <div
       className={cn(
-        'flex flex-col h-full bg-card border-r border-border',
+        'flex flex-col h-full bg-chat-sidebar border-r border-chat-border',
         isMobile ? 'w-full' : 'w-80 lg:w-96',
       )}
     >
-      <div className="p-4 border-b border-border flex flex-col gap-4 shrink-0">
-        <h2 className="text-xl font-semibold text-foreground">Mensagens</h2>
+      <div className="p-4 border-b border-chat-border flex flex-col gap-4 shrink-0">
+        <h2 className="text-xl font-semibold text-chat-text">Mensagens</h2>
         <Select value={selectedDeviceId || undefined} onValueChange={onSelectDevice}>
-          <SelectTrigger className="w-full bg-card border-border h-14">
+          <SelectTrigger className="w-full bg-chat-sidebar border-chat-border h-14">
             <SelectValue placeholder="Selecione um dispositivo..." />
           </SelectTrigger>
           <SelectContent>
             {devices.map((device) => (
               <SelectItem key={device.id} value={device.id} className="py-3">
                 <div className="flex items-center gap-3">
-                  <Avatar className="h-8 w-8 bg-card">
+                  <Avatar className="h-8 w-8 bg-chat-panel">
                     <AvatarImage src={device.avatar_url} />
                     <AvatarFallback>
-                      <Smartphone className="h-4 w-4 text-muted-foreground" />
+                      <Smartphone className="h-4 w-4 text-chat-muted" />
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex flex-col text-left">
-                    <span className="text-sm font-medium leading-none text-foreground">
+                    <span className="text-sm font-medium leading-none text-chat-text">
                       {device.name}
                     </span>
                     {device.department && (
-                      <span className="text-xs text-muted-foreground mt-1.5">
+                      <span className="text-xs text-chat-muted mt-1.5">
                         {device.department}
                       </span>
                     )}
@@ -116,17 +116,17 @@ export function ChatList({
         </Select>
 
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-chat-muted" />
           <Input
             placeholder="Procurar contatos..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9 pr-9 bg-card border-border text-foreground placeholder:text-muted-foreground h-10"
+            className="pl-9 pr-9 bg-chat-panel border-chat-border text-chat-text placeholder:text-chat-muted h-10"
           />
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-accent-foreground transition-colors"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-chat-muted hover:text-chat-text transition-colors"
               title="Limpar busca"
             >
               <X className="h-4 w-4" />
@@ -140,8 +140,8 @@ export function ChatList({
             className={cn(
               'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all',
               showUnrespondedOnly
-                ? 'bg-primary/15 text-primary border border-primary/30'
-                : 'bg-muted text-muted-foreground border border-transparent hover:bg-accent',
+                ? 'bg-chat-active text-chat-text border border-chat-border'
+                : 'text-chat-muted border border-transparent hover:bg-chat-hover',
             )}
           >
             <MessageCircle className="h-3.5 w-3.5" />
@@ -163,9 +163,9 @@ export function ChatList({
                 key={conv.remote_sender}
                 onClick={() => onSelectContact(conv.remote_sender)}
                 className={cn(
-                  'flex items-center gap-3 p-3 rounded-xl transition-all duration-200 text-left w-full hover:bg-accent border-l-2 border-transparent',
-                  isSelected ? 'bg-accent' : '',
-                  isPendingReply ? 'border-primary/40 animate-pulse-border' : '',
+                  'flex items-center gap-3 p-3 rounded-lg transition-colors duration-150 text-left w-full hover:bg-chat-hover',
+                  isSelected ? 'bg-chat-active' : '',
+                  isPendingReply ? 'border-l-2 border-chat-text/10' : '',
                 )}
               >
                 <SmartAvatar
@@ -173,14 +173,14 @@ export function ChatList({
                   name={name}
                   instanceKey={selectedDevice?.instance_key}
                   contactRecord={contact}
-                  className="h-12 w-12 border border-border bg-card"
-                  fallbackClassName="text-muted-foreground"
+                  className="h-12 w-12 border border-chat-border bg-chat-sidebar"
+                  fallbackClassName="text-chat-muted"
                 />
 
                 <div className="flex-1 overflow-hidden">
                   <div className="flex justify-between items-baseline mb-1">
-                    <h3 className="font-medium text-foreground truncate pr-2">{name}</h3>
-                    <span className="text-xs text-muted-foreground whitespace-nowrap">
+                    <h3 className="font-medium text-chat-text truncate pr-2">{name}</h3>
+                    <span className="text-xs text-chat-muted whitespace-nowrap">
                       {format(new Date(conv.lastMessage.created_at), 'HH:mm')}
                     </span>
                   </div>
@@ -190,12 +190,12 @@ export function ChatList({
                       (conv.lastMessage.is_read ? (
                         <CheckCheck className="h-3 w-3 text-blue-400 shrink-0" />
                       ) : (
-                        <Check className="h-3 w-3 text-muted-foreground shrink-0" />
+                        <Check className="h-3 w-3 text-chat-muted shrink-0" />
                       ))}
                     <p
                       className={cn(
                         'text-sm truncate',
-                        conv.unread_count > 0 ? 'text-foreground font-medium' : 'text-muted-foreground',
+                        conv.unread_count > 0 ? 'text-chat-text font-medium' : 'text-chat-muted',
                       )}
                     >
                       {conv.lastMessage.content}
@@ -230,18 +230,33 @@ export function ChatList({
             )
           })}
           {filteredConversations.length === 0 && searchQuery && (
-            <div className="text-center p-8 text-muted-foreground text-sm">
-              Nenhum contato encontrado
+            <div className="flex flex-col items-center justify-center py-12 text-center px-6">
+              <Search className="h-8 w-8 text-chat-muted/30 mb-3" />
+              <p className="text-chat-muted text-sm leading-relaxed">
+                Não encontramos conversas com esse termo.
+              </p>
+              <p className="text-chat-muted/60 text-xs mt-1">
+                Tente buscar por nome, número ou mensagem.
+              </p>
             </div>
           )}
           {conversations.length === 0 && !searchQuery && selectedDeviceId && (
-            <div className="text-center p-8 text-muted-foreground text-sm">
-              Nenhuma conversa encontrada neste dispositivo.
+            <div className="flex flex-col items-center justify-center py-12 text-center px-6">
+              <MessageCircle className="h-8 w-8 text-chat-muted/30 mb-3" />
+              <p className="text-chat-muted text-sm leading-relaxed">
+                Nenhuma conversa por aqui.
+              </p>
+              <p className="text-chat-muted/60 text-xs mt-1">
+                As mensagens aparecerão automaticamente.
+              </p>
             </div>
           )}
           {conversations.length === 0 && !searchQuery && !selectedDeviceId && (
-            <div className="text-center p-8 text-muted-foreground text-sm">
-              Selecione um dispositivo para carregar as mensagens.
+            <div className="flex flex-col items-center justify-center py-12 text-center px-6">
+              <Smartphone className="h-8 w-8 text-chat-muted/30 mb-3" />
+              <p className="text-chat-muted text-sm leading-relaxed">
+                Selecione um dispositivo para começar.
+              </p>
             </div>
           )}
         </div>
