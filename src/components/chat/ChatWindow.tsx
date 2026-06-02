@@ -134,7 +134,7 @@ const formatInline = (text: string, isMe: boolean): React.ReactNode => {
 const isMediaPlaceholder = (content?: string) => {
   if (!content) return false
   return (
-    ['[Anexo]', '[Imagem]', '[Vídeo]', '[Áudio]', '[Música]', '[Figurinha]', '[Mensagem de mídia]'].includes(
+    ['[Anexo]', '[Imagem]', '[Vídeo]', '[Áudio]', '[Ãudio]', '[Música]', '[Figurinha]', '[Mensagem de mídia]'].includes(
       content,
     ) || content.startsWith('[Documento:')
   )
@@ -1151,7 +1151,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                     <div className="text-[13px] italic text-chat-muted/60">
                       [Mensagem apagada]
                     </div>
-                  ) : msg.content !== '[Anexo]' && msg.content !== '[Áudio]' && !(messageAttachments.length > 0 && isMediaPlaceholder(msg.content)) ? (
+                  ) : msg.content !== '[Anexo]' && msg.content !== '[Áudio]' && msg.content !== '[Ãudio]' && !(messageAttachments.length > 0 && isMediaPlaceholder(msg.content)) ? (
                     <div className="text-[15px] leading-relaxed break-words">
                       {renderMessage(msg.content, isMe)}
                     </div>
