@@ -30,7 +30,7 @@ VITE_SUPABASE_URL=https://seu-projeto.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_sua_chave_aqui
 ```
 
-No Dockerfile, as variaveis `VITE_*` devem ser enviadas como build args. A build gera `/env-config.js` dentro da imagem com esses valores.
+No Dockerfile, as variaveis `VITE_*` possuem defaults de producao e tambem podem ser sobrescritas por build args. A build gera `/env-config.js` dentro da imagem com esses valores.
 
 ## Desenvolvimento Local
 
@@ -53,7 +53,13 @@ npm run preview
 
 ## Docker Local
 
-Build com variaveis em build time:
+Build local usando os defaults de producao:
+
+```bash
+docker build -t central-whats .
+```
+
+Build local sobrescrevendo os defaults:
 
 ```bash
 docker build \
@@ -75,14 +81,14 @@ Abra `http://localhost:8080`.
 1. Crie um novo app a partir do repositorio GitHub.
 2. Selecione deploy por `Dockerfile`.
 3. Use porta interna `80`.
-4. Configure as variaveis como build args:
+4. Faca rebuild da imagem. O Dockerfile ja possui defaults de producao para:
 
 | Variavel | Obrigatoria | Observacao |
 | --- | --- | --- |
 | `VITE_SUPABASE_URL` | Sim | URL do projeto Supabase |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | Sim | Chave publishable/anon do Supabase |
 
-Essas variaveis precisam estar disponiveis durante o build da imagem. Depois do rebuild, verifique `/env-config.js` no navegador e confirme que os valores nao estao vazios.
+Se o EasyPanel oferecer build args, voce pode sobrescrever esses valores. Caso contrario, o rebuild usa os defaults do Dockerfile. Depois do rebuild, verifique `/env-config.js` no navegador e confirme que os valores nao estao vazios.
 
 ## Backend E Funcoes
 
