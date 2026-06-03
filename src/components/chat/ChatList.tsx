@@ -15,6 +15,12 @@ import { format } from 'date-fns'
 import { Check, CheckCheck, Smartphone, Search, X, MessageCircle, Pin, Archive } from 'lucide-react'
 import { resolveContact } from '@/services/contacts'
 import { ConversationActionsMenu } from '@/components/chat/ConversationActionsMenu'
+import { ConversationActionsContent } from '@/components/chat/ConversationActionsContent'
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+} from '@/components/ui/context-menu'
 import type { ConversationUserState } from '@/services/conversation_states'
 
 export interface ChatListProps {
@@ -215,23 +221,24 @@ export function ChatList({
             const conversationDeviceId = selectedDeviceId || conv.lastMessage?.device_id
 
             return (
-              <div
-                key={conv.remote_sender}
-                role="button"
-                tabIndex={0}
-                onClick={() => onSelectContact(conv.remote_sender)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    onSelectContact(conv.remote_sender)
-                  }
-                }}
-                className={cn(
-                  'group relative flex items-center gap-3 px-2.5 py-2.5 rounded-md transition-colors duration-150 text-left w-full hover:bg-chat-hover cursor-pointer',
-                  isSelected ? 'bg-chat-active' : '',
-                  isPendingReply ? 'border-l-2 border-chat-text/10' : '',
-                )}
-              >
+              <ContextMenu key={conv.remote_sender}>
+                <ContextMenuTrigger asChild>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => onSelectContact(conv.remote_sender)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        onSelectContact(conv.remote_sender)
+                      }
+                    }}
+                    className={cn(
+                      'group relative flex items-center gap-3 px-2.5 py-2.5 rounded-md transition-colors duration-150 text-left w-full hover:bg-chat-hover cursor-pointer',
+                      isSelected ? 'bg-chat-active' : '',
+                      isPendingReply ? 'border-l-2 border-chat-text/10' : '',
+                    )}
+                  >
                 {convState?.pinned && (
                   <Pin className="h-3.5 w-3.5 text-chat-muted shrink-0 fill-chat-muted/30" />
                 )}
@@ -308,6 +315,20 @@ export function ChatList({
                   </div>
                 )}
               </div>
+                </ContextMenuTrigger>
+                {conversationDeviceId && (
+                  <ContextMenuContent className="z-[80] bg-chat-panel border-chat-border shadow-chat text-chat-text min-w-[160px] rounded-lg py-1 overflow-hidden">
+                    <ConversationActionsContent
+                      deviceId={conversationDeviceId}
+                      remoteSender={conv.remote_sender}
+                      state={convState}
+                      unreadCount={conv.unread_count}
+                      onOpenInfo={onOpenInfo}
+                      mode="context-menu"
+                    />
+                  </ContextMenuContent>
+                )}
+              </ContextMenu>
             )
           })}
           {filteredConversations.length === 0 && searchQuery && (
