@@ -212,6 +212,7 @@ export function ChatList({
             const convState = selectedDeviceId
               ? statesByKey.get(`${selectedDeviceId}:${conv.remote_sender}`)
               : undefined
+            const conversationDeviceId = selectedDeviceId || conv.lastMessage?.device_id
 
             return (
               <div
@@ -226,7 +227,7 @@ export function ChatList({
                   }
                 }}
                 className={cn(
-                  'group flex items-center gap-3 px-2.5 py-2.5 rounded-md transition-colors duration-150 text-left w-full hover:bg-chat-hover cursor-pointer',
+                  'group relative flex items-center gap-3 px-2.5 py-2.5 rounded-md transition-colors duration-150 text-left w-full hover:bg-chat-hover cursor-pointer',
                   isSelected ? 'bg-chat-active' : '',
                   isPendingReply ? 'border-l-2 border-chat-text/10' : '',
                 )}
@@ -246,22 +247,9 @@ export function ChatList({
                 <div className="flex-1 overflow-hidden">
                   <div className="flex justify-between items-baseline mb-1">
                     <h3 className="font-medium text-chat-text truncate pr-2">{name}</h3>
-                    <div className="flex items-center shrink-0 relative">
-                      <span className="text-xs text-chat-muted tabular-nums whitespace-nowrap transition-all duration-150 group-hover:opacity-0">
-                        {format(new Date(conv.lastMessage.created_at), 'HH:mm')}
-                      </span>
-                      {selectedDeviceId && (
-                        <ConversationActionsMenu
-                          deviceId={selectedDeviceId}
-                          remoteSender={conv.remote_sender}
-                          state={convState}
-                          unreadCount={conv.unread_count}
-                          onOpenInfo={onOpenInfo}
-                          isSelected={isSelected}
-                          isMobile={isMobile}
-                        />
-                      )}
-                    </div>
+                    <span className="text-xs text-chat-muted tabular-nums whitespace-nowrap shrink-0">
+                      {format(new Date(conv.lastMessage.created_at), 'HH:mm')}
+                    </span>
                   </div>
 
                   <div className="flex items-center gap-1">
@@ -305,6 +293,20 @@ export function ChatList({
                     </div>
                   ) : null}
                 </div>
+
+                {conversationDeviceId && (
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 z-20">
+                    <ConversationActionsMenu
+                      deviceId={conversationDeviceId}
+                      remoteSender={conv.remote_sender}
+                      state={convState}
+                      unreadCount={conv.unread_count}
+                      onOpenInfo={onOpenInfo}
+                      isSelected={isSelected}
+                      isMobile={isMobile}
+                    />
+                  </div>
+                )}
               </div>
             )
           })}

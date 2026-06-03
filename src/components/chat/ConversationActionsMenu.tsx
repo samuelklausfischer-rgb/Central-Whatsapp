@@ -35,6 +35,8 @@ export function ConversationActionsMenu({
         <DropdownMenuTrigger asChild>
           <button
             onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
             className={cn(
               'h-7 w-7 rounded-full flex items-center justify-center hover:bg-chat-hover/70 shrink-0 transition-all duration-150',
               isMobile ? 'opacity-100' : (isSelected || open) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
