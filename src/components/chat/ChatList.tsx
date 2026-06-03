@@ -246,9 +246,22 @@ export function ChatList({
                 <div className="flex-1 overflow-hidden">
                   <div className="flex justify-between items-baseline mb-1">
                     <h3 className="font-medium text-chat-text truncate pr-2">{name}</h3>
-                    <span className="text-xs text-chat-muted whitespace-nowrap">
-                      {format(new Date(conv.lastMessage.created_at), 'HH:mm')}
-                    </span>
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <span className="text-xs text-chat-muted whitespace-nowrap">
+                        {format(new Date(conv.lastMessage.created_at), 'HH:mm')}
+                      </span>
+                      {selectedDeviceId && (
+                        <ConversationActionsMenu
+                          deviceId={selectedDeviceId}
+                          remoteSender={conv.remote_sender}
+                          state={convState}
+                          unreadCount={conv.unread_count}
+                          onOpenInfo={onOpenInfo}
+                          isSelected={isSelected}
+                          isMobile={isMobile}
+                        />
+                      )}
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-1">
@@ -291,16 +304,6 @@ export function ChatList({
                       </span>
                     </div>
                   ) : null}
-                    {selectedDeviceId && (
-                    <ConversationActionsMenu
-                      deviceId={selectedDeviceId}
-                      remoteSender={conv.remote_sender}
-                      state={convState}
-                      unreadCount={conv.unread_count}
-                      onOpenInfo={onOpenInfo}
-                      isSelected={isSelected}
-                    />
-                  )}
                 </div>
               </div>
             )

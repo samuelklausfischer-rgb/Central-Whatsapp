@@ -6,7 +6,7 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 import { useState } from 'react'
-import { Pin, PinOff, Check, Mail, Info, Archive, ArchiveRestore, MoreVertical } from 'lucide-react'
+import { Pin, PinOff, Check, Mail, Info, Archive, ArchiveRestore, ChevronDown } from 'lucide-react'
 import { togglePin, toggleArchive, markConversationRead, markConversationUnread } from '@/services/conversation_states'
 import type { ConversationUserState } from '@/services/conversation_states'
 import { cn } from '@/lib/utils'
@@ -17,6 +17,7 @@ interface ConversationActionsMenuProps {
   unreadCount: number
   onOpenInfo: (deviceId: string, remoteSender: string) => void
   isSelected?: boolean
+  isMobile?: boolean
 }
 
 export function ConversationActionsMenu({
@@ -26,6 +27,7 @@ export function ConversationActionsMenu({
   unreadCount,
   onOpenInfo,
   isSelected,
+  isMobile,
 }: ConversationActionsMenuProps) {
   const [open, setOpen] = useState(false)
   return (
@@ -34,20 +36,18 @@ export function ConversationActionsMenu({
         <button
           onClick={(e) => e.stopPropagation()}
           className={cn(
-            'h-8 w-8 rounded-full flex items-center justify-center hover:bg-chat-hover shrink-0 transition-colors z-10',
-            (isSelected || open)
-              ? 'opacity-100'
-              : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
+            'h-6 w-6 rounded-full flex items-center justify-center hover:bg-chat-hover shrink-0 transition-colors',
+            isMobile ? 'opacity-100' : (isSelected || open) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
           )}
           title="Menu da conversa"
         >
-          <MoreVertical className="h-4 w-4 text-chat-muted" />
+          <ChevronDown className="h-3.5 w-3.5 text-chat-muted" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="bg-chat-panel border-chat-border shadow-chat min-w-[180px]">
+      <DropdownMenuContent align="end" side="bottom" sideOffset={4} className="z-[80] bg-chat-panel border-chat-border shadow-chat text-chat-text min-w-[190px]">
         {state?.pinned ? (
           <DropdownMenuItem
-            className="text-chat-text"
+            className="text-chat-text hover:bg-chat-hover focus:bg-chat-hover focus:text-chat-text"
             onClick={(e) => {
               e.stopPropagation()
               togglePin(deviceId, remoteSender)
@@ -57,7 +57,7 @@ export function ConversationActionsMenu({
           </DropdownMenuItem>
         ) : (
           <DropdownMenuItem
-            className="text-chat-text"
+            className="text-chat-text hover:bg-chat-hover focus:bg-chat-hover focus:text-chat-text"
             onClick={(e) => {
               e.stopPropagation()
               togglePin(deviceId, remoteSender)
@@ -69,7 +69,7 @@ export function ConversationActionsMenu({
 
         {(unreadCount > 0 || state?.manual_unread) ? (
           <DropdownMenuItem
-            className="text-chat-text"
+            className="text-chat-text hover:bg-chat-hover focus:bg-chat-hover focus:text-chat-text"
             onClick={(e) => {
               e.stopPropagation()
               markConversationRead(deviceId, remoteSender)
@@ -79,7 +79,7 @@ export function ConversationActionsMenu({
           </DropdownMenuItem>
         ) : (
           <DropdownMenuItem
-            className="text-chat-text"
+            className="text-chat-text hover:bg-chat-hover focus:bg-chat-hover focus:text-chat-text"
             onClick={(e) => {
               e.stopPropagation()
               markConversationUnread(deviceId, remoteSender)
@@ -92,7 +92,7 @@ export function ConversationActionsMenu({
         <DropdownMenuSeparator className="bg-chat-border" />
 
         <DropdownMenuItem
-          className="text-chat-text"
+          className="text-chat-text hover:bg-chat-hover focus:bg-chat-hover focus:text-chat-text"
           onClick={(e) => {
             e.stopPropagation()
             onOpenInfo(deviceId, remoteSender)
@@ -105,7 +105,7 @@ export function ConversationActionsMenu({
 
         {state?.archived ? (
           <DropdownMenuItem
-            className="text-chat-text"
+            className="text-chat-text hover:bg-chat-hover focus:bg-chat-hover focus:text-chat-text"
             onClick={(e) => {
               e.stopPropagation()
               toggleArchive(deviceId, remoteSender)
@@ -115,7 +115,7 @@ export function ConversationActionsMenu({
           </DropdownMenuItem>
         ) : (
           <DropdownMenuItem
-            className="text-chat-text"
+            className="text-chat-text hover:bg-chat-hover focus:bg-chat-hover focus:text-chat-text"
             onClick={(e) => {
               e.stopPropagation()
               toggleArchive(deviceId, remoteSender)
