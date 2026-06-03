@@ -246,8 +246,8 @@ export function ChatList({
                 <div className="flex-1 overflow-hidden">
                   <div className="flex justify-between items-baseline mb-1">
                     <h3 className="font-medium text-chat-text truncate pr-2">{name}</h3>
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      <span className="text-xs text-chat-muted whitespace-nowrap">
+                    <div className="flex items-center shrink-0 relative">
+                      <span className="text-xs text-chat-muted tabular-nums whitespace-nowrap transition-all duration-150 group-hover:opacity-0">
                         {format(new Date(conv.lastMessage.created_at), 'HH:mm')}
                       </span>
                       {selectedDeviceId && (
