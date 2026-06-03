@@ -291,13 +291,14 @@ export function ChatList({
                       </span>
                     </div>
                   ) : null}
-                  {selectedDeviceId && (
+                    {selectedDeviceId && (
                     <ConversationActionsMenu
                       deviceId={selectedDeviceId}
                       remoteSender={conv.remote_sender}
                       state={convState}
                       unreadCount={conv.unread_count}
                       onOpenInfo={onOpenInfo}
+                      isSelected={isSelected}
                     />
                   )}
                 </div>
