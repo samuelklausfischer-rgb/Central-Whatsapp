@@ -75,6 +75,7 @@ import { markConversationRead, getConversationViewers, type ConversationViewer }
 import supabase from '@/lib/supabase/client'
 import useAppStore from '@/stores/useAppStore'
 import { useToast } from '@/hooks/use-toast'
+import { format } from 'date-fns'
 
 const formatInline = (text: string, isMe: boolean): React.ReactNode => {
   const regex = /(https?:\/\/[^\s]+|`[^`]+`|\*[^*]+\*|_[^_]+_|~[^~]+~)/g
@@ -251,6 +252,23 @@ const renderMessage = (content: string, isMe: boolean) => {
 
     return <Fragment key={i}>{result}</Fragment>
   })
+}
+
+const getDateKey = (value: string) => {
+  const date = new Date(value)
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
+}
+
+const getDateLabel = (value: string) => {
+  const date = new Date(value)
+  const today = new Date()
+  const yesterday = new Date()
+  yesterday.setDate(today.getDate() - 1)
+
+  if (getDateKey(value) === getDateKey(today.toISOString())) return 'Hoje'
+  if (getDateKey(value) === getDateKey(yesterday.toISOString())) return 'Ontem'
+
+  return format(date, 'dd/MM/yyyy')
 }
 
 export function ChatWindow({ device, contact, conversation, contacts, onBack, isMobile, sheetOpen, onSheetOpenChange }: any) {
@@ -971,16 +989,26 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
             </p>
           </div>
         ) : (
-          messages.map((msg: any) => {
+          messages.map((msg: any, index: number) => {
           const isMe = msg.direction === 'outbound' || msg.sender_id === user?.id
           const messageAttachments = Array.isArray(msg.attachments) ? msg.attachments : []
           const timestamp = new Date(msg.created_at).toLocaleTimeString([], {
             hour: '2-digit',
             minute: '2-digit',
           })
+          const previousMsg = messages[index - 1]
+          const shouldShowDateSeparator =
+            !previousMsg || getDateKey(previousMsg.created_at) !== getDateKey(msg.created_at)
           return (
+            <React.Fragment key={msg.id}>
+              {shouldShowDateSeparator && (
+                <div className="sticky top-2 z-20 flex justify-center py-2">
+                  <span className="rounded-full border border-chat-border bg-chat-panel/90 px-3 py-1 text-[12px] font-medium text-chat-muted shadow-chat backdrop-blur">
+                    {getDateLabel(msg.created_at)}
+                  </span>
+                </div>
+              )}
             <div
-              key={msg.id}
               className={`flex flex-col animate-in fade-in slide-in-from-bottom-2 duration-300 ${isMe ? 'items-end' : 'items-start'}`}
             >
               <div
@@ -1449,6 +1477,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                 )}
               </div>
             </div>
+          </React.Fragment>
           )
         }))}
         </div>
