@@ -1201,7 +1201,10 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                    ) : msg.content?.trim() && !isTechnicalPlaceholder(msg.content) ? (
                      <div className="text-[15px] leading-relaxed break-words">
                        {renderMessage(msg.content, isMe)}
-                       <span className="ml-1 inline-flex items-center gap-1 whitespace-nowrap">
+                       <span
+  className={`inline-flex translate-y-[30%] items-center gap-1 whitespace-nowrap ${
+    isMe ? 'float-right ml-3' : 'ml-1'
+  }`}>
                          {msg.edited_at && (
                            <span className="text-[10px] text-chat-muted/60">(editado)</span>
                          )}
