@@ -305,6 +305,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
   const [replyingTo, setReplyingTo] = useState<any>(null)
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [deleteConfirmMsg, setDeleteConfirmMsg] = useState<any>(null)
+  const [reactionPopoverMessageId, setReactionPopoverMessageId] = useState<string | null>(null)
   const [viewers, setViewers] = useState<ConversationViewer[]>([])
 
   const messages = conversation?.messages || []
@@ -1218,46 +1219,9 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                        ))}
                      </div>
                    )}
-                     <div className="flex items-center justify-between mt-1.5">
-                      <div className="flex items-center gap-0.5">
-                      {!msg.deleted_at && (
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <button
-                            type="button"
-                            className="text-chat-muted/50 hover:text-chat-muted transition-colors p-0.5 rounded hover:bg-chat-hover"
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
-                              <path d="M8 2a.75.75 0 0 1 .75.75v4.5h4.5a.75.75 0 0 1 0 1.5h-4.5v4.5a.75.75 0 0 1-1.5 0v-4.5h-4.5a.75.75 0 0 1 0-1.5h4.5v-4.5A.75.75 0 0 1 8 2Z"/>
-                            </svg>
-                          </button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-1.5 bg-chat-panel border-chat-border" side="top" align="end">
-                         <div className="flex gap-1">
-                           {['👍', '❤️', '😂', '😮', '😢', '🙏'].map((emoji) => (
-                             <button
-                               key={emoji}
-                               type="button"
-                               className="text-lg hover:scale-125 transition-transform p-1"
-                               onClick={async (e) => {
-                                 e.preventDefault()
-                                 try {
-                                   await reactToMessage(msg.id, emoji, device.id, user.id)
-                                   const btn = document.activeElement as HTMLElement
-                                   btn?.blur()
-                                 } catch (err: any) {
-                                   toast({ title: err.message || 'Erro ao reagir', variant: 'destructive' })
-                                 }
-                               }}
-                             >
-                               {emoji}
-                             </button>
-                           ))}
-                         </div>
-                       </PopoverContent>
-                     </Popover>
-                      )}
-                     <DropdownMenu>
+                      <div className="flex items-center justify-between mt-1.5">
+                       <div className="flex items-center gap-0.5">
+                      <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                           <button
                             type="button"
@@ -1314,18 +1278,72 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                         </DropdownMenuContent>
                       </DropdownMenu>
                       </div>
-                      <div className="flex items-center gap-2">
-                       {msg.edited_at && (
-                          <span className="text-[10px] text-chat-muted/60">
-                            (editado)
+                       <div className="flex items-center gap-2">
+                        {msg.edited_at && (
+                           <span className="text-[10px] text-chat-muted/60">
+                             (editado)
                           </span>
                        )}
                         <span className="text-[10px] font-medium text-chat-muted/70">
                           {timestamp}
                         </span>
                       </div>
-                   </div>
-                </div>
+                    </div>
+                    {!msg.deleted_at && (
+                      <Popover
+                        open={reactionPopoverMessageId === msg.id}
+                        onOpenChange={(open) => setReactionPopoverMessageId(open ? msg.id : null)}
+                      >
+                        <PopoverTrigger asChild>
+                          <button
+                            type="button"
+                            aria-label="Adicionar reação"
+                            title="Adicionar reação"
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            className={`absolute top-1/2 z-10 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-chat-border bg-chat-panel text-chat-muted shadow-chat transition-all duration-150 hover:bg-chat-hover hover:text-chat-text ${isMe ? '-left-8' : '-right-8'} ${
+                              reactionPopoverMessageId === msg.id
+                                ? 'opacity-100 pointer-events-auto scale-100'
+                                : 'opacity-0 pointer-events-none scale-95 group-hover:opacity-100 group-hover:pointer-events-auto group-hover:scale-100 group-focus-within:opacity-100 group-focus-within:pointer-events-auto group-focus-within:scale-100'
+                            }`}
+                          >
+                            <Smile className="h-4 w-4" />
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          className="z-[80] w-auto rounded-full border-chat-border bg-chat-panel p-1.5 shadow-chat"
+                          side="top"
+                          align={isMe ? 'end' : 'start'}
+                          sideOffset={6}
+                          onClick={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex gap-1">
+                            {['👍', '❤️', '😂', '😮', '😢', '🙏'].map((emoji) => (
+                              <button
+                                key={emoji}
+                                type="button"
+                                className="rounded-full p-1 text-lg transition-transform hover:scale-125 hover:bg-chat-hover"
+                                onClick={async (e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  try {
+                                    await reactToMessage(msg.id, emoji, device.id, user.id)
+                                    setReactionPopoverMessageId(null)
+                                  } catch (err: any) {
+                                    toast({ title: err.message || 'Erro ao reagir', variant: 'destructive' })
+                                  }
+                                }}
+                              >
+                                {emoji}
+                              </button>
+                            ))}
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    )}
+                 </div>
                 {isMe && (
                   <div className="w-7 flex-shrink-0 hidden sm:block" />
                 )}
