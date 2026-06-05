@@ -144,9 +144,17 @@ async function listInstancesAction() {
     }
   }
 
-  const instances = (rawList as JsonRecord[]).map((raw: JsonRecord) => {
+  const validInstances: JsonRecord[] = []
+
+  for (const raw of rawList as JsonRecord[]) {
     const inst = (raw as JsonRecord).instance as JsonRecord || raw
-    const instanceName = String(inst.instanceName || raw.instanceName || '')
+    const instanceName = String(
+      inst.instanceName || inst.name || inst.instanceId || inst.id
+      || raw.instanceName || raw.name || raw.instanceId || raw.id
+      || ''
+    ).trim()
+    if (!instanceName) continue
+
     const rawStatus = String(inst.connectionStatus || inst.status || raw.connectionStatus || raw.status || 'unknown')
     const lowerStatus = rawStatus.toLowerCase()
 
@@ -158,7 +166,7 @@ async function listInstancesAction() {
 
     const device = devicesByKey.get(instanceName) || null
 
-    return {
+    validInstances.push({
       instanceName,
       status: rawStatus,
       normalizedStatus,
@@ -167,10 +175,10 @@ async function listInstancesAction() {
       profilePicUrl: String(inst.profilePicUrl || inst.profilePictureUrl || raw.profilePicUrl || raw.profilePictureUrl || '') || null,
       device,
       alreadyImported: Boolean(device),
-    }
-  })
+    })
+  }
 
-  return json({ instances })
+  return json({ instances: validInstances })
 }
 
 async function createInstanceAction(body: JsonRecord) {

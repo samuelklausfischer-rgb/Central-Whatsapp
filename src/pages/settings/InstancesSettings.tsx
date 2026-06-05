@@ -332,15 +332,21 @@ export default function InstancesSettings() {
                 <span />
               </div>
               <div className="divide-y divide-border">
-                {instances.map((instance) => {
-                  const displayName = instance.device?.name || instance.instanceName
-                  const isActionLoading = actionLoading === instance.instanceName
+                {instances.map((instance, index) => {
+                  const name = instance.instanceName
+                  const displayName = instance.device?.name || name || 'Desconhecida'
+                  const isActionLoading = actionLoading === name
+                  const isInvalid = !name
                   return (
-                    <div key={instance.instanceName} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto_auto_auto] gap-2 px-3 py-3 items-start sm:items-center">
+                    <div key={name || `invalid-${index}`} className={`grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto_auto_auto] gap-2 px-3 py-3 items-start sm:items-center ${isInvalid ? 'opacity-50' : ''}`}>
                       <div className="min-w-0">
                         <p className="font-medium truncate">{displayName}</p>
                         <div className="flex flex-wrap gap-1 mt-1 text-xs text-muted-foreground">
-                          <Badge variant="outline" className="text-[10px]">{instance.instanceName}</Badge>
+                          {name ? (
+                            <Badge variant="outline" className="text-[10px]">{name}</Badge>
+                          ) : (
+                            <Badge variant="destructive" className="text-[10px]">Sem nome técnico</Badge>
+                          )}
                           {instance.profileName && <span>Perfil: {instance.profileName}</span>}
                           {instance.ownerJid && <span>{instance.ownerJid}</span>}
                         </div>
@@ -363,8 +369,8 @@ export default function InstancesSettings() {
                             variant="ghost"
                             size="sm"
                             className="h-7 text-xs gap-1"
-                            disabled={isActionLoading}
-                            onClick={() => handleDisconnect(instance.instanceName)}
+                            disabled={!name || isActionLoading}
+                            onClick={() => name && handleDisconnect(name)}
                           >
                             {isActionLoading ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Unlink className="h-3 w-3" />}
                             <span className="hidden sm:inline">Desconectar</span>
@@ -374,8 +380,8 @@ export default function InstancesSettings() {
                             variant="ghost"
                             size="sm"
                             className="h-7 text-xs gap-1"
-                            disabled={isActionLoading}
-                            onClick={() => handleConnect(instance.instanceName)}
+                            disabled={!name || isActionLoading}
+                            onClick={() => name && handleConnect(name)}
                           >
                             {isActionLoading ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Link className="h-3 w-3" />}
                             <span className="hidden sm:inline">Conectar</span>
@@ -385,9 +391,11 @@ export default function InstancesSettings() {
                           variant="ghost"
                           size="sm"
                           className="h-7 text-xs gap-1"
+                          disabled={!name}
                           onClick={() => {
-                            setRenameInstance(instance.instanceName)
-                            setRenameDisplay(instance.device?.name || instance.instanceName)
+                            if (!name) return
+                            setRenameInstance(name)
+                            setRenameDisplay(instance.device?.name || name)
                             setRenameOpen(true)
                           }}
                         >
@@ -398,8 +406,8 @@ export default function InstancesSettings() {
                           variant="ghost"
                           size="sm"
                           className="h-7 text-xs gap-1"
-                          disabled={isActionLoading}
-                          onClick={() => handleConfigureWebhook(instance.instanceName)}
+                          disabled={!name || isActionLoading}
+                          onClick={() => name && handleConfigureWebhook(name)}
                         >
                           {isActionLoading ? <RefreshCw className="h-3 w-3 animate-spin" /> : <QrCode className="h-3 w-3" />}
                           <span className="hidden sm:inline">Webhook</span>
@@ -408,7 +416,8 @@ export default function InstancesSettings() {
                           variant="ghost"
                           size="sm"
                           className="h-7 text-xs gap-1 text-red-400 hover:text-red-400"
-                          onClick={() => setDeleteConfirm(instance)}
+                          disabled={!name}
+                          onClick={() => name && setDeleteConfirm(instance)}
                         >
                           <Trash2 className="h-3 w-3" />
                           <span className="hidden sm:inline">Deletar</span>

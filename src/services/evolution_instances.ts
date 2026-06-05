@@ -58,27 +58,43 @@ export const createEvolutionInstance = (params: {
     action: 'create', ...params,
   })
 
-export const connectEvolutionInstance = (instanceName: string) =>
-  invoke<{ instanceName: string; qrcode: QrCodeData | null }>({
+function requireInstanceName(name: string): void {
+  if (!name || !name.trim()) {
+    throw new EvolutionApiError('Nome técnico da instância está vazio.')
+  }
+}
+
+export const connectEvolutionInstance = (instanceName: string) => {
+  requireInstanceName(instanceName)
+  return invoke<{ instanceName: string; qrcode: QrCodeData | null }>({
     action: 'connect', instanceName,
   })
+}
 
-export const disconnectEvolutionInstance = (instanceName: string) =>
-  invoke<{ instanceName: string; status: string }>({
+export const disconnectEvolutionInstance = (instanceName: string) => {
+  requireInstanceName(instanceName)
+  return invoke<{ instanceName: string; status: string }>({
     action: 'disconnect', instanceName,
   })
+}
 
-export const deleteEvolutionInstance = (instanceName: string) =>
-  invoke<{ instanceName: string; softDeleted: boolean }>({
+export const deleteEvolutionInstance = (instanceName: string) => {
+  requireInstanceName(instanceName)
+  return invoke<{ instanceName: string; softDeleted: boolean }>({
     action: 'delete', instanceName,
   })
+}
 
-export const renameEvolutionDisplay = (instanceName: string, displayName: string) =>
-  invoke<{ instanceName: string; displayName: string; updated: boolean }>({
+export const renameEvolutionDisplay = (instanceName: string, displayName: string) => {
+  requireInstanceName(instanceName)
+  return invoke<{ instanceName: string; displayName: string; updated: boolean }>({
     action: 'rename_display', instanceName, displayName,
   })
+}
 
-export const configureInstanceWebhook = (instanceName: string) =>
-  invoke<{ instanceName: string; configured: boolean }>({
+export const configureInstanceWebhook = (instanceName: string) => {
+  requireInstanceName(instanceName)
+  return invoke<{ instanceName: string; configured: boolean }>({
     action: 'configure_webhook', instanceName,
   })
+}
