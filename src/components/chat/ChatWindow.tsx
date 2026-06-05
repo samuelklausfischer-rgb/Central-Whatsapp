@@ -1194,42 +1194,18 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                       })}
                     </div>
                   )}
-                  {msg.deleted_at ? (
-                    <div className="text-[13px] italic text-chat-muted/60">
-                      [Mensagem apagada]
-                    </div>
-                  ) : msg.content?.trim() && !isTechnicalPlaceholder(msg.content) ? (
-                    <div className="text-[15px] leading-relaxed break-words">
-                      {renderMessage(msg.content, isMe)}
-                    </div>
-                   ) : null}
-                   {msg.reactions && msg.reactions.length > 0 && (
-                     <div className="flex flex-wrap gap-1 mt-1.5">
-                       {Array.from(
-                         msg.reactions.reduce((acc: Map<string, number>, r: any) => {
-                           acc.set(r.emoji, (acc.get(r.emoji) || 0) + 1)
-                           return acc
-                         }, new Map())
-                       ).map(([emoji, count]) => (
-                         <span
-                            key={emoji}
-                             className="text-[11px] px-1 py-0.5 rounded-full border border-chat-text/10 bg-chat-text/5"
-                         >
-                           {emoji}{count > 1 ? String(count) : ''}
-                         </span>
-                       ))}
+                    {msg.deleted_at ? (
+                     <div className="text-[13px] italic text-chat-muted/60">
+                       [Mensagem apagada]
                      </div>
-                   )}
-                     <div className="mt-1.5 flex items-center justify-end gap-1">
-                       {msg.edited_at && (
-                         <span className="text-[10px] text-chat-muted/60">
-                           (editado)
-                         </span>
-                       )}
-                       <span className="text-[10px] font-medium text-chat-muted/70 translate-y-[1px]">
-                         {timestamp}
-                       </span>
-                       {!msg.deleted_at && (
+                   ) : msg.content?.trim() && !isTechnicalPlaceholder(msg.content) ? (
+                     <div className="text-[15px] leading-relaxed break-words">
+                       {renderMessage(msg.content, isMe)}
+                       <span className="ml-1 inline-flex items-center gap-1 whitespace-nowrap">
+                         {msg.edited_at && (
+                           <span className="text-[10px] text-chat-muted/60">(editado)</span>
+                         )}
+                         <span className="text-[10px] font-medium text-chat-muted/70">{timestamp}</span>
                          <DropdownMenu
                            open={messageMenuOpenId === msg.id}
                            onOpenChange={(open) => setMessageMenuOpenId(open ? msg.id : null)}
@@ -1304,62 +1280,166 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                              )}
                            </DropdownMenuContent>
                          </DropdownMenu>
-                       )}
+                       </span>
                      </div>
-                    {!msg.deleted_at && (
-                      <Popover
-                        open={reactionPopoverMessageId === msg.id}
-                        onOpenChange={(open) => setReactionPopoverMessageId(open ? msg.id : null)}
-                      >
-                        <PopoverTrigger asChild>
-                          <button
-                            type="button"
-                            aria-label="Adicionar reação"
-                            title="Adicionar reação"
-                            onClick={(e) => e.stopPropagation()}
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onPointerDown={(e) => e.stopPropagation()}
-                            className={`absolute top-1/2 z-10 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-chat-border bg-chat-panel text-chat-muted shadow-chat transition-all duration-150 hover:bg-chat-hover hover:text-chat-text ${isMe ? '-left-8' : '-right-8'} ${
-                              reactionPopoverMessageId === msg.id
-                                ? 'opacity-100 pointer-events-auto scale-100'
-                                : 'opacity-0 pointer-events-none scale-95 group-hover:opacity-100 group-hover:pointer-events-auto group-hover:scale-100 group-focus-within:opacity-100 group-focus-within:pointer-events-auto group-focus-within:scale-100'
-                            }`}
+                    ) : null}
+                    {msg.reactions && msg.reactions.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {Array.from(
+                          msg.reactions.reduce((acc: Map<string, number>, r: any) => {
+                            acc.set(r.emoji, (acc.get(r.emoji) || 0) + 1)
+                            return acc
+                          }, new Map())
+                        ).map(([emoji, count]) => (
+                          <span
+                             key={emoji}
+                              className="text-[11px] px-1 py-0.5 rounded-full border border-chat-text/10 bg-chat-text/5"
                           >
-                            <Smile className="h-4 w-4" />
-                          </button>
-                        </PopoverTrigger>
-                        <PopoverContent
-                          className="z-[80] w-auto rounded-full border-chat-border bg-chat-panel p-1.5 shadow-chat"
-                          side="top"
-                          align={isMe ? 'end' : 'start'}
-                          sideOffset={6}
-                          onClick={(e) => e.stopPropagation()}
-                          onMouseDown={(e) => e.stopPropagation()}
-                        >
-                          <div className="flex gap-1">
-                            {['👍', '❤️', '😂', '😮', '😢', '🙏'].map((emoji) => (
+                            {emoji}{count > 1 ? String(count) : ''}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {(msg.deleted_at || !msg.content?.trim() || isTechnicalPlaceholder(msg.content)) && (
+                      <div className="mt-1.5 flex items-center justify-end gap-1">
+                        {msg.edited_at && (
+                          <span className="text-[10px] text-chat-muted/60">(editado)</span>
+                        )}
+                        <span className="text-[10px] font-medium text-chat-muted/70 translate-y-[1px]">
+                          {timestamp}
+                        </span>
+                        {!msg.deleted_at && (
+                          <DropdownMenu
+                            open={messageMenuOpenId === msg.id}
+                            onOpenChange={(open) => setMessageMenuOpenId(open ? msg.id : null)}
+                          >
+                            <DropdownMenuTrigger asChild>
                               <button
-                                key={emoji}
                                 type="button"
-                                className="rounded-full p-1 text-lg transition-transform hover:scale-125 hover:bg-chat-hover"
+                                onClick={(e) => e.stopPropagation()}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onPointerDown={(e) => e.stopPropagation()}
+                                className={`text-chat-muted/50 hover:text-chat-muted transition-all duration-150 p-0.5 rounded hover:bg-chat-hover ${
+                                  messageMenuOpenId === msg.id
+                                    ? 'opacity-100 pointer-events-auto'
+                                    : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'
+                                }`}
+                              >
+                                <MoreVertical className="h-3.5 w-3.5" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="bg-chat-panel border-chat-border shadow-chat min-w-[170px]">
+                              <DropdownMenuItem
+                                className="cursor-pointer focus:bg-chat-hover"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setReplyingTo(msg)
+                                }}
+                              >
+                                <MessageSquare className="h-4 w-4 mr-2" />
+                                Responder
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="cursor-pointer focus:bg-chat-hover"
                                 onClick={async (e) => {
-                                  e.preventDefault()
                                   e.stopPropagation()
                                   try {
-                                    await reactToMessage(msg.id, emoji, device.id, user.id)
-                                    setReactionPopoverMessageId(null)
-                                  } catch (err: any) {
-                                    toast({ title: err.message || 'Erro ao reagir', variant: 'destructive' })
+                                    await navigator.clipboard.writeText(msg.content || '')
+                                    toast({ title: 'Mensagem copiada!' })
+                                  } catch {
+                                    toast({ title: 'Erro ao copiar', variant: 'destructive' })
                                   }
                                 }}
                               >
-                                {emoji}
-                              </button>
-                            ))}
-                          </div>
-                        </PopoverContent>
-                      </Popover>
+                                <Copy className="h-4 w-4 mr-2" />
+                                Copiar
+                              </DropdownMenuItem>
+                              {isMe && !msg.deleted_at && (
+                                <DropdownMenuItem
+                                  className="cursor-pointer focus:bg-chat-hover"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setEditingMessageId(msg.id)
+                                    setMsgText(msg.content)
+                                    setReplyingTo(null)
+                                  }}
+                                >
+                                  <Pencil className="h-4 w-4 mr-2" />
+                                  Editar
+                                </DropdownMenuItem>
+                              )}
+                              <DropdownMenuSeparator className="bg-chat-border" />
+                              {isMe && (
+                                <DropdownMenuItem
+                                  className="cursor-pointer focus:bg-chat-hover text-red-400"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setDeleteConfirmMsg(msg)
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  Apagar
+                                </DropdownMenuItem>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        )}
+                      </div>
                     )}
+                     {!msg.deleted_at && (
+                       <Popover
+                         open={reactionPopoverMessageId === msg.id}
+                         onOpenChange={(open) => setReactionPopoverMessageId(open ? msg.id : null)}
+                       >
+                         <PopoverTrigger asChild>
+                           <button
+                             type="button"
+                             aria-label="Adicionar reação"
+                             title="Adicionar reação"
+                             onClick={(e) => e.stopPropagation()}
+                             onMouseDown={(e) => e.stopPropagation()}
+                             onPointerDown={(e) => e.stopPropagation()}
+                             className={`absolute top-1/2 z-10 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-chat-border bg-chat-panel text-chat-muted shadow-chat transition-all duration-150 hover:bg-chat-hover hover:text-chat-text ${isMe ? '-left-8' : '-right-8'} ${
+                               reactionPopoverMessageId === msg.id
+                                 ? 'opacity-100 pointer-events-auto scale-100'
+                                 : 'opacity-0 pointer-events-none scale-95 group-hover:opacity-100 group-hover:pointer-events-auto group-hover:scale-100 group-focus-within:opacity-100 group-focus-within:pointer-events-auto group-focus-within:scale-100'
+                             }`}
+                           >
+                             <Smile className="h-4 w-4" />
+                           </button>
+                         </PopoverTrigger>
+                         <PopoverContent
+                           className="z-[80] w-auto rounded-full border-chat-border bg-chat-panel p-1.5 shadow-chat"
+                           side="top"
+                           align={isMe ? 'end' : 'start'}
+                           sideOffset={6}
+                           onClick={(e) => e.stopPropagation()}
+                           onMouseDown={(e) => e.stopPropagation()}
+                         >
+                           <div className="flex gap-1">
+                             {['👍', '❤️', '😂', '😮', '😢', '🙏'].map((emoji) => (
+                               <button
+                                 key={emoji}
+                                 type="button"
+                                 className="rounded-full p-1 text-lg transition-transform hover:scale-125 hover:bg-chat-hover"
+                                 onClick={async (e) => {
+                                   e.preventDefault()
+                                   e.stopPropagation()
+                                   try {
+                                     await reactToMessage(msg.id, emoji, device.id, user.id)
+                                     setReactionPopoverMessageId(null)
+                                   } catch (err: any) {
+                                     toast({ title: err.message || 'Erro ao reagir', variant: 'destructive' })
+                                   }
+                                 }}
+                               >
+                                 {emoji}
+                               </button>
+                             ))}
+                           </div>
+                         </PopoverContent>
+                       </Popover>
+                     )}
                  </div>
                 {isMe && (
                   <div className="w-7 flex-shrink-0 hidden sm:block" />
