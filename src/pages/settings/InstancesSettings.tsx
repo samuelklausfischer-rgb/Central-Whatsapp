@@ -45,6 +45,7 @@ import {
   deleteEvolutionInstance,
   renameEvolutionDisplay,
   configureInstanceWebhook,
+  EvolutionApiError,
   type EvolutionInstance,
   type QrCodeData,
 } from '@/services/evolution_instances'
@@ -64,6 +65,24 @@ const statusBadge = (normalizedStatus: string) => {
     default:
       return <Badge variant="outline" className="gap-1"><AlertCircle className="h-3 w-3" /> {normalizedStatus}</Badge>
   }
+}
+
+function formatError(err: unknown): string {
+  if (err instanceof EvolutionApiError) {
+    let msg = err.message
+    if (err.details) {
+      const detailStr = typeof err.details === 'string' ? err.details
+        : JSON.stringify(err.details).slice(0, 300)
+      msg += `\nDetalhes: ${detailStr}`
+    }
+    if (err.diagnostics) {
+      const diagStr = typeof err.diagnostics === 'string' ? err.diagnostics
+        : JSON.stringify(err.diagnostics).slice(0, 400)
+      msg += `\nDiagnóstico: ${diagStr}`
+    }
+    return msg
+  }
+  return err instanceof Error ? err.message : 'Erro desconhecido'
 }
 
 export default function InstancesSettings() {
@@ -98,8 +117,8 @@ export default function InstancesSettings() {
     try {
       const result = await listEvolutionInstances()
       setInstances(result.instances)
-    } catch (err: any) {
-      toast({ title: 'Erro ao carregar instâncias', description: err.message, variant: 'destructive' })
+    } catch (err: unknown) {
+      toast({ title: 'Erro ao carregar instâncias', description: formatError(err), variant: 'destructive' })
     } finally {
       setLoading(false)
     }
@@ -143,8 +162,8 @@ export default function InstancesSettings() {
         setQrOpen(true)
       }
       await loadInstances()
-    } catch (err: any) {
-      toast({ title: 'Erro ao criar', description: err.message, variant: 'destructive' })
+    } catch (err: unknown) {
+      toast({ title: 'Erro ao criar', description: formatError(err), variant: 'destructive' })
     } finally {
       setCreating(false)
     }
@@ -161,8 +180,8 @@ export default function InstancesSettings() {
       } else {
         toast({ title: 'QR Code não retornado pela Evolution API', variant: 'destructive' })
       }
-    } catch (err: any) {
-      toast({ title: 'Erro ao conectar', description: err.message, variant: 'destructive' })
+    } catch (err: unknown) {
+      toast({ title: 'Erro ao conectar', description: formatError(err), variant: 'destructive' })
     } finally {
       setActionLoading(null)
     }
@@ -174,8 +193,8 @@ export default function InstancesSettings() {
       await disconnectEvolutionInstance(instanceName)
       toast({ title: 'Instância desconectada', description: instanceName })
       await loadInstances()
-    } catch (err: any) {
-      toast({ title: 'Erro ao desconectar', description: err.message, variant: 'destructive' })
+    } catch (err: unknown) {
+      toast({ title: 'Erro ao desconectar', description: formatError(err), variant: 'destructive' })
     } finally {
       setActionLoading(null)
     }
@@ -189,8 +208,8 @@ export default function InstancesSettings() {
       toast({ title: 'Instância deletada', description: `${deleteConfirm.instanceName} removida com soft delete.` })
       setDeleteConfirm(null)
       await loadInstances()
-    } catch (err: any) {
-      toast({ title: 'Erro ao deletar', description: err.message, variant: 'destructive' })
+    } catch (err: unknown) {
+      toast({ title: 'Erro ao deletar', description: formatError(err), variant: 'destructive' })
     } finally {
       setDeleting(false)
     }
@@ -208,8 +227,8 @@ export default function InstancesSettings() {
       toast({ title: 'Nome atualizado', description: `Agora exibe "${name}"` })
       setRenameOpen(false)
       await loadInstances()
-    } catch (err: any) {
-      toast({ title: 'Erro ao renomear', description: err.message, variant: 'destructive' })
+    } catch (err: unknown) {
+      toast({ title: 'Erro ao renomear', description: formatError(err), variant: 'destructive' })
     } finally {
       setRenaming(false)
     }
@@ -223,8 +242,8 @@ export default function InstancesSettings() {
         title: result.configured ? 'Webhook configurado' : 'Falha ao configurar webhook',
         variant: result.configured ? 'default' : 'destructive',
       })
-    } catch (err: any) {
-      toast({ title: 'Erro', description: err.message, variant: 'destructive' })
+    } catch (err: unknown) {
+      toast({ title: 'Erro no webhook', description: formatError(err), variant: 'destructive' })
     } finally {
       setActionLoading(null)
     }
@@ -240,8 +259,8 @@ export default function InstancesSettings() {
       } else {
         toast({ title: 'Evolution API não retornou QR', variant: 'destructive' })
       }
-    } catch (err: any) {
-      toast({ title: 'Erro', description: err.message, variant: 'destructive' })
+    } catch (err: unknown) {
+      toast({ title: 'Erro ao atualizar QR', description: formatError(err), variant: 'destructive' })
     } finally {
       setActionLoading(null)
     }

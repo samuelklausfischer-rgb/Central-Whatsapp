@@ -18,12 +18,31 @@ export interface QrCodeData {
   pairingCode?: string
 }
 
+export class EvolutionApiError extends Error {
+  details: unknown
+  diagnostics: unknown
+
+  constructor(message: string, details?: unknown, diagnostics?: unknown) {
+    super(message)
+    this.name = 'EvolutionApiError'
+    this.details = details
+    this.diagnostics = diagnostics
+  }
+}
+
 const invoke = async <T>(body: Record<string, unknown>): Promise<T> => {
   const { data, error } = await supabase.functions.invoke<T>('evolution-instances', {
     method: 'POST',
     body,
   })
-  if (error) throw new Error(error.message)
+  if (error) {
+    const ctx = (error as any).context
+    const ctxData = typeof ctx === 'object' && ctx ? ctx : {}
+    const message = (ctxData as any).error || error.message
+    const details = (ctxData as any).details
+    const diagnostics = (ctxData as any).diagnostics
+    throw new EvolutionApiError(message, details, diagnostics)
+  }
   return data as T
 }
 
