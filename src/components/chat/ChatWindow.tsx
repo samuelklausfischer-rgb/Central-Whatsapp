@@ -1036,26 +1036,6 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                       : 'bg-chat-bubble-in text-chat-text rounded-bl-sm'
                   }`}
                 >
-                  {!isMe && (
-                    <div className="text-[11px] font-medium mb-1">
-                      <span className="text-chat-muted/70">
-                        {(() => {
-                          const msgContactRecord = contacts?.find(
-                            (c: any) => c.remote_jid === msg.remote_sender,
-                          )
-                          return msgContactRecord?.nickname
-                            ? msgContactRecord.nickname
-                            : msg.sender_name && msg.sender_name !== 'Unknown Sender'
-                              ? msg.sender_name
-                              : msgContactRecord?.name && msgContactRecord.name !== 'Unknown Sender'
-                                ? msgContactRecord.name
-                                : msg.remote_sender === 'Unknown Sender'
-                                  ? msg.remote_sender
-                                  : `+${msg.remote_sender}`
-                        })()}
-                      </span>
-                    </div>
-                  )}
                   {!msg.deleted_at && msg.reply_to_snapshot && (
                     <div className="flex items-start gap-2 mb-2 pl-2 border-l-2 border-chat-text/20">
                       <div className="flex-1 min-w-0">
