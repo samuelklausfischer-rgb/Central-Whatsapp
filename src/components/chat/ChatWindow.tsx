@@ -999,6 +999,17 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
           const previousMsg = messages[index - 1]
           const shouldShowDateSeparator =
             !previousMsg || getDateKey(previousMsg.created_at) !== getDateKey(msg.created_at)
+          const previousIsMe = previousMsg
+            ? previousMsg.direction === 'outbound' || previousMsg.sender_id === user?.id
+            : false
+          const shouldShowReceivedAvatar =
+            !isMe &&
+            (
+              !previousMsg ||
+              previousIsMe ||
+              shouldShowDateSeparator ||
+              previousMsg.remote_sender !== msg.remote_sender
+            )
           return (
             <React.Fragment key={msg.id}>
               {shouldShowDateSeparator && (
@@ -1015,19 +1026,23 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                 className={`flex gap-2.5 items-end w-full ${isMe ? 'justify-end' : 'justify-start'}`}
               >
                 {!isMe && (
-                  <SmartAvatar
-                    jid={msg.remote_sender}
-                    name={(() => {
-                      const msgContactRecord = contacts?.find(
-                        (c: any) => c.remote_jid === msg.remote_sender,
-                      )
-                      return msgContactRecord?.nickname || msg.sender_name || msgContactRecord?.name
-                    })()}
-                    instanceKey={device?.instance_key}
-                    contactRecord={contacts?.find((c: any) => c.remote_jid === msg.remote_sender)}
-                    className="h-7 w-7 border border-chat-border shadow-sm flex-shrink-0 mb-1 hidden sm:block"
-                    fallbackClassName="bg-chat-panel text-chat-muted text-xs"
-                  />
+                  shouldShowReceivedAvatar ? (
+                    <SmartAvatar
+                      jid={msg.remote_sender}
+                      name={(() => {
+                        const msgContactRecord = contacts?.find(
+                          (c: any) => c.remote_jid === msg.remote_sender,
+                        )
+                        return msgContactRecord?.nickname || msg.sender_name || msgContactRecord?.name
+                      })()}
+                      instanceKey={device?.instance_key}
+                      contactRecord={contacts?.find((c: any) => c.remote_jid === msg.remote_sender)}
+                      className="h-7 w-7 border border-chat-border shadow-sm flex-shrink-0 mb-1 hidden sm:block"
+                      fallbackClassName="bg-chat-panel text-chat-muted text-xs"
+                    />
+                  ) : (
+                    <div className="h-7 w-7 flex-shrink-0 mb-1 hidden sm:block" />
+                  )
                 )}
                 <div
                   className={`max-w-[88%] sm:max-w-[78%] rounded-2xl px-3.5 py-2 shadow-chat-bubble relative group transition-all duration-150 ${
