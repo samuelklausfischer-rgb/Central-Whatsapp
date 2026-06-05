@@ -2,6 +2,11 @@ import supabase from '@/lib/supabase/client'
 import type { Device } from '@/lib/supabase/types'
 
 export const getDevices = async () => {
+  const { data } = await supabase.from('devices').select('*').is('deleted_at', null).order('name')
+  return (data as Device[]) || []
+}
+
+export const getAllDevices = async () => {
   const { data } = await supabase.from('devices').select('*').order('name')
   return (data as Device[]) || []
 }

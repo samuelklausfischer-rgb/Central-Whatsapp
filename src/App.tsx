@@ -17,6 +17,7 @@ import SettingsLayout from './pages/settings/SettingsLayout'
 import GeneralSettings from './pages/settings/GeneralSettings'
 import LabelsSettings from './pages/settings/LabelsSettings'
 import AiAssistantSettings from './pages/settings/AiAssistantSettings'
+import InstancesSettings from './pages/settings/InstancesSettings'
 import Login from './pages/Login'
 import { AuthProvider, useAuth } from './hooks/use-auth'
 import AdminPage from './pages/admin/AdminPage'
@@ -64,6 +65,9 @@ const App = () => (
                   <Route path="general" element={<GeneralSettings />} />
                   <Route path="labels" element={<LabelsSettings />} />
                   <Route path="ai-assistant" element={<AiAssistantSettings />} />
+                  <Route element={<AdminRoute />}>
+                    <Route path="instances" element={<InstancesSettings />} />
+                  </Route>
                   <Route index element={<Navigate to="general" replace />} />
                 </Route>
               </Route>

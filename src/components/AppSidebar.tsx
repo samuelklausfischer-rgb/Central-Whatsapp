@@ -127,6 +127,19 @@ export function AppSidebar() {
                       </Link>
                     </SidebarMenuSubButton>
                   </SidebarMenuSubItem>
+                  {user?.is_admin && (
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton
+                        asChild
+                        isActive={location.pathname === '/settings/instances'}
+                      >
+                        <Link to="/settings/instances" className="py-4">
+                          <Smartphone className="h-4 w-4" />
+                          <span>Instâncias Evolution</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                  )}
                   <SidebarMenuSubItem>
                     <SidebarMenuSubButton
                       asChild

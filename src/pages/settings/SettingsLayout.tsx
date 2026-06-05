@@ -1,8 +1,10 @@
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useAuth } from '@/hooks/use-auth'
 
 export default function SettingsLayout() {
   const location = useLocation()
+  const { user } = useAuth()
 
   const currentTab = location.pathname.includes('/settings/devices')
     ? 'devices'
@@ -10,7 +12,9 @@ export default function SettingsLayout() {
       ? 'labels'
       : location.pathname.includes('/settings/ai-assistant')
         ? 'ai-assistant'
-        : 'general'
+        : location.pathname.includes('/settings/instances')
+          ? 'instances'
+          : 'general'
 
   return (
     <div className="flex flex-col gap-6">
@@ -35,6 +39,11 @@ export default function SettingsLayout() {
           <TabsTrigger value="ai-assistant" asChild>
             <Link to="/settings/ai-assistant">Assistente IA</Link>
           </TabsTrigger>
+          {user?.is_admin && (
+            <TabsTrigger value="instances" asChild>
+              <Link to="/settings/instances">Instâncias Evolution</Link>
+            </TabsTrigger>
+          )}
         </TabsList>
       </Tabs>
 

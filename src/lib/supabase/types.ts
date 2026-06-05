@@ -21,6 +21,7 @@ export interface Device {
   signature: string | null
   avatar_url: string | null
   avatar_updated_at: string | null
+  deleted_at: string | null
   created_at: string
   updated_at: string
 }
