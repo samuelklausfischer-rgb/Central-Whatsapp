@@ -12,6 +12,9 @@ import {
   AlertCircle,
   Smartphone,
   QrCode,
+  History,
+  Play,
+  Square,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -36,6 +39,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { Progress } from '@/components/ui/progress'
 import { useToast } from '@/hooks/use-toast'
 import {
   listEvolutionInstances,
@@ -49,6 +53,17 @@ import {
   type EvolutionInstance,
   type QrCodeData,
 } from '@/services/evolution_instances'
+import {
+  FINANCEIRO_MEDIMAGEM_INSTANCE,
+  previewHistoryImport,
+  startHistoryImport,
+  runHistoryImport,
+  getHistoryImportStatus,
+  cancelHistoryImport,
+  EvolutionHistoryImportError,
+  type EvolutionHistoryImportJob,
+  type EvolutionHistoryPreview,
+} from '@/services/evolution_history_import'
 
 const statusBadge = (normalizedStatus: string) => {
   switch (normalizedStatus) {
@@ -68,6 +83,17 @@ const statusBadge = (normalizedStatus: string) => {
 }
 
 function formatError(err: unknown): string {
+  if (err instanceof EvolutionHistoryImportError) {
+    let msg = err.message
+    if (err.details) {
+      const detailStr = typeof err.details === 'string' ? err.details
+        : JSON.stringify(err.details).slice(0, 300)
+      msg += `\nDetalhes: ${detailStr}`
+    }
+    if (err.job?.error_message) msg += `\nJob: ${err.job.error_message}`
+    return msg
+  }
+
   if (err instanceof EvolutionApiError) {
     let msg = err.message
     if (err.details) {
@@ -84,6 +110,21 @@ function formatError(err: unknown): string {
   }
   return err instanceof Error ? err.message : 'Erro desconhecido'
 }
+
+const historyStatusLabel = (status?: string | null) => {
+  switch (status) {
+    case 'pending': return 'Pendente'
+    case 'running': return 'Rodando'
+    case 'paused': return 'Pausado'
+    case 'completed': return 'Concluído'
+    case 'failed': return 'Falhou'
+    case 'cancelled': return 'Cancelado'
+    default: return 'Sem job'
+  }
+}
+
+const isActiveHistoryJob = (job: EvolutionHistoryImportJob | null) =>
+  Boolean(job && ['pending', 'running', 'paused'].includes(job.status))
 
 export default function InstancesSettings() {
   const { toast } = useToast()
@@ -111,6 +152,14 @@ export default function InstancesSettings() {
   // Delete confirmation
   const [deleteConfirm, setDeleteConfirm] = useState<EvolutionInstance | null>(null)
   const [deleting, setDeleting] = useState(false)
+
+  // History import modal
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyInstance, setHistoryInstance] = useState(FINANCEIRO_MEDIMAGEM_INSTANCE)
+  const [historyPreview, setHistoryPreview] = useState<EvolutionHistoryPreview | null>(null)
+  const [historyJob, setHistoryJob] = useState<EvolutionHistoryImportJob | null>(null)
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyRunning, setHistoryRunning] = useState(false)
 
   const loadInstances = useCallback(async () => {
     setLoading(true)
@@ -266,6 +315,104 @@ export default function InstancesSettings() {
     }
   }
 
+  const openHistoryImport = async (instanceName: string) => {
+    setHistoryInstance(instanceName)
+    setHistoryOpen(true)
+    setHistoryLoading(true)
+    setHistoryPreview(null)
+    setHistoryJob(null)
+    try {
+      const [preview, status] = await Promise.all([
+        previewHistoryImport(instanceName),
+        getHistoryImportStatus({ instanceName }),
+      ])
+      setHistoryPreview(preview)
+      setHistoryJob(status.job || preview.latestJob)
+    } catch (err: unknown) {
+      toast({ title: 'Erro ao carregar preview', description: formatError(err), variant: 'destructive' })
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
+  const refreshHistory = async () => {
+    setHistoryLoading(true)
+    try {
+      const [preview, status] = await Promise.all([
+        previewHistoryImport(historyInstance),
+        getHistoryImportStatus({ instanceName: historyInstance, jobId: historyJob?.id }),
+      ])
+      setHistoryPreview(preview)
+      setHistoryJob(status.job || preview.latestJob)
+    } catch (err: unknown) {
+      toast({ title: 'Erro ao atualizar histórico', description: formatError(err), variant: 'destructive' })
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
+  const startHistory = async (mode: 'test' | 'last_1000' | 'all') => {
+    setHistoryRunning(true)
+    try {
+      const result = await startHistoryImport({
+        instanceName: historyInstance,
+        mode,
+        pageSize: 50,
+        recentMediaDays: 7,
+      })
+      setHistoryJob(result.job)
+      toast({ title: 'Importação criada', description: `${historyStatusLabel(result.job.status)} - página ${result.job.current_page}` })
+    } catch (err: unknown) {
+      if (err instanceof EvolutionHistoryImportError && err.job) setHistoryJob(err.job)
+      toast({ title: 'Erro ao iniciar importação', description: formatError(err), variant: 'destructive' })
+    } finally {
+      setHistoryRunning(false)
+    }
+  }
+
+  const processHistoryBatch = async () => {
+    if (!historyJob) return
+    setHistoryRunning(true)
+    try {
+      const result = await runHistoryImport({
+        instanceName: historyInstance,
+        jobId: historyJob.id,
+        pagesPerRun: 2,
+      })
+      setHistoryJob(result.job)
+      toast({
+        title: result.done ? 'Importação concluída' : 'Lote processado',
+        description: `Inseridas: ${result.inserted} | Duplicadas: ${result.skipped} | Falhas: ${result.failed}`,
+      })
+      if (result.done) await refreshHistory()
+    } catch (err: unknown) {
+      if (err instanceof EvolutionHistoryImportError && err.job) setHistoryJob(err.job)
+      toast({ title: 'Erro ao processar lote', description: formatError(err), variant: 'destructive' })
+    } finally {
+      setHistoryRunning(false)
+    }
+  }
+
+  const cancelHistory = async () => {
+    if (!historyJob) return
+    setHistoryRunning(true)
+    try {
+      const result = await cancelHistoryImport({ instanceName: historyInstance, jobId: historyJob.id })
+      setHistoryJob(result.job)
+      toast({ title: 'Importação cancelada' })
+    } catch (err: unknown) {
+      toast({ title: 'Erro ao cancelar importação', description: formatError(err), variant: 'destructive' })
+    } finally {
+      setHistoryRunning(false)
+    }
+  }
+
+  const historyTargetPages = historyJob?.target_pages || historyPreview?.totalPages || 0
+  const historyProcessedPages = historyJob ? Math.max(0, Math.min(historyTargetPages, historyJob.current_page - 1)) : 0
+  const historyProgress = historyTargetPages > 0 ? Math.round((historyProcessedPages / historyTargetPages) * 100) : 0
+  const canStartHistory = !isActiveHistoryJob(historyJob)
+  const canProcessHistory = Boolean(historyJob && isActiveHistoryJob(historyJob) && historyJob.current_page <= historyJob.target_pages)
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -412,6 +559,18 @@ export default function InstancesSettings() {
                           {isActionLoading ? <RefreshCw className="h-3 w-3 animate-spin" /> : <QrCode className="h-3 w-3" />}
                           <span className="hidden sm:inline">Webhook</span>
                         </Button>
+                        {name === FINANCEIRO_MEDIMAGEM_INSTANCE && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs gap-1"
+                            disabled={!name || isActionLoading}
+                            onClick={() => openHistoryImport(name)}
+                          >
+                            <History className="h-3 w-3" />
+                            <span className="hidden sm:inline">Histórico</span>
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="sm"
@@ -525,6 +684,117 @@ export default function InstancesSettings() {
             </Button>
             <Button variant="outline" onClick={() => setQrOpen(false)} className="w-full sm:w-auto">
               Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* History Import Modal */}
+      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+        <DialogContent className="sm:max-w-2xl bg-card border-border">
+          <DialogHeader>
+            <DialogTitle>Importar histórico</DialogTitle>
+            <DialogDescription>
+              Instância: <strong>{historyInstance}</strong>. Mensagens serão sincronizadas; mídia real somente dos últimos 7 dias.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {historyLoading ? (
+              <div className="py-8 flex flex-col items-center gap-3 text-muted-foreground">
+                <RefreshCw className="h-6 w-6 animate-spin" />
+                Carregando dados do histórico...
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="rounded-lg border border-border bg-muted p-3">
+                    <p className="text-xs text-muted-foreground">Evolution</p>
+                    <p className="text-xl font-semibold">{historyPreview?.totalEvolution ?? '-'}</p>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted p-3">
+                    <p className="text-xs text-muted-foreground">Sistema</p>
+                    <p className="text-xl font-semibold">{historyPreview?.totalLocal ?? '-'}</p>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted p-3">
+                    <p className="text-xs text-muted-foreground">Faltantes</p>
+                    <p className="text-xl font-semibold">{historyPreview?.estimatedMissing ?? '-'}</p>
+                  </div>
+                  <div className="rounded-lg border border-border bg-muted p-3">
+                    <p className="text-xs text-muted-foreground">Páginas</p>
+                    <p className="text-xl font-semibold">{historyPreview?.totalPages ?? '-'}</p>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-border p-4 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <div>
+                      <p className="font-medium">Status do job</p>
+                      <p className="text-sm text-muted-foreground">
+                        {historyStatusLabel(historyJob?.status)}
+                        {historyJob ? ` - página ${historyProcessedPages}/${historyTargetPages}` : ''}
+                      </p>
+                    </div>
+                    <Badge variant={historyJob?.status === 'completed' ? 'default' : historyJob?.status === 'failed' ? 'destructive' : 'outline'}>
+                      {historyStatusLabel(historyJob?.status)}
+                    </Badge>
+                  </div>
+
+                  <Progress value={historyProgress} />
+
+                  <div className="grid grid-cols-3 gap-2 text-sm">
+                    <div>
+                      <p className="text-muted-foreground">Inseridas</p>
+                      <p className="font-medium">{historyJob?.inserted_count ?? 0}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Duplicadas</p>
+                      <p className="font-medium">{historyJob?.skipped_count ?? 0}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Falhas</p>
+                      <p className="font-medium">{historyJob?.failed_count ?? 0}</p>
+                    </div>
+                  </div>
+
+                  {historyJob?.error_message && (
+                    <p className="rounded-md border border-red-500/20 bg-red-500/10 p-2 text-sm text-red-400">
+                      {historyJob.error_message}
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/10 p-3 text-sm text-muted-foreground">
+                  Mensagens históricas entram como lidas, sem notificação e sem incrementar não-lidas. Arquivos de mídia antigos ficam como placeholder.
+                </div>
+              </>
+            )}
+          </div>
+
+          <DialogFooter className="flex-col sm:flex-row sm:flex-wrap gap-2">
+            <Button variant="outline" onClick={refreshHistory} disabled={historyLoading || historyRunning} className="gap-2 w-full sm:w-auto">
+              <RefreshCw className={`h-4 w-4 ${historyLoading ? 'animate-spin' : ''}`} />
+              Atualizar
+            </Button>
+            <Button variant="outline" onClick={() => startHistory('test')} disabled={!canStartHistory || historyLoading || historyRunning} className="gap-2 w-full sm:w-auto">
+              <Play className="h-4 w-4" />
+              Testar 2 páginas
+            </Button>
+            <Button variant="outline" onClick={() => startHistory('last_1000')} disabled={!canStartHistory || historyLoading || historyRunning} className="gap-2 w-full sm:w-auto">
+              <Play className="h-4 w-4" />
+              Importar 1000
+            </Button>
+            <Button variant="outline" onClick={() => startHistory('all')} disabled={!canStartHistory || historyLoading || historyRunning} className="gap-2 w-full sm:w-auto">
+              <Play className="h-4 w-4" />
+              Importar tudo
+            </Button>
+            <Button onClick={processHistoryBatch} disabled={!canProcessHistory || historyLoading || historyRunning} className="gap-2 w-full sm:w-auto">
+              {historyRunning ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              Processar lote
+            </Button>
+            <Button variant="destructive" onClick={cancelHistory} disabled={!isActiveHistoryJob(historyJob) || historyLoading || historyRunning} className="gap-2 w-full sm:w-auto">
+              <Square className="h-4 w-4" />
+              Cancelar
             </Button>
           </DialogFooter>
         </DialogContent>
