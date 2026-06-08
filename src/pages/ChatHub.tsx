@@ -413,10 +413,10 @@ export default function ChatHub() {
               onToggleArchived={() => setShowArchived(!showArchived)}
             />
             <div
-              className="absolute right-0 top-0 bottom-0 w-4 cursor-col-resize z-20 -mr-2"
+              className="absolute -right-[6px] top-0 bottom-0 w-[14px] cursor-col-resize z-10 flex items-center justify-center"
               onPointerDown={handlePointerDown}
             >
-              <div className="w-1.5 h-full mx-auto hover:bg-blue-400/40 active:bg-blue-500/50 transition-colors rounded-full" />
+              <div className="w-1 h-3/5 mx-auto hover:bg-blue-400/40 active:bg-blue-500/50 transition-colors rounded-full" />
             </div>
           </div>
         )

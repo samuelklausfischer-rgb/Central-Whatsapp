@@ -245,7 +245,7 @@ export function ChatList({
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="px-2 py-1 flex flex-col gap-0.5">
+        <div className="pl-2 pr-3 py-1 flex flex-col gap-0.5">
           {filteredConversations.map((conv) => {
             const contact = contacts.find((c) => c.remote_jid === conv.remote_sender)
             const isSelected = selectedContact === conv.remote_sender
@@ -270,7 +270,7 @@ export function ChatList({
                       }
                     }}
                     className={cn(
-                      'group relative flex items-center gap-3 px-2.5 py-2.5 rounded-md transition-colors duration-150 text-left w-full hover:bg-chat-hover cursor-pointer',
+                      'group relative grid grid-cols-[auto_1fr_auto] items-center gap-2.5 px-2.5 py-2.5 rounded-md transition-colors duration-150 text-left w-full hover:bg-chat-hover cursor-pointer',
                       isSelected ? 'bg-chat-active' : '',
                       isPendingReply ? 'border-l-2 border-chat-text/10' : '',
                     )}
@@ -287,7 +287,7 @@ export function ChatList({
                   fallbackClassName="text-chat-muted"
                 />
 
-                <div className="flex-1 min-w-0 overflow-hidden">
+                <div className="min-w-0 overflow-hidden">
                   <h3 className="font-medium text-chat-text truncate">{name}</h3>
                   <div className="flex items-center gap-1 mt-0.5">
                     {conv.lastMessage.direction === 'outbound' &&
@@ -310,11 +310,11 @@ export function ChatList({
                   </div>
                 </div>
 
-                <div className="flex flex-col items-end gap-0.5 shrink-0 min-w-[40px]">
+                <div className="flex flex-col items-end gap-0.5 min-w-0 w-[72px] overflow-hidden">
                   <span className="text-[11px] text-chat-muted tabular-nums whitespace-nowrap leading-none pt-0.5">
                     {formatChatTimestamp(conv.lastMessage?.created_at)}
                   </span>
-                  <div className="flex items-center gap-0.5 h-7">
+                  <div className="flex items-center justify-end gap-0.5 h-7">
                     {isPendingReply ? (
                       <div
                         onClick={(e) => {
