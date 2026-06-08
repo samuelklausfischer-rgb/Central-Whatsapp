@@ -22,6 +22,23 @@ export const getConversationSummaries = async (deviceId: string): Promise<Conver
   return (data as ConversationSummary[]) || []
 }
 
+export const getConversationMessages = async (
+  deviceId: string,
+  remoteSender: string,
+  limit = 500
+): Promise<Message[]> => {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('*')
+    .eq('device_id', deviceId)
+    .eq('remote_sender', remoteSender)
+    .is('deleted_at', null)
+    .order('created_at', { ascending: true })
+    .limit(limit)
+  if (error) throw new Error(error.message)
+  return (data as Message[]) || []
+}
+
 export const getMessages = async (deviceId: string) => {
   const { data } = await supabase
     .from('messages')

@@ -4,7 +4,7 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { ChatList } from '@/components/chat/ChatList'
 import { ChatWindow } from '@/components/chat/ChatWindow'
 import { syncDeviceAvatar } from '@/services/devices'
-import { getMessages, getConversationSummaries, type ConversationSummary } from '@/services/messages'
+import { getMessages, getConversationSummaries, getConversationMessages, type ConversationSummary } from '@/services/messages'
 import { getContacts } from '@/services/contacts'
 import { getMyStates, type ConversationUserState } from '@/services/conversation_states'
 import { useRealtime } from '@/hooks/use-realtime'
@@ -52,6 +52,7 @@ export default function ChatHub() {
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null)
   const [messages, setMessages] = useState<any[]>([])
   const [conversationSummaries, setConversationSummaries] = useState<ConversationSummary[]>([])
+  const [conversationMessages, setConversationMessages] = useState<any[]>([])
   const [contacts, setContacts] = useState<any[]>([])
   const [selectedContact, setSelectedContact] = useState<string | null>(null)
   const [userStates, setUserStates] = useState<ConversationUserState[]>([])
@@ -129,9 +130,11 @@ export default function ChatHub() {
       getMessages(selectedDeviceId).then(setMessages)
       getConversationSummaries(selectedDeviceId).then(setConversationSummaries)
       setSelectedContact(null)
+      setConversationMessages([])
     } else {
       setMessages([])
       setConversationSummaries([])
+      setConversationMessages([])
       setSelectedContact(null)
     }
   }, [selectedDeviceId])
@@ -169,6 +172,17 @@ export default function ChatHub() {
       else if (e.action === 'delete')
         setMessages((prev) => prev.filter((m) => m.id !== e.record.id))
 
+      // Atualizar mensagens da conversa aberta
+      if (e.record.remote_sender === selectedContact) {
+        if (e.action === 'create') {
+          setConversationMessages((prev) => [...prev, e.record])
+        } else if (e.action === 'update') {
+          setConversationMessages((prev) => prev.map((m) => (m.id === e.record.id ? e.record : m)))
+        } else if (e.action === 'delete') {
+          setConversationMessages((prev) => prev.filter((m) => m.id !== e.record.id))
+        }
+      }
+
       // Atualizar resumos de conversas quando chega mensagem nova
       if (e.action === 'create') {
         getConversationSummaries(selectedDeviceId).then(setConversationSummaries)
@@ -192,6 +206,15 @@ export default function ChatHub() {
       setUserStates((prev) => prev.filter((s) => s.id !== e.record.id))
     }
   })
+
+  // Carregar mensagens da conversa selecionada
+  useEffect(() => {
+    if (selectedDeviceId && selectedContact) {
+      getConversationMessages(selectedDeviceId, selectedContact).then(setConversationMessages)
+    } else {
+      setConversationMessages([])
+    }
+  }, [selectedDeviceId, selectedContact])
 
   const handleOpenInfo = useCallback((deviceId: string, remoteSender: string) => {
     setSelectedContact(remoteSender)
@@ -286,8 +309,13 @@ export default function ChatHub() {
   const selectedDevice = devices.find((d) => d.id === selectedDeviceId)
 
   const currentConversation = useMemo(() => {
-    return conversations.find((c) => c.remote_sender === selectedContact)
-  }, [conversations, selectedContact])
+    const baseConv = conversations.find((c) => c.remote_sender === selectedContact)
+    if (!baseConv) return undefined
+    return {
+      ...baseConv,
+      messages: conversationMessages,
+    }
+  }, [conversations, selectedContact, conversationMessages])
 
   const containerRef = useRef<HTMLDivElement>(null)
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT)
