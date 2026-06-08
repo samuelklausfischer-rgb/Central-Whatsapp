@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   RefreshCw,
   Plus,
@@ -160,6 +160,8 @@ export default function InstancesSettings() {
   const [historyJob, setHistoryJob] = useState<EvolutionHistoryImportJob | null>(null)
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyRunning, setHistoryRunning] = useState(false)
+  const [historyAutoRunning, setHistoryAutoRunning] = useState(false)
+  const historyAutoStopRef = useRef(false)
 
   const loadInstances = useCallback(async () => {
     setLoading(true)
@@ -352,6 +354,7 @@ export default function InstancesSettings() {
   }
 
   const startHistory = async (mode: 'test' | 'last_1000' | 'all') => {
+    historyAutoStopRef.current = true
     setHistoryRunning(true)
     try {
       const result = await startHistoryImport({
@@ -372,6 +375,7 @@ export default function InstancesSettings() {
 
   const processHistoryBatch = async () => {
     if (!historyJob) return
+    historyAutoStopRef.current = true
     setHistoryRunning(true)
     try {
       const result = await runHistoryImport({
@@ -393,8 +397,68 @@ export default function InstancesSettings() {
     }
   }
 
+  const processHistoryUntilDone = async () => {
+    if (!historyJob) return
+    historyAutoStopRef.current = false
+    setHistoryAutoRunning(true)
+    setHistoryRunning(true)
+
+    let currentJob = historyJob
+    let totalInserted = 0
+    let totalSkipped = 0
+    let totalFailed = 0
+
+    try {
+      while (!historyAutoStopRef.current && isActiveHistoryJob(currentJob) && currentJob.current_page <= currentJob.target_pages) {
+        const result = await runHistoryImport({
+          instanceName: historyInstance,
+          jobId: currentJob.id,
+          pagesPerRun: 2,
+        })
+
+        totalInserted += result.inserted
+        totalSkipped += result.skipped
+        totalFailed += result.failed
+        currentJob = result.job
+        setHistoryJob(result.job)
+
+        if (result.failed > 0 || result.job.failed_count > 0 || result.job.status === 'failed') {
+          toast({
+            title: 'Processamento pausado por falha',
+            description: `Inseridas: ${totalInserted} | Duplicadas: ${totalSkipped} | Falhas: ${totalFailed}`,
+            variant: 'destructive',
+          })
+          return
+        }
+
+        if (result.done || result.job.status === 'completed') {
+          await refreshHistory()
+          toast({
+            title: 'Importação concluída',
+            description: `Inseridas: ${totalInserted} | Duplicadas: ${totalSkipped} | Falhas: ${totalFailed}`,
+          })
+          return
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 250))
+      }
+
+      if (historyAutoStopRef.current) {
+        toast({ title: 'Processamento automático interrompido' })
+      }
+    } catch (err: unknown) {
+      if (err instanceof EvolutionHistoryImportError && err.job) setHistoryJob(err.job)
+      toast({ title: 'Erro ao processar automaticamente', description: formatError(err), variant: 'destructive' })
+    } finally {
+      historyAutoStopRef.current = true
+      setHistoryAutoRunning(false)
+      setHistoryRunning(false)
+    }
+  }
+
   const cancelHistory = async () => {
     if (!historyJob) return
+    historyAutoStopRef.current = true
     setHistoryRunning(true)
     try {
       const result = await cancelHistoryImport({ instanceName: historyInstance, jobId: historyJob.id })
@@ -762,6 +826,12 @@ export default function InstancesSettings() {
                       {historyJob.error_message}
                     </p>
                   )}
+
+                  {historyAutoRunning && (
+                    <p className="rounded-md border border-blue-500/20 bg-blue-500/10 p-2 text-sm text-blue-400">
+                      Processando automaticamente. Pode fazer outras coisas, mas mantenha esta aba aberta.
+                    </p>
+                  )}
                 </div>
 
                 <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/10 p-3 text-sm text-muted-foreground">
@@ -772,27 +842,31 @@ export default function InstancesSettings() {
           </div>
 
           <DialogFooter className="flex-col sm:flex-row sm:flex-wrap gap-2">
-            <Button variant="outline" onClick={refreshHistory} disabled={historyLoading || historyRunning} className="gap-2 w-full sm:w-auto">
+            <Button variant="outline" onClick={refreshHistory} disabled={historyLoading || historyRunning || historyAutoRunning} className="gap-2 w-full sm:w-auto">
               <RefreshCw className={`h-4 w-4 ${historyLoading ? 'animate-spin' : ''}`} />
               Atualizar
             </Button>
-            <Button variant="outline" onClick={() => startHistory('test')} disabled={!canStartHistory || historyLoading || historyRunning} className="gap-2 w-full sm:w-auto">
+            <Button variant="outline" onClick={() => startHistory('test')} disabled={!canStartHistory || historyLoading || historyRunning || historyAutoRunning} className="gap-2 w-full sm:w-auto">
               <Play className="h-4 w-4" />
               Testar 2 páginas
             </Button>
-            <Button variant="outline" onClick={() => startHistory('last_1000')} disabled={!canStartHistory || historyLoading || historyRunning} className="gap-2 w-full sm:w-auto">
+            <Button variant="outline" onClick={() => startHistory('last_1000')} disabled={!canStartHistory || historyLoading || historyRunning || historyAutoRunning} className="gap-2 w-full sm:w-auto">
               <Play className="h-4 w-4" />
               Importar 1000
             </Button>
-            <Button variant="outline" onClick={() => startHistory('all')} disabled={!canStartHistory || historyLoading || historyRunning} className="gap-2 w-full sm:w-auto">
+            <Button variant="outline" onClick={() => startHistory('all')} disabled={!canStartHistory || historyLoading || historyRunning || historyAutoRunning} className="gap-2 w-full sm:w-auto">
               <Play className="h-4 w-4" />
               Importar tudo
             </Button>
-            <Button onClick={processHistoryBatch} disabled={!canProcessHistory || historyLoading || historyRunning} className="gap-2 w-full sm:w-auto">
+            <Button variant="outline" onClick={processHistoryBatch} disabled={!canProcessHistory || historyLoading || historyRunning || historyAutoRunning} className="gap-2 w-full sm:w-auto">
               {historyRunning ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
               Processar lote
             </Button>
-            <Button variant="destructive" onClick={cancelHistory} disabled={!isActiveHistoryJob(historyJob) || historyLoading || historyRunning} className="gap-2 w-full sm:w-auto">
+            <Button onClick={processHistoryUntilDone} disabled={!canProcessHistory || historyLoading || historyRunning || historyAutoRunning} className="gap-2 w-full sm:w-auto">
+              {historyAutoRunning ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              Processar até concluir
+            </Button>
+            <Button variant="destructive" onClick={cancelHistory} disabled={!isActiveHistoryJob(historyJob) || historyLoading} className="gap-2 w-full sm:w-auto">
               <Square className="h-4 w-4" />
               Cancelar
             </Button>
