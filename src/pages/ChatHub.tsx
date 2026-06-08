@@ -193,7 +193,10 @@ export default function ChatHub() {
   const refreshConversationStates = useCallback(async () => {
     const states = await getMyStates()
     setUserStates(states)
-  }, [])
+    if (selectedDeviceId) {
+      getConversationSummaries(selectedDeviceId).then(setConversationSummaries)
+    }
+  }, [selectedDeviceId])
 
   useRealtime('conversation_user_states', (e) => {
     if (e.record.user_id !== user?.id) return
@@ -233,6 +236,17 @@ export default function ChatHub() {
           (s) => s.device_id === selectedDeviceId && s.remote_sender === summary.remote_sender,
         )
 
+        let unreadCount = summary.unread_count
+        if (state?.manual_unread) {
+          unreadCount = Math.max(1, unreadCount)
+        } else if (state?.last_read_at) {
+          const lastRead = new Date(state.last_read_at)
+          const lastMsgDate = new Date(summary.last_message_created_at)
+          if (lastMsgDate <= lastRead) {
+            unreadCount = 0
+          }
+        }
+
         return {
           remote_sender: summary.remote_sender,
           sender_name: summary.sender_name,
@@ -245,7 +259,7 @@ export default function ChatHub() {
             attachments: summary.last_message_attachments,
             sender_name: summary.sender_name,
           },
-          unread_count: summary.unread_count,
+          unread_count: unreadCount,
           message_count: summary.message_count,
           pinned: state?.pinned ?? false,
           archived: state?.archived ?? false,
