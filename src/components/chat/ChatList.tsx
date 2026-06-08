@@ -277,9 +277,6 @@ export function ChatList({
                       isPendingReply ? 'border-l-2 border-chat-text/10' : '',
                     )}
                   >
-                {convState?.pinned && (
-                  <Pin className="h-3.5 w-3.5 text-chat-muted shrink-0 fill-chat-muted/30" />
-                )}
                 <SmartAvatar
                   jid={conv.remote_sender}
                   name={name}
@@ -317,6 +314,9 @@ export function ChatList({
                     {formatChatTimestamp(conv.lastMessage?.created_at)}
                   </span>
                   <div className="flex items-center justify-end gap-0.5 h-7">
+                    {convState?.pinned && (
+                      <Pin className="h-3 w-3 text-chat-muted shrink-0 fill-chat-muted/30" />
+                    )}
                     {isPendingReply ? (
                       <div
                         onClick={(e) => {
