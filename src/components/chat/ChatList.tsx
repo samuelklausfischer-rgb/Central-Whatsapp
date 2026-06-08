@@ -81,7 +81,7 @@ const getConversationName = (conv: any, contact: any) => {
     return contact?.nickname || contact?.name || conv.remote_sender
   }
 
-  return contact?.nickname || conv.sender_name || contact?.name || conv.remote_sender
+  return contact?.nickname || contact?.name || conv.sender_name || conv.remote_sender
 }
 
 function previewLabel(content: string): string {

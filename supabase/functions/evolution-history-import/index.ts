@@ -434,13 +434,13 @@ function normalizeMessage(raw: unknown, deviceId: string, instanceName: string, 
   const mediaInfo = getMediaInfo(msgObj)
   const content = extractContent(msgObj)
   const shouldFetchMedia = job.media_mode === 'hybrid' && mediaInfo && isRecent(createdAt, job.recent_media_days)
-  const senderName = stringFrom(record.pushName) || (isFromMe ? instanceName : '')
+  const senderName = stringFrom(record.pushName) || ''
 
   return {
     raw: record,
     mediaInfo,
     shouldFetchMedia,
-    contact: { remote_jid: remoteSender, name: !String(remoteSender).includes('@g.us') ? senderName : '' },
+    contact: { remote_jid: remoteSender, name: (!isFromMe && !String(remoteSender).includes('@g.us')) ? senderName : '' },
     row: {
       content,
       device_id: deviceId,

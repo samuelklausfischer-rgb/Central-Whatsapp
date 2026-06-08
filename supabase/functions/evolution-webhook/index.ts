@@ -543,8 +543,8 @@ Deno.serve(async (req: Request) => {
 
   const mediaInfo = getMediaInfo(msgObj)
   const content = extractContent(msgObj)
-  const nameToUse = pushName || (isFromMe ? body.instance : '')
-  let contactName = isGroup ? '' : nameToUse
+  const nameToUse = pushName || ''
+  let contactName = (!isFromMe && !isGroup) ? nameToUse : ''
   let contactAvatarUrl = messageData.profilePicUrl || ''
 
   if (isGroup) {

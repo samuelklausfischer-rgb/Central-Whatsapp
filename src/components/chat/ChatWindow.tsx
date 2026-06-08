@@ -737,10 +737,10 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
       ? contactRecord?.name && contactRecord.name !== 'Unknown Sender'
         ? contactRecord.name
         : contact
-      : conversation?.sender_name && conversation.sender_name !== 'Unknown Sender'
-        ? conversation.sender_name
-        : contactRecord?.name && contactRecord.name !== 'Unknown Sender'
+      : contactRecord?.name && contactRecord.name !== 'Unknown Sender'
         ? contactRecord.name
+        : conversation?.sender_name && conversation.sender_name !== 'Unknown Sender'
+        ? conversation.sender_name
         : contact === 'Unknown Sender'
           ? contact
           : `+${contact}`
@@ -1033,7 +1033,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                         const msgContactRecord = contacts?.find(
                           (c: any) => c.remote_jid === msg.remote_sender,
                         )
-                        return msgContactRecord?.nickname || msg.sender_name || msgContactRecord?.name
+                        return msgContactRecord?.nickname || msgContactRecord?.name || msg.sender_name
                       })()}
                       instanceKey={device?.instance_key}
                       contactRecord={contacts?.find((c: any) => c.remote_jid === msg.remote_sender)}
