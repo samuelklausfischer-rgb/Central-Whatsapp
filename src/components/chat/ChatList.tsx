@@ -11,7 +11,8 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { SmartAvatar } from '@/components/chat/SmartAvatar'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
-import { format } from 'date-fns'
+import { format, startOfDay } from 'date-fns'
+import { ptBR } from 'date-fns/locale'
 import { Check, CheckCheck, Smartphone, Search, X, MessageCircle, Pin, Archive } from 'lucide-react'
 import { resolveContact } from '@/services/contacts'
 import { ConversationActionsMenu } from '@/components/chat/ConversationActionsMenu'
@@ -39,6 +40,39 @@ export interface ChatListProps {
 }
 
 const isGroupJid = (jid?: string) => Boolean(jid?.includes('@g.us'))
+
+function formatChatTimestamp(dateString: string): string {
+  const date = new Date(dateString)
+  const now = new Date()
+  const todayStart = startOfDay(now)
+  const yesterdayStart = startOfDay(new Date(now.getTime() - 24 * 60 * 60 * 1000))
+  const dateStart = startOfDay(date)
+
+  if (dateStart.getTime() === todayStart.getTime()) {
+    // Hoje: mostra apenas a hora (HH:mm)
+    return format(date, 'HH:mm')
+  }
+
+  if (dateStart.getTime() === yesterdayStart.getTime()) {
+    // Ontem: mostra "Ontem"
+    return 'Ontem'
+  }
+
+  const diffDays = Math.floor((todayStart.getTime() - dateStart.getTime()) / (24 * 60 * 60 * 1000))
+
+  if (diffDays <= 6) {
+    // Últimos 6 dias: mostra dia da semana abreviado
+    return format(date, 'EEE', { locale: ptBR })
+  }
+
+  if (date.getFullYear() === now.getFullYear()) {
+    // Mesmo ano: mostra DD/MM
+    return format(date, 'dd/MM')
+  }
+
+  // Ano anterior: mostra DD/MM/YY
+  return format(date, 'dd/MM/yy')
+}
 
 const getConversationName = (conv: any, contact: any) => {
   if (isGroupJid(conv.remote_sender)) {
@@ -255,7 +289,7 @@ export function ChatList({
                   <div className="flex justify-between items-baseline mb-1">
                     <h3 className="font-medium text-chat-text truncate pr-2">{name}</h3>
                     <span className="text-xs text-chat-muted tabular-nums whitespace-nowrap shrink-0">
-                      {format(new Date(conv.lastMessage.created_at), 'HH:mm')}
+                      {formatChatTimestamp(conv.lastMessage.created_at)}
                     </span>
                   </div>
 

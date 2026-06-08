@@ -1,6 +1,27 @@
 ﻿import supabase from '@/lib/supabase/client'
 import type { Message } from '@/lib/supabase/types'
 
+export interface ConversationSummary {
+  remote_sender: string
+  sender_name: string
+  last_message_id: string
+  last_message_content: string
+  last_message_direction: string
+  last_message_created_at: string
+  last_message_is_read: boolean
+  last_message_attachments: Record<string, unknown> | null
+  unread_count: number
+  message_count: number
+}
+
+export const getConversationSummaries = async (deviceId: string): Promise<ConversationSummary[]> => {
+  const { data, error } = await supabase.rpc('get_conversation_summaries', {
+    p_device_id: deviceId,
+  })
+  if (error) throw new Error(error.message)
+  return (data as ConversationSummary[]) || []
+}
+
 export const getMessages = async (deviceId: string) => {
   const { data } = await supabase
     .from('messages')
