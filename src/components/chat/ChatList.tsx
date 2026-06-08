@@ -41,8 +41,10 @@ export interface ChatListProps {
 
 const isGroupJid = (jid?: string) => Boolean(jid?.includes('@g.us'))
 
-function formatChatTimestamp(dateString: string): string {
+function formatChatTimestamp(dateString: string | undefined | null): string {
+  if (!dateString) return ''
   const date = new Date(dateString)
+  if (isNaN(date.getTime())) return ''
   const now = new Date()
   const todayStart = startOfDay(now)
   const yesterdayStart = startOfDay(new Date(now.getTime() - 24 * 60 * 60 * 1000))
@@ -285,15 +287,9 @@ export function ChatList({
                   fallbackClassName="text-chat-muted"
                 />
 
-                <div className="flex-1 overflow-hidden">
-                  <div className="flex justify-between items-baseline mb-1">
-                    <h3 className="font-medium text-chat-text truncate pr-2">{name}</h3>
-                    <span className="text-xs text-chat-muted tabular-nums whitespace-nowrap shrink-0">
-                      {formatChatTimestamp(conv.lastMessage.created_at)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-1">
+                <div className="flex-1 min-w-0 overflow-hidden">
+                  <h3 className="font-medium text-chat-text truncate">{name}</h3>
+                  <div className="flex items-center gap-1 mt-0.5">
                     {conv.lastMessage.direction === 'outbound' &&
                       (conv.lastMessage.is_read ? (
                         <CheckCheck className="h-3 w-3 text-blue-400 shrink-0" />
@@ -314,40 +310,42 @@ export function ChatList({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1 shrink-0">
-                  {isPendingReply ? (
-                    <div
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleResolve(conv.remote_sender)
-                      }}
-                      className="h-8 w-8 rounded-full bg-green-500/20 border border-green-500/40 flex items-center justify-center hover:bg-green-500/30 shrink-0 cursor-pointer transition-colors"
-                      title="Marcar como respondido"
-                    >
-                      <CheckCheck className="h-4 w-4 text-green-500" />
-                    </div>
-                  ) : conv.unread_count > 0 ? (
-                    <div className="h-5 min-w-5 rounded-full bg-primary flex items-center justify-center px-1.5 shrink-0">
-                      <span className="text-[10px] font-bold text-primary-foreground">
-                        {conv.unread_count}
-                      </span>
-                    </div>
-                  ) : null}
-                </div>
-
-                {conversationDeviceId && (
-                  <div className="absolute right-2 top-1/2 -translate-y-1/2 z-20">
-                    <ConversationActionsMenu
-                      deviceId={conversationDeviceId}
-                      remoteSender={conv.remote_sender}
-                      state={convState}
-                      unreadCount={conv.unread_count}
-                      onOpenInfo={onOpenInfo}
-                      isSelected={isSelected}
-                      isMobile={isMobile}
-                    />
+                <div className="flex flex-col items-end gap-0.5 shrink-0 min-w-[40px]">
+                  <span className="text-[11px] text-chat-muted tabular-nums whitespace-nowrap leading-none pt-0.5">
+                    {formatChatTimestamp(conv.lastMessage?.created_at)}
+                  </span>
+                  <div className="flex items-center gap-0.5 h-7">
+                    {isPendingReply ? (
+                      <div
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleResolve(conv.remote_sender)
+                        }}
+                        className="h-7 w-7 rounded-full bg-green-500/20 border border-green-500/40 flex items-center justify-center hover:bg-green-500/30 shrink-0 cursor-pointer transition-colors"
+                        title="Marcar como respondido"
+                      >
+                        <CheckCheck className="h-3.5 w-3.5 text-green-500" />
+                      </div>
+                    ) : conv.unread_count > 0 ? (
+                      <div className="h-5 min-w-5 rounded-full bg-primary flex items-center justify-center px-1.5 shrink-0">
+                        <span className="text-[10px] font-bold text-primary-foreground">
+                          {conv.unread_count}
+                        </span>
+                      </div>
+                    ) : null}
+                    {conversationDeviceId && (
+                      <ConversationActionsMenu
+                        deviceId={conversationDeviceId}
+                        remoteSender={conv.remote_sender}
+                        state={convState}
+                        unreadCount={conv.unread_count}
+                        onOpenInfo={onOpenInfo}
+                        isSelected={isSelected}
+                        isMobile={isMobile}
+                      />
+                    )}
                   </div>
-                )}
+                </div>
               </div>
                 </ContextMenuTrigger>
                 {conversationDeviceId && (
