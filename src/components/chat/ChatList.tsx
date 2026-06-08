@@ -256,6 +256,8 @@ export function ChatList({
             const convState = selectedDeviceId
               ? statesByKey.get(`${selectedDeviceId}:${conv.remote_sender}`)
               : undefined
+            const isUnread = conv.unread_count > 0 || Boolean(convState?.manual_unread)
+            const unreadBadgeCount = Math.max(1, conv.unread_count)
             const conversationDeviceId = selectedDeviceId || conv.lastMessage?.device_id
 
             return (
@@ -298,7 +300,7 @@ export function ChatList({
                     <p
                       className={cn(
                         'text-sm truncate',
-                        conv.unread_count > 0 ? 'text-chat-text font-medium' : 'text-chat-muted',
+                        isUnread ? 'text-chat-text font-medium' : 'text-chat-muted',
                       )}
                     >
                       {previewLabel(conv.lastMessage.content)}
@@ -317,7 +319,13 @@ export function ChatList({
                     {convState?.pinned && (
                       <Pin className="h-3 w-3 text-chat-muted shrink-0 fill-chat-muted/30" />
                     )}
-                    {isPendingReply ? (
+                    {isUnread ? (
+                      <div className="h-5 min-w-5 rounded-full bg-primary flex items-center justify-center px-1.5 shrink-0">
+                        <span className="text-[10px] font-bold text-primary-foreground">
+                          {unreadBadgeCount}
+                        </span>
+                      </div>
+                    ) : isPendingReply ? (
                       <div
                         onClick={(e) => {
                           e.stopPropagation()
@@ -327,12 +335,6 @@ export function ChatList({
                         title="Marcar como respondido"
                       >
                         <CheckCheck className="h-3.5 w-3.5 text-green-500" />
-                      </div>
-                    ) : conv.unread_count > 0 ? (
-                      <div className="h-5 min-w-5 rounded-full bg-primary flex items-center justify-center px-1.5 shrink-0">
-                        <span className="text-[10px] font-bold text-primary-foreground">
-                          {conv.unread_count}
-                        </span>
                       </div>
                     ) : null}
                     {conversationDeviceId && (
