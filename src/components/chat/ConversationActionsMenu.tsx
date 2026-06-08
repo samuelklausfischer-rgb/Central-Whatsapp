@@ -17,6 +17,7 @@ interface ConversationActionsMenuProps {
   onOpenInfo: (deviceId: string, remoteSender: string) => void
   isSelected?: boolean
   isMobile?: boolean
+  onStateChange?: () => void
 }
 
 export function ConversationActionsMenu({
@@ -27,6 +28,7 @@ export function ConversationActionsMenu({
   onOpenInfo,
   isSelected,
   isMobile,
+  onStateChange,
 }: ConversationActionsMenuProps) {
   const [open, setOpen] = useState(false)
   return (
@@ -53,6 +55,7 @@ export function ConversationActionsMenu({
           unreadCount={unreadCount}
           onOpenInfo={onOpenInfo}
           mode="dropdown"
+          onStateChange={onStateChange}
         />
       </DropdownMenuContent>
     </DropdownMenu>

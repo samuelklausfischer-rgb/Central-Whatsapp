@@ -190,6 +190,11 @@ export default function ChatHub() {
     }
   })
 
+  const refreshConversationStates = useCallback(async () => {
+    const states = await getMyStates()
+    setUserStates(states)
+  }, [])
+
   useRealtime('conversation_user_states', (e) => {
     if (e.record.user_id !== user?.id) return
     if (e.action === 'create' || e.action === 'update') {
@@ -223,8 +228,7 @@ export default function ChatHub() {
 
   const conversations = useMemo(() => {
     if (conversationSummaries.length > 0) {
-      // Usar resumos do banco (ordenados corretamente)
-      return conversationSummaries.map((summary) => {
+      const mapped = conversationSummaries.map((summary) => {
         const state = userStates.find(
           (s) => s.device_id === selectedDeviceId && s.remote_sender === summary.remote_sender,
         )
@@ -247,6 +251,11 @@ export default function ChatHub() {
           archived: state?.archived ?? false,
           pendingReply: summary.last_message_direction === 'inbound',
         }
+      })
+
+      return mapped.sort((a, b) => {
+        if (a.pinned !== b.pinned) return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)
+        return new Date(b.lastMessage.created_at).getTime() - new Date(a.lastMessage.created_at).getTime()
       })
     }
 
@@ -392,6 +401,7 @@ export default function ChatHub() {
             onOpenInfo={handleOpenInfo}
             showArchived={showArchived}
             onToggleArchived={() => setShowArchived(!showArchived)}
+            onStateChange={refreshConversationStates}
           />
         ) : (
           <div
@@ -411,6 +421,7 @@ export default function ChatHub() {
               onOpenInfo={handleOpenInfo}
               showArchived={showArchived}
               onToggleArchived={() => setShowArchived(!showArchived)}
+              onStateChange={refreshConversationStates}
             />
             <div
               className="absolute -right-[6px] top-0 bottom-0 w-[14px] cursor-col-resize z-10 flex items-center justify-center"

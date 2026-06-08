@@ -772,7 +772,8 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
           <div className="h-24 w-24 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mx-auto mb-6 shadow-[0_0_30px_rgba(37,99,235,0.2)]">
             <MessageSquare className="h-10 w-10 text-blue-400" />
           </div>
-          <h2 className="text-2xl font-semibold text-chat-text tracking-tight">CentralCell Web</h2>
+          <img src="/logo.png" alt="Logo" className="h-12 w-auto mx-auto mb-3 object-contain" />
+          <h2 className="text-2xl font-semibold text-chat-text tracking-tight">Central Cell</h2>
           <p className="text-chat-muted mt-3 text-[15px] leading-relaxed">
             {device
               ? 'Selecione uma conversa para iniciar o atendimento.'

@@ -38,8 +38,9 @@ export default function Login() {
         className="relative z-10 p-8 bg-card backdrop-blur-xl rounded-xl shadow-2xl border border-border space-y-6 w-[400px]"
       >
         <div className="text-center space-y-2">
+          <img src="/logo.png" alt="Logo" className="h-16 w-auto mx-auto mb-2 object-contain" />
           <h1 className="text-4xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-br from-gray-200 to-gray-600">
-            CentralCell
+            Central Cell
           </h1>
           <p className="text-sm text-muted-foreground">Faça login com suas credenciais corporativas.</p>
         </div>

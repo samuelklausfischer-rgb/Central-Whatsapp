@@ -13,6 +13,7 @@ interface ConversationActionsContentProps {
   unreadCount: number
   onOpenInfo: (deviceId: string, remoteSender: string) => void
   mode: 'dropdown' | 'context-menu'
+  onStateChange?: () => void
 }
 
 const itemClass = 'text-chat-text hover:bg-chat-hover focus:bg-chat-hover focus:text-chat-text rounded-none px-2.5 py-1.5 text-sm cursor-pointer'
@@ -25,6 +26,7 @@ export function ConversationActionsContent({
   unreadCount,
   onOpenInfo,
   mode,
+  onStateChange,
 }: ConversationActionsContentProps) {
   const Item = mode === 'context-menu' ? ContextMenuItem : DropdownMenuItem
   const Separator = mode === 'context-menu' ? ContextMenuSeparator : DropdownMenuSeparator
@@ -34,9 +36,10 @@ export function ConversationActionsContent({
       {state?.pinned ? (
         <Item
           className={itemClass}
-          onClick={(e) => {
+          onClick={async (e) => {
             e.stopPropagation()
-            togglePin(deviceId, remoteSender)
+            await togglePin(deviceId, remoteSender)
+            onStateChange?.()
           }}
         >
           <PinOff className="h-3.5 w-3.5 mr-2.5 text-chat-muted" /> Desafixar
@@ -44,9 +47,10 @@ export function ConversationActionsContent({
       ) : (
         <Item
           className={itemClass}
-          onClick={(e) => {
+          onClick={async (e) => {
             e.stopPropagation()
-            togglePin(deviceId, remoteSender)
+            await togglePin(deviceId, remoteSender)
+            onStateChange?.()
           }}
         >
           <Pin className="h-3.5 w-3.5 mr-2.5 text-chat-muted" /> Fixar conversa
@@ -56,9 +60,10 @@ export function ConversationActionsContent({
       {unreadCount > 0 || state?.manual_unread ? (
         <Item
           className={itemClass}
-          onClick={(e) => {
+          onClick={async (e) => {
             e.stopPropagation()
-            markConversationRead(deviceId, remoteSender)
+            await markConversationRead(deviceId, remoteSender)
+            onStateChange?.()
           }}
         >
           <Check className="h-3.5 w-3.5 mr-2.5 text-chat-muted" /> Marcar lida
@@ -66,9 +71,10 @@ export function ConversationActionsContent({
       ) : (
         <Item
           className={itemClass}
-          onClick={(e) => {
+          onClick={async (e) => {
             e.stopPropagation()
-            markConversationUnread(deviceId, remoteSender)
+            await markConversationUnread(deviceId, remoteSender)
+            onStateChange?.()
           }}
         >
           <Mail className="h-3.5 w-3.5 mr-2.5 text-chat-muted" /> Marcar não lida
@@ -92,9 +98,10 @@ export function ConversationActionsContent({
       {state?.archived ? (
         <Item
           className={itemClass}
-          onClick={(e) => {
+          onClick={async (e) => {
             e.stopPropagation()
-            toggleArchive(deviceId, remoteSender)
+            await toggleArchive(deviceId, remoteSender)
+            onStateChange?.()
           }}
         >
           <ArchiveRestore className="h-3.5 w-3.5 mr-2.5 text-chat-muted" /> Desarquivar
@@ -102,9 +109,10 @@ export function ConversationActionsContent({
       ) : (
         <Item
           className={itemClass}
-          onClick={(e) => {
+          onClick={async (e) => {
             e.stopPropagation()
-            toggleArchive(deviceId, remoteSender)
+            await toggleArchive(deviceId, remoteSender)
+            onStateChange?.()
           }}
         >
           <Archive className="h-3.5 w-3.5 mr-2.5 text-chat-muted" /> Arquivar

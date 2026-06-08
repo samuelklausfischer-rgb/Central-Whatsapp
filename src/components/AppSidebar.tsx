@@ -44,11 +44,9 @@ export function AppSidebar() {
     <Sidebar className="border-r border-border bg-sidebar backdrop-blur-2xl">
       <SidebarHeader className="px-4 py-0 border-b border-border h-16 flex flex-col justify-center">
         <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center shadow-[inset_0_0_10px_rgba(30,64,175,0.4)]">
-            <Smartphone className="h-5 w-5 text-blue-400" />
-          </div>
+          <img src="/logo.png" alt="Logo" className="h-9 w-9 object-contain" />
           <span className="text-xl font-display font-bold tracking-tight text-sidebar-foreground">
-            CentralCell
+            Central Cell
           </span>
         </div>
       </SidebarHeader>

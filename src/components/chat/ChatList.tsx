@@ -37,6 +37,7 @@ export interface ChatListProps {
   onOpenInfo: (deviceId: string, remoteSender: string) => void
   showArchived: boolean
   onToggleArchived: () => void
+  onStateChange?: () => void
 }
 
 const isGroupJid = (jid?: string) => Boolean(jid?.includes('@g.us'))
@@ -113,6 +114,7 @@ export function ChatList({
   onOpenInfo,
   showArchived,
   onToggleArchived,
+  onStateChange,
 }: ChatListProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [showUnrespondedOnly, setShowUnrespondedOnly] = useState(false)
@@ -342,6 +344,7 @@ export function ChatList({
                         onOpenInfo={onOpenInfo}
                         isSelected={isSelected}
                         isMobile={isMobile}
+                        onStateChange={onStateChange}
                       />
                     )}
                   </div>
@@ -357,6 +360,7 @@ export function ChatList({
                       unreadCount={conv.unread_count}
                       onOpenInfo={onOpenInfo}
                       mode="context-menu"
+                      onStateChange={onStateChange}
                     />
                   </ContextMenuContent>
                 )}
