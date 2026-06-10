@@ -1012,15 +1012,14 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
           const previousIsMe = previousMsg
             ? previousMsg.direction === 'outbound' || previousMsg.sender_id === user?.id
             : false
-          const isGroupContactMsg = contact?.includes('@g.us')
-          const thisSender = !isMe && isGroupContactMsg ? (msg.sender_name || null) : null
-          const previousSender = !previousIsMe && previousMsg && isGroupContactMsg ? (previousMsg.sender_name || null) : null
-          const shouldShowSenderLabel = !!thisSender && (
-            !previousMsg ||
-            previousIsMe ||
-            shouldShowDateSeparator ||
-            thisSender !== previousSender
-          )
+          const isGroupContactMsg = contact?.includes('@g.us') || msg.remote_sender?.includes('@g.us')
+          const participantContact = msg.group_participant
+            ? contacts?.find((c: any) => c.remote_jid === msg.group_participant)
+            : null
+          const thisSender = !isMe && isGroupContactMsg
+            ? (msg.sender_name || participantContact?.nickname || participantContact?.name || (msg.group_participant ? msg.group_participant.split('@')[0] : 'Participante'))
+            : null
+          const shouldShowSenderLabel = !isMe && isGroupContactMsg && !!thisSender
           const shouldShowReceivedAvatar =
             !isMe &&
             !isGroupContactMsg &&
