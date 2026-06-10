@@ -130,10 +130,10 @@ const ChatRow = memo(function ChatRow({
   onStateChange?: () => void
 }) {
   const name = getConversationName(conv, contact)
+  const conversationDeviceId = selectedDeviceId || conv.lastMessage?.device_id
   const isPendingReply = conv.pendingReply && !resolvedLocally.has(`${conversationDeviceId || ''}:${conv.remote_sender}`)
   const isUnread = conv.unread_count > 0
   const unreadBadgeCount = Math.max(1, conv.unread_count)
-  const conversationDeviceId = selectedDeviceId || conv.lastMessage?.device_id
 
   return (
     <ContextMenu>

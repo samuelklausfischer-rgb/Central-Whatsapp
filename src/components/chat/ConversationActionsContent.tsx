@@ -27,6 +27,7 @@ export function ConversationActionsContent({
   unreadCount,
   onOpenInfo,
   mode,
+  isPendingReply,
   onStateChange,
 }: ConversationActionsContentProps) {
   const Item = mode === 'context-menu' ? ContextMenuItem : DropdownMenuItem
