@@ -239,6 +239,23 @@ export default function ChatHub() {
     }
   }, [selectedDeviceId, selectedContact])
 
+  const handleCloseConversation = useCallback(() => {
+    setSelectedContact(null)
+    setIsSheetOpen(false)
+  }, [])
+
+  useEffect(() => {
+    if (!selectedContact) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (e.defaultPrevented) return
+      e.preventDefault()
+      handleCloseConversation()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [selectedContact, handleCloseConversation])
+
   const handleOpenInfo = useCallback((deviceId: string, remoteSender: string) => {
     setSelectedContact(remoteSender)
     setIsSheetOpen(true)
@@ -468,7 +485,7 @@ export default function ChatHub() {
           contact={selectedContact}
           conversation={currentConversation}
           contacts={contacts}
-          onBack={() => setSelectedContact(null)}
+          onBack={handleCloseConversation}
           isMobile={isMobile}
           sheetOpen={isSheetOpen}
           onSheetOpenChange={setIsSheetOpen}
