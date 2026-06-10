@@ -1013,13 +1013,24 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
             ? previousMsg.direction === 'outbound' || previousMsg.sender_id === user?.id
             : false
           const isGroupContactMsg = contact?.includes('@g.us') || msg.remote_sender?.includes('@g.us')
-          const participantContact = msg.group_participant
-            ? contacts?.find((c: any) => c.remote_jid === msg.group_participant)
+          const normalizeJid = (jid: string) => jid.replace(/@s\.whatsapp\.net/g, '').replace(/@lid/g, '').replace(/\D/g, '')
+          const participantJid = msg.group_participant ? normalizeJid(msg.group_participant) : null
+          const participantContact = participantJid
+            ? contacts?.find((c: any) => normalizeJid(c.remote_jid) === participantJid)
             : null
           const thisSender = !isMe && isGroupContactMsg
-            ? (msg.sender_name || participantContact?.nickname || participantContact?.name || (msg.group_participant ? msg.group_participant.split('@')[0] : 'Participante'))
+            ? (msg.sender_name || participantContact?.nickname || participantContact?.name || participantJid || 'Participante')
             : null
-          const shouldShowSenderLabel = !isMe && isGroupContactMsg && !!thisSender
+          const currentAuthorKey = msg.group_participant || msg.sender_name || msg.remote_sender
+          const previousAuthorKey = previousMsg && !previousIsMe
+            ? (previousMsg.group_participant || previousMsg.sender_name || previousMsg.remote_sender)
+            : null
+          const shouldShowSenderLabel = !isMe && isGroupContactMsg && !!thisSender && (
+            !previousMsg ||
+            previousIsMe ||
+            shouldShowDateSeparator ||
+            currentAuthorKey !== previousAuthorKey
+          )
           const shouldShowReceivedAvatar =
             !isMe &&
             !isGroupContactMsg &&
