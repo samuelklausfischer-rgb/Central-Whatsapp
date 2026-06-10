@@ -7,10 +7,8 @@ import {
   Smile,
   MoreVertical,
   StickyNote,
-  ListTodo,
   MessageSquare,
   Info,
-  User,
   Tags,
   Check,
   CalendarClock,
@@ -38,7 +36,6 @@ import {
 } from '@/components/ui/dialog'
 import {
   AlertDialog,
-  AlertDialogTrigger,
   AlertDialogContent,
   AlertDialogHeader,
   AlertDialogFooter,
@@ -58,7 +55,6 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { createScheduledMessage, type CreateScheduledMessageInput } from '@/services/scheduled_messages'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { SmartAvatar } from '@/components/chat/SmartAvatar'
 import { AudioMessage } from '@/components/chat/AudioMessage'
 import { Button } from '@/components/ui/button'
@@ -73,7 +69,6 @@ import { sendMessage, reactToMessage, deleteMessage, editMessage } from '@/servi
 import { updateContactByJid } from '@/services/contacts'
 import { markConversationRead, getConversationViewers, type ConversationViewer } from '@/services/conversation_states'
 import supabase from '@/lib/supabase/client'
-import useAppStore from '@/stores/useAppStore'
 import { useToast } from '@/hooks/use-toast'
 import { format } from 'date-fns'
 
@@ -273,7 +268,6 @@ const getDateLabel = (value: string) => {
 
 export function ChatWindow({ device, contact, conversation, contacts, onBack, isMobile, sheetOpen, onSheetOpenChange }: any) {
   const { user } = useAuth()
-  const { addTask } = useAppStore()
   const { toast } = useToast()
 
   const [msgText, setMsgText] = useState('')
@@ -308,6 +302,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
   const [recordingTime, setRecordingTime] = useState(0)
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
+  const audioUrlRef = useRef<string | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -336,6 +331,12 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
     getLabels()
       .then(setLabels)
       .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current)
+    }
   }, [])
 
   const loadContactTags = async () => {
@@ -492,7 +493,9 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
       recorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
         setAudioBlob(blob)
-        setAudioUrl(URL.createObjectURL(blob))
+        const url = URL.createObjectURL(blob)
+        audioUrlRef.current = url
+        setAudioUrl(url)
         stream.getTracks().forEach((t) => t.stop())
       }
 
@@ -543,6 +546,10 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
 
   const discardAudio = () => {
     setAudioBlob(null)
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current)
+      audioUrlRef.current = null
+    }
     setAudioUrl(null)
     setRecordingTime(0)
   }
@@ -768,7 +775,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
     return (
       <div className="hidden md:flex flex-col items-center justify-center h-full bg-chat-conversation/80 backdrop-blur-sm flex-1 relative overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(59,130,246,0.05),transparent_70%)]" />
-        <div className="max-w-md text-center p-8 rounded-3xl bg-chat-panel border border-chat-border shadow-chat backdrop-blur-2xl relative z-10">
+        <div className="max-w-md text-center p-8 rounded-3xl bg-chat-panel border border-chat-border shadow-chat relative z-10">
           <div className="h-24 w-24 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mx-auto mb-6 shadow-[0_0_30px_rgba(37,99,235,0.2)]">
             <MessageSquare className="h-10 w-10 text-blue-400" />
           </div>
@@ -842,7 +849,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
             </PopoverTrigger>
             <PopoverContent
               align="end"
-              className="w-56 p-2 bg-chat-panel border-chat-border backdrop-blur-xl"
+              className="w-56 p-2 bg-chat-panel border-chat-border"
             >
               <div className="mb-2 px-2 pb-2 pt-1 border-b border-chat-border text-xs font-semibold text-chat-muted">
                 Etiquetas do Contato
@@ -884,7 +891,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                 <MoreVertical className="h-5 w-5" />
               </Button>
             </SheetTrigger>
-            <SheetContent className="bg-chat-panel border-chat-border backdrop-blur-xl">
+            <SheetContent className="bg-chat-panel border-chat-border">
               <SheetHeader>
                 <SheetTitle className="text-chat-text">Info do {isGroupContact ? 'Grupo' : 'Contato'}</SheetTitle>
               </SheetHeader>
@@ -1612,7 +1619,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                 </Button>
               </PopoverTrigger>
               <PopoverContent
-                className="w-64 p-2 mb-2 border-chat-border bg-chat-panel backdrop-blur-xl"
+                className="w-64 p-2 mb-2 border-chat-border bg-chat-panel"
                 align="start"
                 side="top"
                 sideOffset={10}
@@ -1789,7 +1796,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                   </DropdownMenuTrigger>
                   <DropdownMenuContent
                     align="end"
-                    className="w-56 bg-chat-panel border-chat-border backdrop-blur-xl"
+                    className="w-56 bg-chat-panel border-chat-border"
                   >
                     <DropdownMenuLabel className="text-xs text-chat-muted font-semibold">
                       Assistente IA

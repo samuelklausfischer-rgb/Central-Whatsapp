@@ -1,26 +1,28 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import { ThemeProvider } from 'next-themes'
 import { Toaster } from '@/components/ui/toaster'
 import { Toaster as Sonner } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import Index from './pages/Index'
-import Devices from './pages/Devices'
-import ChatHub from './pages/ChatHub'
-import CRM from './pages/CRM'
-import Notes from './pages/Notes'
-import Triggers from './pages/Triggers'
-import ScheduledMessages from './pages/ScheduledMessages'
-import NotFound from './pages/NotFound'
 import Layout from './components/Layout'
 import { AppProvider } from './stores/useAppStore'
 import SettingsLayout from './pages/settings/SettingsLayout'
-import GeneralSettings from './pages/settings/GeneralSettings'
-import LabelsSettings from './pages/settings/LabelsSettings'
-import AiAssistantSettings from './pages/settings/AiAssistantSettings'
-import InstancesSettings from './pages/settings/InstancesSettings'
 import Login from './pages/Login'
 import { AuthProvider, useAuth } from './hooks/use-auth'
-import AdminPage from './pages/admin/AdminPage'
+
+const Index = lazy(() => import('./pages/Index'))
+const Devices = lazy(() => import('./pages/Devices'))
+const ChatHub = lazy(() => import('./pages/ChatHub'))
+const CRM = lazy(() => import('./pages/CRM'))
+const Notes = lazy(() => import('./pages/Notes'))
+const Triggers = lazy(() => import('./pages/Triggers'))
+const ScheduledMessages = lazy(() => import('./pages/ScheduledMessages'))
+const NotFound = lazy(() => import('./pages/NotFound'))
+const GeneralSettings = lazy(() => import('./pages/settings/GeneralSettings'))
+const LabelsSettings = lazy(() => import('./pages/settings/LabelsSettings'))
+const AiAssistantSettings = lazy(() => import('./pages/settings/AiAssistantSettings'))
+const InstancesSettings = lazy(() => import('./pages/settings/InstancesSettings'))
+const AdminPage = lazy(() => import('./pages/admin/AdminPage'))
 
 const ProtectedRoute = () => {
   const { isAuthenticated, loading } = useAuth()
@@ -46,6 +48,7 @@ const App = () => (
           <TooltipProvider>
           <Toaster />
           <Sonner />
+          <Suspense fallback={<div className="h-screen w-full flex items-center justify-center text-muted-foreground">Carregando...</div>}>
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route element={<ProtectedRoute />}>
@@ -74,6 +77,7 @@ const App = () => (
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>
+          </Suspense>
         </TooltipProvider>
       </AppProvider>
     </AuthProvider>

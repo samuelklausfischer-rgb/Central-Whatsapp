@@ -35,7 +35,7 @@ export default function Login() {
       <GridBackground />
       <form
         onSubmit={handleLogin}
-        className="relative z-10 p-8 bg-card backdrop-blur-xl rounded-xl shadow-2xl border border-border space-y-6 w-[400px]"
+        className="relative z-10 p-8 bg-card rounded-xl shadow-2xl border border-border space-y-6 w-[400px]"
       >
         <div className="text-center space-y-2">
           <img src="/logo.png" alt="Logo" className="h-16 w-auto mx-auto mb-2 object-contain" />

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, ReactNode, createElement } from 'react'
+import { createContext, useContext, useState, useCallback, useMemo, createElement, ReactNode } from 'react'
 
 export interface Device {
   id: string
@@ -119,7 +119,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [notes, setNotes] = useState<Note[]>(initialNotes)
   const [userSignature, setUserSignature] = useState('')
 
-  const addMessage = (threadId: string, text: string) => {
+  const addMessage = useCallback((threadId: string, text: string) => {
     setThreads((prev) =>
       prev.map((t) => {
         if (t.id === threadId) {
@@ -142,13 +142,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return t
       }),
     )
-  }
+  }, [])
 
-  const markThreadRead = (threadId: string) => {
+  const markThreadRead = useCallback((threadId: string) => {
     setThreads((prev) => prev.map((t) => (t.id === threadId ? { ...t, unread: false } : t)))
-  }
+  }, [])
 
-  const addNote = (note: Omit<Note, 'id' | 'date'>) => {
+  const addNote = useCallback((note: Omit<Note, 'id' | 'date'>) => {
     setNotes((prev) => [
       {
         ...note,
@@ -157,17 +157,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
       ...prev,
     ])
-  }
+  }, [])
 
-  const addTask = (task: Omit<Task, 'id'>) => {
+  const addTask = useCallback((task: Omit<Task, 'id'>) => {
     setTasks((prev) => [{ ...task, id: Math.random().toString() }, ...prev])
-  }
+  }, [])
 
-  const updateTaskStatus = (taskId: string, status: Task['status']) => {
+  const updateTaskStatus = useCallback((taskId: string, status: Task['status']) => {
     setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status } : t)))
-  }
+  }, [])
 
-  const syncDevice = (name: string, department: string) => {
+  const syncDevice = useCallback((name: string, department: string) => {
     setDevices((prev) => [
       ...prev,
       {
@@ -180,28 +180,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
         status: 'online',
       },
     ])
-  }
+  }, [])
 
-  return createElement(
-    AppContext.Provider,
-    {
-      value: {
-        devices,
-        threads,
-        tasks,
-        notes,
-        userSignature,
-        addMessage,
-        addNote,
-        addTask,
-        updateTaskStatus,
-        syncDevice,
-        markThreadRead,
-        setUserSignature,
-      },
-    },
-    children,
-  )
+  const value = useMemo(() => ({
+    devices,
+    threads,
+    tasks,
+    notes,
+    userSignature,
+    addMessage,
+    addNote,
+    addTask,
+    updateTaskStatus,
+    syncDevice,
+    markThreadRead,
+    setUserSignature,
+  }), [devices, threads, tasks, notes, userSignature, addMessage, addNote, addTask, updateTaskStatus, syncDevice, markThreadRead, setUserSignature])
+
+  return createElement(AppContext.Provider, { value }, children)
 }
 
 export default function useAppStore() {

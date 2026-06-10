@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback, useMemo, ReactNode } from 'react'
 import supabase from '@/lib/supabase/client'
 import type { Profile, Device } from '@/lib/supabase/types'
 
@@ -47,6 +47,35 @@ async function fetchAllowedDevices(userId: string): Promise<Device[]> {
   return (devices as Device[]) || []
 }
 
+async function loadUserData(
+  session: { user: { id: string; email?: string | null } },
+  signal: { aborted: boolean },
+) {
+  const profile = await fetchProfile(session.user.id)
+  if (!profile || signal.aborted) return null
+
+  const mergedUser = { ...profile, email: session.user.email || profile.email || '' }
+  let deviceList: Device[] = []
+  let deviceIdList: string[] = []
+
+  if (profile.is_admin) {
+    const { data: allDevices } = await supabase.from('devices').select('*')
+    if (!signal.aborted) {
+      deviceList = (allDevices as Device[]) || []
+      deviceIdList = deviceList.map((d) => d.id)
+    }
+  } else {
+    const devices = await fetchAllowedDevices(session.user.id)
+    if (!signal.aborted) {
+      deviceList = devices
+      deviceIdList = devices.map((d) => d.id)
+    }
+  }
+
+  if (signal.aborted) return null
+  return { user: mergedUser, devices: deviceList, deviceIds: deviceIdList }
+}
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<(Profile & { email: string }) | null>(null)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
@@ -54,87 +83,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [allowedDeviceIds, setAllowedDeviceIds] = useState<string[]>([])
   const [allowedDevices, setAllowedDevices] = useState<Device[]>([])
 
-  const refreshProfile = async () => {
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session?.user) {
-      setUser(null)
-      setIsAuthenticated(false)
-      setAllowedDeviceIds([])
-      setAllowedDevices([])
-      return
-    }
-
-    const profile = await fetchProfile(session.user.id)
-    if (!profile) {
-      setUser(null)
-      setIsAuthenticated(false)
-      return
-    }
-
-    const mergedUser = { ...profile, email: session.user.email || profile.email || '' }
-    setUser(mergedUser)
-    setIsAuthenticated(true)
-
-    // Fetch allowed devices
-    if (profile.is_admin) {
-      const { data: allDevices } = await supabase
-        .from('devices')
-        .select('*')
-      setAllowedDevices((allDevices as Device[]) || [])
-      setAllowedDeviceIds((allDevices as Device[])?.map((d) => d.id) || [])
-    } else {
-      const devices = await fetchAllowedDevices(session.user.id)
-      setAllowedDevices(devices)
-      setAllowedDeviceIds(devices.map((d) => d.id))
-    }
-  }
-
   useEffect(() => {
     let mounted = true
+    const signal = { get aborted() { return !mounted } }
 
-    const loadProfile = async (session: { user: { id: string; email?: string | null } }) => {
-      try {
-        const profile = await fetchProfile(session.user.id)
-        if (!mounted) return
-
-        if (profile) {
-          const mergedUser = { ...profile, email: session.user.email || profile.email || '' }
-          setUser(mergedUser)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!mounted) return
+      if (session?.user) {
+        setLoading(true)
+        try {
+          const result = await loadUserData(session, signal)
+          if (!result || !mounted) return
+          setUser(result.user)
           setIsAuthenticated(true)
-
-          if (profile.is_admin) {
-            const { data: allDevices } = await supabase.from('devices').select('*')
-            if (!mounted) return
-            setAllowedDevices((allDevices as Device[]) || [])
-            setAllowedDeviceIds((allDevices as Device[])?.map((d) => d.id) || [])
-          } else {
-            const devices = await fetchAllowedDevices(session.user.id)
-            if (!mounted) return
-            setAllowedDevices(devices)
-            setAllowedDeviceIds(devices.map((d) => d.id))
-          }
-        } else {
+          setAllowedDevices(result.devices)
+          setAllowedDeviceIds(result.deviceIds)
+        } catch {
+          if (!mounted) return
           setUser(null)
           setIsAuthenticated(false)
           setAllowedDeviceIds([])
           setAllowedDevices([])
+        } finally {
+          if (mounted) setLoading(false)
         }
-      } catch (err) {
-        console.error('loadProfile error:', err)
-        if (!mounted) return
-        setUser(null)
-        setIsAuthenticated(false)
-        setAllowedDeviceIds([])
-        setAllowedDevices([])
-      } finally {
-        if (mounted) setLoading(false)
-      }
-    }
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!mounted) return
-      if (session?.user) {
-        loadProfile(session)
       } else {
         setUser(null)
         setIsAuthenticated(false)
@@ -150,48 +122,78 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [])
 
-  const signUp = async (email: string, password: string, data?: Record<string, string>) => {
+  const refreshProfile = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) {
+      setUser(null)
+      setIsAuthenticated(false)
+      setAllowedDeviceIds([])
+      setAllowedDevices([])
+      return
+    }
+
+    setLoading(true)
+    let mounted = true
+    const signal = { get aborted() { return !mounted } }
+
+    try {
+      const result = await loadUserData(session, signal)
+      if (!result || !mounted) return
+      setUser(result.user)
+      setIsAuthenticated(true)
+      setAllowedDevices(result.devices)
+      setAllowedDeviceIds(result.deviceIds)
+    } catch {
+      if (!mounted) return
+      setUser(null)
+      setIsAuthenticated(false)
+      setAllowedDeviceIds([])
+      setAllowedDevices([])
+    } finally {
+      if (mounted) setLoading(false)
+    }
+  }, [])
+
+  const signUp = useCallback(async (email: string, password: string, data?: Record<string, string>) => {
     try {
       const { error } = await supabase.auth.signUp({
         email,
         password,
         options: { data },
       })
-      if (error) return { error }
-      return { error: null }
+      return { error: error || null }
     } catch (error) {
       return { error }
     }
-  }
+  }, [])
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = useCallback(async (email: string, password: string) => {
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
-      if (error) return { error }
-      return { error: null }
+      return { error: error || null }
     } catch (error) {
       return { error }
     }
-  }
+  }, [])
 
-  const signOut = () => {
+  const signOut = useCallback(() => {
     supabase.auth.signOut()
-  }
+  }, [])
+
+  const value = useMemo(() => ({
+    user,
+    isAuthenticated,
+    signUp,
+    signIn,
+    signOut,
+    loading,
+    refreshProfile,
+    allowedDeviceIds,
+    allowedDevices,
+  }), [user, isAuthenticated, signUp, signIn, signOut, loading, refreshProfile, allowedDeviceIds, allowedDevices])
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        isAuthenticated,
-        signUp,
-        signIn,
-        signOut,
-        loading,
-        refreshProfile,
-        allowedDeviceIds,
-        allowedDevices,
-      }}
-    >
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   )

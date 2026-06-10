@@ -472,11 +472,15 @@ export default function InstancesSettings() {
     }
   }
 
-  const historyTargetPages = historyJob?.target_pages || historyPreview?.totalPages || 0
-  const historyProcessedPages = historyJob ? Math.max(0, Math.min(historyTargetPages, historyJob.current_page - 1)) : 0
-  const historyProgress = historyTargetPages > 0 ? Math.round((historyProcessedPages / historyTargetPages) * 100) : 0
-  const canStartHistory = !isActiveHistoryJob(historyJob)
-  const canProcessHistory = Boolean(historyJob && isActiveHistoryJob(historyJob) && historyJob.current_page <= historyJob.target_pages)
+  const historyDerived = useMemo(() => {
+    const targetPages = historyJob?.target_pages || historyPreview?.totalPages || 0
+    const processedPages = historyJob ? Math.max(0, Math.min(targetPages, historyJob.current_page - 1)) : 0
+    const progress = targetPages > 0 ? Math.round((processedPages / targetPages) * 100) : 0
+    const canStart = !isActiveHistoryJob(historyJob)
+    const canProcess = Boolean(historyJob && isActiveHistoryJob(historyJob) && historyJob.current_page <= historyJob.target_pages)
+    return { targetPages, processedPages, progress, canStart, canProcess }
+  }, [historyJob, historyPreview])
+  const { targetPages: historyTargetPages, processedPages: historyProcessedPages, progress: historyProgress, canStart: canStartHistory, canProcess: canProcessHistory } = historyDerived
 
   return (
     <div className="space-y-6">

@@ -41,7 +41,7 @@ export function AppSidebar() {
   const isSettingsActive = location.pathname.startsWith('/settings')
 
   return (
-    <Sidebar className="border-r border-border bg-sidebar backdrop-blur-2xl">
+    <Sidebar className="border-r border-border bg-sidebar">
       <SidebarHeader className="px-4 py-0 border-b border-border h-16 flex flex-col justify-center">
         <div className="flex items-center gap-3">
           <img src="/logo.png" alt="Logo" className="h-9 w-9 object-contain" />

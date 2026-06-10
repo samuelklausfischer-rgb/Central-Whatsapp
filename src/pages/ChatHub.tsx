@@ -10,6 +10,14 @@ import { getMyStates, type ConversationUserState } from '@/services/conversation
 import { useRealtime } from '@/hooks/use-realtime'
 import { useAuth } from '@/hooks/use-auth'
 
+function debounce<A extends any[]>(fn: (...args: A) => void, ms: number): (...args: A) => void {
+  let timer: ReturnType<typeof setTimeout>
+  return (...args: A) => {
+    clearTimeout(timer)
+    timer = setTimeout(() => fn(...args), ms)
+  }
+}
+
 const SIDEBAR_MIN = 300
 const SIDEBAR_MAX = 520
 const SIDEBAR_DEFAULT = 384
@@ -185,18 +193,25 @@ export default function ChatHub() {
 
       // Atualizar resumos de conversas quando chega mensagem nova
       if (e.action === 'create') {
-        getConversationSummaries(selectedDeviceId).then(setConversationSummaries)
+        debouncedRefreshSummaries(selectedDeviceId)
       }
     }
   })
+
+  const debouncedRefreshSummaries = useMemo(
+    () => debounce((deviceId: string) => {
+      getConversationSummaries(deviceId).then(setConversationSummaries)
+    }, 500),
+    [],
+  )
 
   const refreshConversationStates = useCallback(async () => {
     const states = await getMyStates()
     setUserStates(states)
     if (selectedDeviceId) {
-      getConversationSummaries(selectedDeviceId).then(setConversationSummaries)
+      debouncedRefreshSummaries(selectedDeviceId)
     }
-  }, [selectedDeviceId])
+  }, [selectedDeviceId, debouncedRefreshSummaries])
 
   useRealtime('conversation_user_states', (e) => {
     if (e.record.user_id !== user?.id) return
@@ -230,11 +245,14 @@ export default function ChatHub() {
   }, [])
 
   const conversations = useMemo(() => {
+    const userStatesMap = new Map<string, ConversationUserState>()
+    for (const s of userStates) {
+      userStatesMap.set(`${s.device_id}|${s.remote_sender}`, s)
+    }
+
     if (conversationSummaries.length > 0) {
       const mapped = conversationSummaries.map((summary) => {
-        const state = userStates.find(
-          (s) => s.device_id === selectedDeviceId && s.remote_sender === summary.remote_sender,
-        )
+        const state = userStatesMap.get(`${selectedDeviceId}|${summary.remote_sender}`)
 
         let unreadCount = summary.unread_count
         if (state?.manual_unread) {
@@ -297,9 +315,7 @@ export default function ChatHub() {
     })
     return Array.from(map.values())
       .map((conv) => {
-        const state = userStates.find(
-          (s) => s.device_id === selectedDeviceId && s.remote_sender === conv.remote_sender,
-        )
+        const state = userStatesMap.get(`${selectedDeviceId}|${conv.remote_sender}`)
 
         if (state?.manual_unread) {
           conv.unread_count = Math.max(1, conv.messages.filter(
@@ -398,7 +414,7 @@ export default function ChatHub() {
   }, [clampSidebarWidth])
 
   return (
-    <div ref={containerRef} className="h-full w-full relative bg-chat-app backdrop-blur-2xl border-chat-border flex rounded-none md:rounded-2xl border overflow-hidden shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
+    <div ref={containerRef} className="h-full w-full relative bg-chat-app border-chat-border flex rounded-none md:rounded-2xl border overflow-hidden shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
 
       {(!isMobile || !selectedContact) && (
         isMobile ? (

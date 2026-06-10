@@ -56,6 +56,7 @@ export default function AdminPage() {
 
   const [users, setUsers] = useState<ManagedUser[]>([])
   const [devices, setDevices] = useState<any[]>([])
+  const devicesMap = useMemo(() => new Map(devices.map((d: any) => [d.id, d])), [devices])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isSyncDialogOpen, setIsSyncDialogOpen] = useState(false)
   const [editingUser, setEditingUser] = useState<ManagedUser | null>(null)
@@ -123,10 +124,10 @@ export default function AdminPage() {
     loadData()
   }, [loadData])
 
-  const getDevicesForDepartment = (department: string) => {
+  const getDevicesForDepartment = useCallback((department: string) => {
     if (!department) return []
     return devices.filter((device) => device.department === department).map((device) => device.id)
-  }
+  }, [devices])
 
   const openCreateDialog = () => {
     setEditingUser(null)
@@ -466,7 +467,7 @@ export default function AdminPage() {
                             </Badge>
                           ) : user.allowed_devices?.length > 0 ? (
                             user.allowed_devices.map((deviceId) => {
-                              const device = devices.find((d) => d.id === deviceId)
+                              const device = devicesMap.get(deviceId)
                               return (
                                 <Badge key={deviceId} variant="secondary" className="bg-accent">
                                   {device ? device.name : 'Desconhecido'}
