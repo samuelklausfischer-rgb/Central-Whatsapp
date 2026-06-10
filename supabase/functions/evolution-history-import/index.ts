@@ -3,7 +3,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || ''
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
 const STORAGE_BUCKET = 'chat-attachments'
-const ALLOWED_INSTANCE = 'Financeiro Medimagem'
+const ALLOWED_INSTANCES = ['Financeiro Medimagem', 'Financeiro PRN']
 const DEFAULT_PAGE_SIZE = 50
 const DEFAULT_RECENT_MEDIA_DAYS = 7
 
@@ -89,8 +89,8 @@ function clampInt(value: unknown, fallback: number, min: number, max: number) {
 }
 
 function validateInstance(instanceName: string) {
-  if (instanceName !== ALLOWED_INSTANCE) {
-    throw new Error(`Importação liberada apenas para ${ALLOWED_INSTANCE}`)
+  if (!ALLOWED_INSTANCES.includes(instanceName)) {
+    throw new Error(`Importação liberada apenas para: ${ALLOWED_INSTANCES.join(', ')}`)
   }
 }
 
@@ -590,7 +590,7 @@ async function insertMessages(rows: JsonRecord[]) {
 }
 
 async function previewAction(body: JsonRecord) {
-  const instanceName = stringFrom(body.instanceName) || ALLOWED_INSTANCE
+  const instanceName = stringFrom(body.instanceName) || ALLOWED_INSTANCES[0]
   validateInstance(instanceName)
   const pageSize = clampInt(body.pageSize, DEFAULT_PAGE_SIZE, 1, 200)
   const device = await getDevice(instanceName)
@@ -613,7 +613,7 @@ async function previewAction(body: JsonRecord) {
 }
 
 async function startAction(body: JsonRecord, userId: string) {
-  const instanceName = stringFrom(body.instanceName) || ALLOWED_INSTANCE
+  const instanceName = stringFrom(body.instanceName) || ALLOWED_INSTANCES[0]
   validateInstance(instanceName)
 
   const active = await getActiveJob(instanceName)
@@ -650,7 +650,7 @@ async function startAction(body: JsonRecord, userId: string) {
 }
 
 async function runAction(body: JsonRecord) {
-  const instanceName = stringFrom(body.instanceName) || ALLOWED_INSTANCE
+  const instanceName = stringFrom(body.instanceName) || ALLOWED_INSTANCES[0]
   validateInstance(instanceName)
 
   let job: ImportJob | null = null
@@ -733,7 +733,7 @@ async function runAction(body: JsonRecord) {
 }
 
 async function statusAction(body: JsonRecord) {
-  const instanceName = stringFrom(body.instanceName) || ALLOWED_INSTANCE
+  const instanceName = stringFrom(body.instanceName) || ALLOWED_INSTANCES[0]
   validateInstance(instanceName)
   const jobId = stringFrom(body.jobId)
   const job = jobId ? await getJob(jobId) : await getLatestJob(instanceName)
@@ -741,7 +741,7 @@ async function statusAction(body: JsonRecord) {
 }
 
 async function cancelAction(body: JsonRecord) {
-  const instanceName = stringFrom(body.instanceName) || ALLOWED_INSTANCE
+  const instanceName = stringFrom(body.instanceName) || ALLOWED_INSTANCES[0]
   validateInstance(instanceName)
   const jobId = stringFrom(body.jobId)
   const job = jobId ? await getJob(jobId) : await getActiveJob(instanceName)

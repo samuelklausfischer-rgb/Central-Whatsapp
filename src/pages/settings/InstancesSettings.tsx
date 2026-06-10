@@ -55,6 +55,7 @@ import {
 } from '@/services/evolution_instances'
 import {
   FINANCEIRO_MEDIMAGEM_INSTANCE,
+  ALLOWED_HISTORY_INSTANCES,
   previewHistoryImport,
   startHistoryImport,
   runHistoryImport,
@@ -623,7 +624,7 @@ export default function InstancesSettings() {
                           {isActionLoading ? <RefreshCw className="h-3 w-3 animate-spin" /> : <QrCode className="h-3 w-3" />}
                           <span className="hidden sm:inline">Webhook</span>
                         </Button>
-                        {name === FINANCEIRO_MEDIMAGEM_INSTANCE && (
+                        {name && ALLOWED_HISTORY_INSTANCES.includes(name) && (
                           <Button
                             variant="ghost"
                             size="sm"

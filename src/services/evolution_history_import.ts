@@ -1,6 +1,8 @@
 import supabase from '@/lib/supabase/client'
 
 export const FINANCEIRO_MEDIMAGEM_INSTANCE = 'Financeiro Medimagem'
+export const FINANCEIRO_PRN_INSTANCE = 'Financeiro PRN'
+export const ALLOWED_HISTORY_INSTANCES = [FINANCEIRO_MEDIMAGEM_INSTANCE, FINANCEIRO_PRN_INSTANCE]
 
 export type HistoryImportStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
 
