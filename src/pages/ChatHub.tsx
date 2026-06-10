@@ -281,7 +281,7 @@ export default function ChatHub() {
           message_count: summary.message_count,
           pinned: state?.pinned ?? false,
           archived: state?.archived ?? false,
-          pendingReply: summary.last_message_direction === 'inbound',
+          pendingReply: summary.last_message_direction === 'inbound' && (!state?.responded_at || new Date(summary.last_message_created_at) > new Date(state.responded_at)),
         }
       })
 
@@ -336,7 +336,7 @@ export default function ChatHub() {
         if (conv.lastMessage?.sender_name && conv.lastMessage.direction === 'inbound') {
           conv.sender_name = conv.lastMessage.sender_name
         }
-        conv.pendingReply = conv.lastMessage?.direction === 'inbound'
+        conv.pendingReply = conv.lastMessage?.direction === 'inbound' && (!state?.responded_at || new Date(conv.lastMessage.created_at) > new Date(state.responded_at))
         return conv
       })
       .sort((a, b) => {

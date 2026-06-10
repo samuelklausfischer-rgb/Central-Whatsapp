@@ -15,6 +15,7 @@ export interface ConversationUserState {
   pinned_at: string | null
   archived: boolean
   archived_at: string | null
+  responded_at: string | null
   created_at: string
   updated_at: string
 }
@@ -76,6 +77,18 @@ export interface ConversationViewer {
   user_name: string
   last_read_at: string | null
   last_opened_at: string | null
+}
+
+export async function toggleResponded(deviceId: string, remoteSender: string): Promise<string | null> {
+  const { data, error } = await supabase.rpc('toggle_conversation_responded', {
+    p_device_id: deviceId,
+    p_remote_sender: remoteSender,
+  })
+  if (error) {
+    console.error('Error toggling responded:', error)
+    return null
+  }
+  return data as string | null
 }
 
 export async function getConversationViewers(deviceId: string, remoteSender: string): Promise<ConversationViewer[]> {

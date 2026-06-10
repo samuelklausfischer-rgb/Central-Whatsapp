@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils'
 import { format, startOfDay, differenceInCalendarDays } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { Check, CheckCheck, Smartphone, Search, X, MessageCircle, Pin } from 'lucide-react'
-import { resolveContact } from '@/services/contacts'
+import { toggleResponded } from '@/services/conversation_states'
 import { ConversationActionsMenu } from '@/components/chat/ConversationActionsMenu'
 import { ConversationActionsContent } from '@/components/chat/ConversationActionsContent'
 import ConversationFilters from '@/components/chat/ConversationFilters'
@@ -123,14 +123,14 @@ const ChatRow = memo(function ChatRow({
   selectedDevice: any
   selectedDeviceId: string | null
   resolvedLocally: Set<string>
-  handleResolve: (jid: string) => void
+  handleResolve: (deviceId: string, remoteSender: string) => void
   onSelectContact: (id: string) => void
   onOpenInfo: (deviceId: string, remoteSender: string) => void
   isMobile: boolean
   onStateChange?: () => void
 }) {
   const name = getConversationName(conv, contact)
-  const isPendingReply = conv.pendingReply && !resolvedLocally.has(conv.remote_sender)
+  const isPendingReply = conv.pendingReply && !resolvedLocally.has(`${conversationDeviceId || ''}:${conv.remote_sender}`)
   const isUnread = conv.unread_count > 0
   const unreadBadgeCount = Math.max(1, conv.unread_count)
   const conversationDeviceId = selectedDeviceId || conv.lastMessage?.device_id
@@ -204,7 +204,7 @@ const ChatRow = memo(function ChatRow({
             <div
               onClick={(e) => {
                 e.stopPropagation()
-                handleResolve(conv.remote_sender)
+                handleResolve(conversationDeviceId || '', conv.remote_sender)
               }}
               className="h-7 w-7 rounded-full bg-green-500/20 border border-green-500/40 flex items-center justify-center hover:bg-green-500/30 shrink-0 cursor-pointer transition-colors"
               title="Marcar como respondido"
@@ -221,6 +221,7 @@ const ChatRow = memo(function ChatRow({
               onOpenInfo={onOpenInfo}
               isSelected={isSelected}
               isMobile={isMobile}
+              isPendingReply={isPendingReply}
               onStateChange={onStateChange}
             />
           )}
@@ -237,6 +238,7 @@ const ChatRow = memo(function ChatRow({
             unreadCount={conv.unread_count}
             onOpenInfo={onOpenInfo}
             mode="context-menu"
+            isPendingReply={isPendingReply}
             onStateChange={onStateChange}
           />
         </ContextMenuContent>
@@ -369,14 +371,16 @@ export function ChatList({
     return filtered
   }, [deferredSearch, showUnrespondedOnly, showArchived, conversations, contactsMap, statesByKey, selectedDeviceId, activePeriodFilter, activeStatusFilter])
 
-  const handleResolve = useCallback((jid: string) => {
+  const handleResolve = useCallback((deviceId: string, remoteSender: string) => {
+    const key = `${deviceId}:${remoteSender}`
     setResolvedLocally((prev) => {
       const next = new Set(prev)
-      next.add(jid)
+      next.add(key)
       return next
     })
-    resolveContact(jid)
-  }, [])
+    toggleResponded(deviceId, remoteSender)
+    onStateChange?.()
+  }, [onStateChange])
 
   const isSearching = deferredSearch !== searchQuery
 
