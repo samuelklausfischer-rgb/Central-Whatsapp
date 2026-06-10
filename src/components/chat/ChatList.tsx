@@ -11,12 +11,13 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { SmartAvatar } from '@/components/chat/SmartAvatar'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
-import { format, startOfDay } from 'date-fns'
+import { format, startOfDay, differenceInCalendarDays } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { Check, CheckCheck, Smartphone, Search, X, MessageCircle, Pin, Archive } from 'lucide-react'
+import { Check, CheckCheck, Smartphone, Search, X, MessageCircle, Pin } from 'lucide-react'
 import { resolveContact } from '@/services/contacts'
 import { ConversationActionsMenu } from '@/components/chat/ConversationActionsMenu'
 import { ConversationActionsContent } from '@/components/chat/ConversationActionsContent'
+import ConversationFilters from '@/components/chat/ConversationFilters'
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -244,6 +245,38 @@ const ChatRow = memo(function ChatRow({
   )
 })
 
+const FILTER_LABELS: Record<string, string> = {
+  today: 'Hoje',
+  yesterday: 'Ontem',
+  last3: 'Últimos 3 dias',
+  last7: 'Últimos 7 dias',
+  unread: 'Não lidos',
+  pinned: 'Fixados',
+}
+
+function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-chat-active text-chat-text text-xs font-medium border border-chat-border">
+      {label}
+      <button onClick={onRemove} className="hover:bg-chat-hover rounded-full p-0.5 transition-colors">
+        <X className="h-3 w-3" />
+      </button>
+    </span>
+  )
+}
+
+function matchesPeriod(dateStr: string | undefined | null, filter: string): boolean {
+  if (!dateStr || filter === 'all') return true
+  const diff = differenceInCalendarDays(new Date(), new Date(dateStr))
+  switch (filter) {
+    case 'today': return diff === 0
+    case 'yesterday': return diff === 1
+    case 'last3': return diff <= 2
+    case 'last7': return diff <= 6
+    default: return true
+  }
+}
+
 export function ChatList({
   devices,
   selectedDeviceId,
@@ -261,9 +294,28 @@ export function ChatList({
 }: ChatListProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const deferredSearch = useDeferredValue(searchQuery)
-  const [activeFilter, setActiveFilter] = useState<'all' | 'unread' | 'pinned'>('all')
+  const [activePeriodFilter, setActivePeriodFilter] = useState<'all' | 'today' | 'yesterday' | 'last3' | 'last7'>('all')
+  const [activeStatusFilter, setActiveStatusFilter] = useState<'all' | 'unread' | 'pinned'>('all')
   const [showUnrespondedOnly, setShowUnrespondedOnly] = useState(false)
   const [resolvedLocally, setResolvedLocally] = useState<Set<string>>(new Set())
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0
+    if (activePeriodFilter !== 'all') count++
+    if (activeStatusFilter !== 'all') count++
+    if (showUnrespondedOnly) count++
+    if (showArchived) count++
+    if (searchQuery.trim()) count++
+    return count
+  }, [activePeriodFilter, activeStatusFilter, showUnrespondedOnly, showArchived, searchQuery])
+
+  const handleClearAllFilters = useCallback(() => {
+    setActivePeriodFilter('all')
+    setActiveStatusFilter('all')
+    setShowUnrespondedOnly(false)
+    if (showArchived) onToggleArchived()
+    setSearchQuery('')
+  }, [showArchived, onToggleArchived])
 
   const selectedDevice = useMemo(
     () => devices.find((d) => d.id === selectedDeviceId),
@@ -288,10 +340,13 @@ export function ChatList({
 
   const filteredConversations = useMemo(() => {
     let filtered = conversations
-    if (activeFilter === 'unread') {
+    if (activePeriodFilter !== 'all') {
+      filtered = filtered.filter((conv) => matchesPeriod(conv.lastMessage?.created_at, activePeriodFilter))
+    }
+    if (activeStatusFilter === 'unread') {
       filtered = filtered.filter((conv) => conv.unread_count > 0)
     }
-    if (activeFilter === 'pinned') {
+    if (activeStatusFilter === 'pinned') {
       filtered = filtered.filter((conv) => conv.pinned)
     }
     if (!showArchived) {
@@ -312,7 +367,7 @@ export function ChatList({
       })
     }
     return filtered
-  }, [deferredSearch, showUnrespondedOnly, showArchived, conversations, contactsMap, statesByKey, selectedDeviceId, activeFilter])
+  }, [deferredSearch, showUnrespondedOnly, showArchived, conversations, contactsMap, statesByKey, selectedDeviceId, activePeriodFilter, activeStatusFilter])
 
   const handleResolve = useCallback((jid: string) => {
     setResolvedLocally((prev) => {
@@ -384,70 +439,52 @@ export function ChatList({
         </div>
 
         <div className="flex items-center gap-2 px-1 flex-wrap">
+          <ConversationFilters
+            periodFilter={activePeriodFilter}
+            statusFilter={activeStatusFilter}
+            showUnresponded={showUnrespondedOnly}
+            showArchived={showArchived}
+            onPeriodFilterChange={setActivePeriodFilter}
+            onStatusFilterChange={setActiveStatusFilter}
+            onUnrespondedChange={setShowUnrespondedOnly}
+            onArchivedChange={(v) => { if (v !== showArchived) onToggleArchived() }}
+            onClearAll={handleClearAllFilters}
+            isMobile={isMobile}
+            filterCount={activeFilterCount}
+          />
           <button
-            onClick={() => {
-              setActiveFilter('all')
-              setSearchQuery('')
-              setShowUnrespondedOnly(false)
-              if (showArchived) onToggleArchived()
-            }}
+            onClick={handleClearAllFilters}
+            disabled={activeFilterCount === 0}
             className={cn(
-              'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all',
-              activeFilter === 'all' && !showUnrespondedOnly && !showArchived && !searchQuery
-                ? 'bg-chat-active text-chat-text border border-chat-border'
-                : 'text-chat-muted border border-transparent hover:bg-chat-hover',
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all border',
+              activeFilterCount > 0
+                ? 'text-chat-muted border-chat-border hover:bg-chat-hover hover:text-chat-text'
+                : 'text-chat-muted/40 border-transparent cursor-not-allowed',
             )}
           >
-            Todos
-          </button>
-          <button
-            onClick={() => setActiveFilter('unread')}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all',
-              activeFilter === 'unread'
-                ? 'bg-chat-active text-chat-text border border-chat-border'
-                : 'text-chat-muted border border-transparent hover:bg-chat-hover',
-            )}
-          >
-            Não lidos
-          </button>
-          <button
-            onClick={() => setActiveFilter('pinned')}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all',
-              activeFilter === 'pinned'
-                ? 'bg-chat-active text-chat-text border border-chat-border'
-                : 'text-chat-muted border border-transparent hover:bg-chat-hover',
-            )}
-          >
-            <Pin className="h-3.5 w-3.5" />
-            Fixados
-          </button>
-          <button
-            onClick={() => setShowUnrespondedOnly(!showUnrespondedOnly)}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all',
-              showUnrespondedOnly
-                ? 'bg-chat-active text-chat-text border border-chat-border'
-                : 'text-chat-muted border border-transparent hover:bg-chat-hover',
-            )}
-          >
-            <MessageCircle className="h-3.5 w-3.5" />
-            Não respondidas
-          </button>
-          <button
-            onClick={onToggleArchived}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all',
-              showArchived
-                ? 'bg-chat-active text-chat-text border border-chat-border'
-                : 'text-chat-muted border border-transparent hover:bg-chat-hover',
-            )}
-          >
-            <Archive className="h-3.5 w-3.5" />
-            Arquivadas
+            <X className="h-3.5 w-3.5" />
+            Remover
           </button>
         </div>
+        {activeFilterCount > 0 && (
+          <div className="flex items-center gap-1.5 px-1 flex-wrap">
+            {activePeriodFilter !== 'all' && (
+              <FilterChip label={FILTER_LABELS[activePeriodFilter]} onRemove={() => setActivePeriodFilter('all')} />
+            )}
+            {activeStatusFilter !== 'all' && (
+              <FilterChip label={FILTER_LABELS[activeStatusFilter]} onRemove={() => setActiveStatusFilter('all')} />
+            )}
+            {showUnrespondedOnly && (
+              <FilterChip label="Não respondidas" onRemove={() => setShowUnrespondedOnly(false)} />
+            )}
+            {showArchived && (
+              <FilterChip label="Arquivadas" onRemove={() => onToggleArchived()} />
+            )}
+            {searchQuery.trim() && (
+              <FilterChip label={`Busca: "${searchQuery}"`} onRemove={() => setSearchQuery('')} />
+            )}
+          </div>
+        )}
       </div>
 
       <ScrollArea className="flex-1">
