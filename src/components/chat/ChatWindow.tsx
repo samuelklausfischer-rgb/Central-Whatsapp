@@ -1010,8 +1010,18 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
           const previousIsMe = previousMsg
             ? previousMsg.direction === 'outbound' || previousMsg.sender_id === user?.id
             : false
+          const isGroupContactMsg = contact?.includes('@g.us')
+          const thisSender = !isMe && isGroupContactMsg ? (msg.sender_name || null) : null
+          const previousSender = !previousIsMe && previousMsg && isGroupContactMsg ? (previousMsg.sender_name || null) : null
+          const shouldShowSenderLabel = !!thisSender && (
+            !previousMsg ||
+            previousIsMe ||
+            shouldShowDateSeparator ||
+            thisSender !== previousSender
+          )
           const shouldShowReceivedAvatar =
             !isMe &&
+            !isGroupContactMsg &&
             (
               !previousMsg ||
               previousIsMe ||
@@ -1030,6 +1040,11 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
             <div
               className={`flex flex-col animate-in fade-in slide-in-from-bottom-2 duration-300 ${isMe ? 'items-end' : 'items-start'}`}
             >
+              {shouldShowSenderLabel && (
+                <div className="text-[13px] leading-tight font-semibold text-chat-muted/85 mb-0.5 ml-1">
+                  {thisSender}
+                </div>
+              )}
               <div
                 className={`flex gap-2.5 items-end w-full ${isMe ? 'justify-end' : 'justify-start'}`}
               >
