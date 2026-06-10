@@ -1,4 +1,4 @@
-import { Bell, Search, LogOut, Settings, Sun, Moon } from 'lucide-react'
+import { Search, LogOut, Settings, Sun, Moon } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { SidebarTrigger } from '@/components/ui/sidebar'
 import { Input } from '@/components/ui/input'
@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useAuth } from '@/hooks/use-auth'
 import { Link } from 'react-router-dom'
+import { ReleaseNotesDialog } from '@/components/ReleaseNotesDialog'
 
 export function Header() {
   const { user, signOut } = useAuth()
@@ -40,14 +41,7 @@ export function Header() {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="relative rounded-full text-muted-foreground hover:text-foreground"
-          >
-            <Bell className="h-5 w-5" />
-            <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-blue-500 animate-pulse-ring"></span>
-          </Button>
+          <ReleaseNotesDialog />
 
           <Button
             variant="ghost"
