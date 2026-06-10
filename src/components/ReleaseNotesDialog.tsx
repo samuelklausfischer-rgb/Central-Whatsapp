@@ -47,7 +47,7 @@ export function ReleaseNotesDialog() {
                   <div className="w-2 h-2 rounded-full bg-primary" />
                 </div>
                 <Badge variant="secondary" className="mb-2 text-xs font-mono tracking-tight">
-                  v{version}
+                  Versão {version}
                 </Badge>
                 <Accordion type="multiple" className="space-y-2">
                   {notes.map((note, i) => (
