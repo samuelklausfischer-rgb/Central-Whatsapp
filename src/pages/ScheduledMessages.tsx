@@ -3,6 +3,7 @@ import {
   CalendarClock,
   CheckCircle,
   Clock,
+  RefreshCw,
   Trash2,
   XCircle,
   AlertCircle,
@@ -14,6 +15,7 @@ import {
   getScheduledMessages,
   deleteScheduledMessage,
   updateScheduledMessage,
+  retryScheduledMessage,
   type ScheduledMessageWithContact,
 } from '@/services/scheduled_messages'
 import { useRealtime } from '@/hooks/use-realtime'
@@ -61,6 +63,15 @@ export default function ScheduledMessages() {
       toast({ title: 'Mensagem cancelada com sucesso' })
     } catch {
       toast({ title: 'Erro ao cancelar mensagem', variant: 'destructive' })
+    }
+  }
+
+  const handleRetry = async (id: string) => {
+    try {
+      await retryScheduledMessage(id)
+      toast({ title: 'Mensagem será reenviada em breve' })
+    } catch {
+      toast({ title: 'Erro ao reagendar mensagem', variant: 'destructive' })
     }
   }
 
@@ -220,6 +231,17 @@ export default function ScheduledMessages() {
                               onClick={() => handleCancel(msg.id!)}
                             >
                               Cancelar
+                            </Button>
+                          )}
+                          {msg.status === 'failed' && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 bg-transparent border-border hover:bg-accent"
+                              onClick={() => handleRetry(msg.id!)}
+                            >
+                              <RefreshCw className="h-3.5 w-3.5 mr-1" />
+                              Reenviar
                             </Button>
                           )}
                           <Button

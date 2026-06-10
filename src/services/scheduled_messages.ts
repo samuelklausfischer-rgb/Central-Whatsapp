@@ -112,3 +112,14 @@ export const deleteScheduledMessage = async (id: string) => {
   const { error } = await supabase.from('scheduled_messages').delete().eq('id', id)
   if (error) throw new Error(error.message)
 }
+
+export const retryScheduledMessage = async (id: string) => {
+  const { data, error } = await supabase
+    .from('scheduled_messages')
+    .update({ status: 'pending', error_message: null, processed_at: null })
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) throw new Error(error.message)
+  return data as ScheduledMessage
+}

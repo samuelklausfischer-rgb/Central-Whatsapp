@@ -113,6 +113,7 @@ export interface ScheduledMessage {
   attachments: ScheduledAttachment[] | null
   processed_at: string | null
   error_message: string | null
+  retry_count: number
   sent_message_ids: string[]
   created_at: string
   updated_at: string
