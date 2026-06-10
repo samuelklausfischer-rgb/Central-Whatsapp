@@ -87,26 +87,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     let mounted = true
     const signal = { get aborted() { return !mounted } }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!mounted) return
       if (session?.user) {
         setLoading(true)
-        try {
-          const result = await loadUserData(session, signal)
-          if (!result || !mounted) return
-          setUser(result.user)
-          setIsAuthenticated(true)
-          setAllowedDevices(result.devices)
-          setAllowedDeviceIds(result.deviceIds)
-        } catch {
+        // Defer async work outside the callback to prevent Supabase auth deadlock
+        setTimeout(async () => {
           if (!mounted) return
-          setUser(null)
-          setIsAuthenticated(false)
-          setAllowedDeviceIds([])
-          setAllowedDevices([])
-        } finally {
-          if (mounted) setLoading(false)
-        }
+          try {
+            const result = await loadUserData(session, signal)
+            if (!result || !mounted) return
+            setUser(result.user)
+            setIsAuthenticated(true)
+            setAllowedDevices(result.devices)
+            setAllowedDeviceIds(result.deviceIds)
+          } catch {
+            if (!mounted) return
+            setUser(null)
+            setIsAuthenticated(false)
+            setAllowedDeviceIds([])
+            setAllowedDevices([])
+          } finally {
+            if (mounted) setLoading(false)
+          }
+        }, 0)
       } else {
         setUser(null)
         setIsAuthenticated(false)
@@ -129,6 +133,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setIsAuthenticated(false)
       setAllowedDeviceIds([])
       setAllowedDevices([])
+      setLoading(false)
       return
     }
 
