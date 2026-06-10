@@ -481,10 +481,12 @@ Deno.serve(async (req: Request) => {
   const isFromMe = key.fromMe === true
   const pushName = messageData.pushName || ''
   const externalId = key.id || ''
+  const participant = key.participant || ''
 
   const rawJid = key.remoteJidAlt || key.remoteJid || ''
   const isGroup = rawJid.includes('@g.us')
   const remoteSender = isGroup ? rawJid : rawJid.replace(/@s\.whatsapp\.net/g, '').replace(/@lid/g, '').replace(/\D/g, '')
+  const groupParticipant = isGroup && participant ? participant : null
 
   if (!remoteSender) {
     return new Response(JSON.stringify({ status: 'ignored', reason: 'no remote sender' }), { status: 200 })
@@ -593,6 +595,7 @@ Deno.serve(async (req: Request) => {
 
       if (!isUpdate && existing[0].content !== content) patchData.content = content
       if (nameToUse && existing[0].sender_name !== nameToUse) patchData.sender_name = nameToUse
+      if (groupParticipant && existing[0].group_participant !== groupParticipant) patchData.group_participant = groupParticipant
       if (nextAttachments.length > 0) patchData.attachments = nextAttachments
 
       if (Object.keys(patchData).length > 0) {
@@ -640,6 +643,7 @@ Deno.serve(async (req: Request) => {
       origin: 'webhook',
       ...(attachments ? { attachments } : {}),
       ...(externalId ? { external_id: externalId } : {}),
+      ...(groupParticipant ? { group_participant: groupParticipant } : {}),
     }),
   })
 

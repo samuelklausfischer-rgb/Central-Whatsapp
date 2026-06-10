@@ -8,6 +8,18 @@ export interface ReleaseNote {
 export const releaseNotes: ReleaseNote[] = [
   {
     version: '0.0.139',
+    date: '2026-06-10 18:00',
+    title: 'Autores de grupo com nome certo',
+    details: [
+      '👥 Conversas de grupo agora mostram o nome de quem enviou cada mensagem',
+      '🏷️ O nome aparece em um selo destacado no começo do bloco de mensagens',
+      '🔄 Quando muda de pessoa, o selo aparece de novo pra ficar claro quem falou',
+      '🧹 Mensagens antigas com numeros foram limpas e agora mostram o nome correto',
+      '📲 Mensagens agendadas ganharam botao Reenviar e erro mais detalhado',
+    ],
+  },
+  {
+    version: '0.0.139',
     date: '2026-06-10 14:07',
     title: 'Fechar conversa com Esc',
     details: [

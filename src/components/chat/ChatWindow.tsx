@@ -743,7 +743,9 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
     : isGroupContact
       ? contactRecord?.name && contactRecord.name !== 'Unknown Sender'
         ? contactRecord.name
-        : contact
+        : conversation?.sender_name && conversation.sender_name !== 'Unknown Sender'
+          ? conversation.sender_name
+          : 'Grupo'
       : contactRecord?.name && contactRecord.name !== 'Unknown Sender'
         ? contactRecord.name
         : conversation?.sender_name && conversation.sender_name !== 'Unknown Sender'
@@ -1041,8 +1043,11 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
               className={`flex flex-col animate-in fade-in slide-in-from-bottom-2 duration-300 ${isMe ? 'items-end' : 'items-start'}`}
             >
               {shouldShowSenderLabel && (
-                <div className="text-[13px] leading-tight font-semibold text-chat-muted/85 mb-0.5 ml-1">
-                  {thisSender}
+                <div
+                  className="text-[12px] leading-none font-semibold mb-1 ml-1 px-1.5 py-0.5 rounded-full bg-chat-text/10 text-chat-text/80 border border-chat-text/10 inline-flex items-center gap-1.5 select-none"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-chat-text/30 flex-shrink-0" />
+                  <span>{thisSender}</span>
                 </div>
               )}
               <div

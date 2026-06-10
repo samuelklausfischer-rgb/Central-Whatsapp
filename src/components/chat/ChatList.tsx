@@ -80,7 +80,7 @@ function formatChatTimestamp(dateString: string | undefined | null): string {
 
 const getConversationName = (conv: any, contact: any) => {
   if (isGroupJid(conv.remote_sender)) {
-    return contact?.nickname || contact?.name || conv.remote_sender
+    return contact?.nickname || contact?.name || 'Grupo'
   }
 
   return contact?.nickname || contact?.name || conv.sender_name || conv.remote_sender

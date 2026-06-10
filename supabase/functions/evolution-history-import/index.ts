@@ -435,17 +435,21 @@ function normalizeMessage(raw: unknown, deviceId: string, instanceName: string, 
   const content = extractContent(msgObj)
   const shouldFetchMedia = job.media_mode === 'hybrid' && mediaInfo && isRecent(createdAt, job.recent_media_days)
   const senderName = stringFrom(record.pushName) || ''
+  const isGroup = String(remoteSender).includes('@g.us')
+  const participant = String(key.participant || '')
+  const groupParticipant = isGroup && participant ? participant : null
 
   return {
     raw: record,
     mediaInfo,
     shouldFetchMedia,
-    contact: { remote_jid: remoteSender, name: (!isFromMe && !String(remoteSender).includes('@g.us')) ? senderName : '' },
+    contact: { remote_jid: remoteSender, name: (!isFromMe && !isGroup) ? senderName : '' },
     row: {
       content,
       device_id: deviceId,
       remote_sender: remoteSender,
       sender_name: senderName,
+      group_participant: groupParticipant,
       direction: isFromMe ? 'outbound' : 'inbound',
       is_read: true,
       origin: 'webhook',
@@ -456,15 +460,28 @@ function normalizeMessage(raw: unknown, deviceId: string, instanceName: string, 
 }
 
 async function existingExternalIds(deviceId: string, externalIds: string[]) {
-  if (externalIds.length === 0) return new Set<string>()
+  if (externalIds.length === 0) return new Map<string, JsonRecord | null>()
   const filter = encodeURIComponent(quotedIn(externalIds))
   const resp = await fetch(
-    `${SUPABASE_URL}/rest/v1/messages?device_id=eq.${encodeURIComponent(deviceId)}&external_id=in.(${filter})&select=external_id`,
+    `${SUPABASE_URL}/rest/v1/messages?device_id=eq.${encodeURIComponent(deviceId)}&external_id=in.(${filter})&select=external_id,sender_name,group_participant`,
     { headers: serviceHeaders },
   )
-  if (!resp.ok) return new Set<string>()
+  if (!resp.ok) return new Map<string, JsonRecord | null>()
   const rows = await resp.json()
-  return new Set(Array.isArray(rows) ? rows.map((r) => String(r.external_id)).filter(Boolean) : [])
+  const map = new Map<string, JsonRecord | null>()
+  if (Array.isArray(rows)) {
+    for (const r of rows) {
+      const extId = String(r.external_id)
+      if (extId) map.set(extId, r)
+    }
+  }
+  return map
+}
+
+function isWeakSenderName(name: unknown): boolean {
+  if (!name || name === '') return true
+  const s = String(name)
+  return /^\d{10,}$/.test(s) || s.includes('@')
 }
 
 async function saveContacts(candidates: Array<{ remote_jid: string; name: string }>) {
@@ -682,9 +699,36 @@ async function runAction(body: JsonRecord) {
         .filter(Boolean) as NonNullable<ReturnType<typeof normalizeMessage>>[]
 
       const ids = normalized.map((item) => String(item.row.external_id)).filter(Boolean)
-      const existing = await existingExternalIds(job.device_id, ids)
-      const missing = normalized.filter((item) => !existing.has(String(item.row.external_id)))
+      const existingMap = await existingExternalIds(job.device_id, ids)
+      const missing = normalized.filter((item) => {
+        const extId = String(item.row.external_id)
+        return !existingMap.has(extId)
+      })
       skipped += normalized.length - missing.length
+
+      // Patch existing group messages that have weak sender_name
+      for (const item of normalized) {
+        const extId = String(item.row.external_id)
+        const existingRow = existingMap.get(extId)
+        if (!existingRow) continue
+        const isGroup = String(item.row.remote_sender).includes('@g.us')
+        const isInbound = item.row.direction === 'inbound'
+        if (!isGroup || !isInbound) continue
+        const patch: Record<string, unknown> = {}
+        const hasNewName = item.row.sender_name && !isWeakSenderName(item.row.sender_name)
+        if (hasNewName && isWeakSenderName(existingRow.sender_name)) {
+          patch.sender_name = item.row.sender_name
+        }
+        if (item.row.group_participant && !existingRow.group_participant) {
+          patch.group_participant = item.row.group_participant
+        }
+        if (Object.keys(patch).length > 0) {
+          await fetch(
+            `${SUPABASE_URL}/rest/v1/messages?external_id=eq.${encodeURIComponent(extId)}&device_id=eq.${encodeURIComponent(job.device_id)}`,
+            { method: 'PATCH', headers: serviceHeaders, body: JSON.stringify(patch) },
+          )
+        }
+      }
 
       await saveContacts(missing.map((item) => item.contact))
 

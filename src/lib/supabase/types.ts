@@ -50,6 +50,7 @@ export interface Message {
   device_id: string
   sender_id: string | null
   sender_name: string | null
+  group_participant: string | null
   is_read: boolean
   remote_sender: string
   direction: 'inbound' | 'outbound'
