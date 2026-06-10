@@ -261,6 +261,7 @@ export function ChatList({
 }: ChatListProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const deferredSearch = useDeferredValue(searchQuery)
+  const [activeFilter, setActiveFilter] = useState<'all' | 'unread' | 'pinned'>('all')
   const [showUnrespondedOnly, setShowUnrespondedOnly] = useState(false)
   const [resolvedLocally, setResolvedLocally] = useState<Set<string>>(new Set())
 
@@ -287,6 +288,12 @@ export function ChatList({
 
   const filteredConversations = useMemo(() => {
     let filtered = conversations
+    if (activeFilter === 'unread') {
+      filtered = filtered.filter((conv) => conv.unread_count > 0)
+    }
+    if (activeFilter === 'pinned') {
+      filtered = filtered.filter((conv) => conv.pinned)
+    }
     if (!showArchived) {
       filtered = filtered.filter((conv) => {
         const state = selectedDeviceId ? statesByKey.get(`${selectedDeviceId}:${conv.remote_sender}`) : undefined
@@ -305,7 +312,7 @@ export function ChatList({
       })
     }
     return filtered
-  }, [deferredSearch, showUnrespondedOnly, showArchived, conversations, contactsMap, statesByKey, selectedDeviceId])
+  }, [deferredSearch, showUnrespondedOnly, showArchived, conversations, contactsMap, statesByKey, selectedDeviceId, activeFilter])
 
   const handleResolve = useCallback((jid: string) => {
     setResolvedLocally((prev) => {
@@ -376,7 +383,46 @@ export function ChatList({
           )}
         </div>
 
-        <div className="flex items-center gap-2 px-1">
+        <div className="flex items-center gap-2 px-1 flex-wrap">
+          <button
+            onClick={() => {
+              setActiveFilter('all')
+              setSearchQuery('')
+              setShowUnrespondedOnly(false)
+              if (showArchived) onToggleArchived()
+            }}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all',
+              activeFilter === 'all' && !showUnrespondedOnly && !showArchived && !searchQuery
+                ? 'bg-chat-active text-chat-text border border-chat-border'
+                : 'text-chat-muted border border-transparent hover:bg-chat-hover',
+            )}
+          >
+            Todos
+          </button>
+          <button
+            onClick={() => setActiveFilter('unread')}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all',
+              activeFilter === 'unread'
+                ? 'bg-chat-active text-chat-text border border-chat-border'
+                : 'text-chat-muted border border-transparent hover:bg-chat-hover',
+            )}
+          >
+            Não lidos
+          </button>
+          <button
+            onClick={() => setActiveFilter('pinned')}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all',
+              activeFilter === 'pinned'
+                ? 'bg-chat-active text-chat-text border border-chat-border'
+                : 'text-chat-muted border border-transparent hover:bg-chat-hover',
+            )}
+          >
+            <Pin className="h-3.5 w-3.5" />
+            Fixados
+          </button>
           <button
             onClick={() => setShowUnrespondedOnly(!showUnrespondedOnly)}
             className={cn(
