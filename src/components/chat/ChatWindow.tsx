@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef, Fragment } from 'react'
+﻿import React, { useState, useEffect, useRef, useMemo, Fragment } from 'react'
 import {
   ArrowLeft,
   Plus,
@@ -68,11 +68,115 @@ import { useAuth } from '@/hooks/use-auth'
 import { sendMessage, reactToMessage, deleteMessage, editMessage } from '@/services/messages'
 import { updateContactByJid } from '@/services/contacts'
 import { markConversationRead, getConversationViewers, type ConversationViewer } from '@/services/conversation_states'
+import { buildContactIndex, resolveContactDisplayName, findContactByIdentifier, isGroupJid, normalizeToDigits } from '@/lib/contacts/normalize'
 import supabase from '@/lib/supabase/client'
 import { useToast } from '@/hooks/use-toast'
 import { format } from 'date-fns'
 
-const formatInline = (text: string, isMe: boolean): React.ReactNode => {
+const PHONE_REGEX = /(?:\+55\s?)?(?:\(?\d{2}\)?[\s-]?\d{4,5}[\s-]?\d{4}|\d{10,13})/g
+
+function normalizePhoneNumber(raw: string): string {
+  const digits = raw.replace(/\D/g, '')
+  if (digits.length < 10 || digits.length > 13) return ''
+  if (digits.startsWith('55')) return digits
+  return `55${digits}`
+}
+
+function splitByPhoneNumbers(
+  text: string,
+  onOpenConversation?: (jid: string) => void,
+): React.ReactNode[] {
+  const segments: React.ReactNode[] = []
+  let lastIndex = 0
+  for (const match of Array.from(text.matchAll(PHONE_REGEX))) {
+    const idx = match.index ?? 0
+    if (idx > lastIndex) {
+      segments.push(text.slice(lastIndex, idx))
+    }
+    const jid = normalizePhoneNumber(match[0])
+    if (jid) {
+      segments.push(
+        <PhoneNumberTrigger
+          key={idx}
+          display={match[0]}
+          jid={jid}
+          onOpenConversation={onOpenConversation}
+        />,
+      )
+    } else {
+      segments.push(match[0])
+    }
+    lastIndex = idx + match[0].length
+  }
+  if (lastIndex < text.length) {
+    segments.push(text.slice(lastIndex))
+  }
+  return segments.length > 0 ? segments : [text]
+}
+
+function PhoneNumberTrigger({
+  display,
+  jid,
+  onOpenConversation,
+}: {
+  display: string
+  jid: string
+  onOpenConversation?: (jid: string) => void
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const { toast } = useToast()
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(jid)
+      toast({ title: 'Número copiado!' })
+    } catch {
+      toast({ title: 'Erro ao copiar', variant: 'destructive' })
+    }
+    setIsOpen(false)
+  }
+
+  const handleOpen = () => {
+    if (onOpenConversation) {
+      onOpenConversation(jid)
+    }
+    setIsOpen(false)
+  }
+
+  return (
+    <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
+      <DropdownMenuTrigger asChild>
+        <span
+          role="button"
+          tabIndex={0}
+          className="text-blue-400 hover:text-blue-500 underline underline-offset-2 decoration-blue-400/50 hover:decoration-blue-500 transition-colors cursor-pointer"
+          onClick={(e) => { e.stopPropagation(); setIsOpen(true) }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setIsOpen(true) } }}
+        >
+          {display}
+        </span>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="bg-chat-panel border-chat-border min-w-[200px]">
+        <DropdownMenuItem
+          className="cursor-pointer focus:bg-chat-hover"
+          onClick={(e) => { e.stopPropagation(); handleOpen() }}
+        >
+          <MessageSquare className="h-4 w-4 mr-2" />
+          Abrir conversa com esse número
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="cursor-pointer focus:bg-chat-hover"
+          onClick={(e) => { e.stopPropagation(); handleCopy() }}
+        >
+          <Copy className="h-4 w-4 mr-2" />
+          Copiar número
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+const formatInline = (text: string, isMe: boolean, onOpenConversation?: (jid: string) => void): React.ReactNode => {
   const regex = /(https?:\/\/[^\s]+|`[^`]+`|\*[^*]+\*|_[^_]+_|~[^~]+~)/g
   const parts = text.split(regex)
 
@@ -98,33 +202,34 @@ const formatInline = (text: string, isMe: boolean): React.ReactNode => {
           key={i}
           className="bg-foreground/10 px-1.5 py-0.5 rounded text-[13px] font-mono text-foreground/90"
         >
-          {part.slice(1, -1)}
+          {formatInline(part.slice(1, -1), isMe, onOpenConversation)}
         </code>
       )
     }
     if (part.startsWith('*') && part.endsWith('*')) {
       return (
         <strong key={i} className="font-bold">
-          {formatInline(part.slice(1, -1), isMe)}
+          {formatInline(part.slice(1, -1), isMe, onOpenConversation)}
         </strong>
       )
     }
     if (part.startsWith('_') && part.endsWith('_')) {
       return (
         <em key={i} className="italic">
-          {formatInline(part.slice(1, -1), isMe)}
+          {formatInline(part.slice(1, -1), isMe, onOpenConversation)}
         </em>
       )
     }
     if (part.startsWith('~') && part.endsWith('~')) {
       return (
         <del key={i} className="line-through">
-          {formatInline(part.slice(1, -1), isMe)}
+          {formatInline(part.slice(1, -1), isMe, onOpenConversation)}
         </del>
       )
     }
 
-    return <Fragment key={i}>{part}</Fragment>
+    const phoneSegments = splitByPhoneNumbers(part, onOpenConversation)
+    return <Fragment key={i}>{phoneSegments}</Fragment>
   })
 }
 
@@ -150,7 +255,7 @@ const isTechnicalPlaceholder = (content?: string) => {
   )
 }
 
-const renderMessage = (content: string, isMe: boolean) => {
+const renderMessage = (content: string, isMe: boolean, onOpenConversation?: (jid: string) => void) => {
   if (!content) return null
   const parts = content.split(/(```[\s\S]*?```)/g)
 
@@ -179,7 +284,7 @@ const renderMessage = (content: string, isMe: boolean) => {
               className="list-disc pl-5 my-2 space-y-1 marker:text-foreground/50"
             >
               {currentList.items.map((item, idx) => (
-                <li key={idx}>{formatInline(item, isMe)}</li>
+                <li key={idx}>{formatInline(item, isMe, onOpenConversation)}</li>
               ))}
             </ul>,
           )
@@ -190,7 +295,7 @@ const renderMessage = (content: string, isMe: boolean) => {
               className="list-decimal pl-5 my-2 space-y-1 marker:text-foreground/50"
             >
               {currentList.items.map((item, idx) => (
-                <li key={idx}>{formatInline(item, isMe)}</li>
+                <li key={idx}>{formatInline(item, isMe, onOpenConversation)}</li>
               ))}
             </ol>,
           )
@@ -225,7 +330,7 @@ const renderMessage = (content: string, isMe: boolean) => {
                   : 'border-secondary-foreground/40 bg-secondary-foreground/10 text-secondary-foreground'
               }`}
             >
-              {formatInline(isQuote[1], isMe)}
+              {formatInline(isQuote[1], isMe, onOpenConversation)}
             </blockquote>,
           )
         } else {
@@ -236,7 +341,7 @@ const renderMessage = (content: string, isMe: boolean) => {
 
           result.push(
             <Fragment key={`line-${j}`}>
-              {formatInline(line, isMe)}
+              {formatInline(line, isMe, onOpenConversation)}
               {j < lines.length - 1 && !isNextBlock && <br />}
             </Fragment>,
           )
@@ -255,7 +360,9 @@ const getDateKey = (value: string) => {
 }
 
 const getDateLabel = (value: string) => {
+  if (!value) return ''
   const date = new Date(value)
+  if (isNaN(date.getTime())) return ''
   const today = new Date()
   const yesterday = new Date()
   yesterday.setDate(today.getDate() - 1)
@@ -266,7 +373,7 @@ const getDateLabel = (value: string) => {
   return format(date, 'dd/MM/yyyy')
 }
 
-export function ChatWindow({ device, contact, conversation, contacts, onBack, isMobile, sheetOpen, onSheetOpenChange }: any) {
+export function ChatWindow({ device, contact, conversation, contacts, onBack, isMobile, sheetOpen, onSheetOpenChange, onStartConversation, onOpenConversationByJid }: any) {
   const { user } = useAuth()
   const { toast } = useToast()
 
@@ -735,24 +842,16 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
     }
   }
 
-  const contactRecord = contacts?.find((c: any) => c.remote_jid === contact)
-  const isGroupContact = Boolean(contact?.includes('@g.us'))
+  const contactIndex = useMemo(() => {
+    return buildContactIndex(contacts || [])
+  }, [contacts])
 
-  const displayName = contactRecord?.nickname
-    ? contactRecord.nickname
-    : isGroupContact
-      ? contactRecord?.name && contactRecord.name !== 'Unknown Sender'
-        ? contactRecord.name
-        : conversation?.sender_name && conversation.sender_name !== 'Unknown Sender'
-          ? conversation.sender_name
-          : 'Grupo'
-      : contactRecord?.name && contactRecord.name !== 'Unknown Sender'
-        ? contactRecord.name
-        : conversation?.sender_name && conversation.sender_name !== 'Unknown Sender'
-        ? conversation.sender_name
-        : contact === 'Unknown Sender'
-          ? contact
-          : `+${contact}`
+  const contactRecord = findContactByIdentifier(contact, contactIndex)
+  const isGroupContact = isGroupJid(contact)
+
+  const displayName = resolveContactDisplayName(contact, contactIndex, {
+    sender_name: conversation?.sender_name
+  })
 
   const handleEditNickname = () => {
     setNicknameInput(contactRecord?.nickname || '')
@@ -788,6 +887,15 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
               ? 'Selecione uma conversa para iniciar o atendimento.'
               : 'Selecione um dispositivo e uma conversa para iniciar.'}
           </p>
+          {device && onStartConversation && (
+            <Button
+              onClick={onStartConversation}
+              className="mt-6 bg-primary hover:bg-primary/90 text-primary-foreground rounded-full px-6 py-2.5 font-medium shadow-lg shadow-primary/25 transition-all hover:scale-105 active:scale-95"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Adicionar nova conversa
+            </Button>
+          )}
         </div>
       </div>
     )
@@ -966,7 +1074,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                           >
                             <span className="text-sm text-chat-text truncate">{v.user_name}</span>
                             <span className="text-[11px] text-chat-muted shrink-0 ml-2">
-                              {v.last_opened_at
+                              { v.last_opened_at && !isNaN(new Date(v.last_opened_at).getTime()) 
                                 ? format(new Date(v.last_opened_at), 'dd/MM HH:mm')
                                 : '—'}
                             </span>
@@ -1013,13 +1121,12 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
             ? previousMsg.direction === 'outbound' || previousMsg.sender_id === user?.id
             : false
           const isGroupContactMsg = contact?.includes('@g.us') || msg.remote_sender?.includes('@g.us')
-          const normalizeJid = (jid: string) => jid.replace(/@s\.whatsapp\.net/g, '').replace(/@lid/g, '').replace(/\D/g, '')
-          const participantJid = msg.group_participant ? normalizeJid(msg.group_participant) : null
-          const participantContact = participantJid
-            ? contacts?.find((c: any) => normalizeJid(c.remote_jid) === participantJid)
+          const participantContact = msg.group_participant
+            ? findContactByIdentifier(msg.group_participant, contactIndex)
             : null
+          const fallbackParticipantId = msg.group_participant ? normalizeToDigits(msg.group_participant) : ''
           const thisSender = !isMe && isGroupContactMsg
-            ? (msg.sender_name || participantContact?.nickname || participantContact?.name || participantJid || 'Participante')
+            ? (msg.sender_name || participantContact?.nickname || participantContact?.name || fallbackParticipantId || 'Participante')
             : null
           const currentAuthorKey = msg.group_participant || msg.sender_name || msg.remote_sender
           const previousAuthorKey = previousMsg && !previousIsMe
@@ -1063,21 +1170,18 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
               <div
                 className={`flex gap-2.5 items-end w-full ${isMe ? 'justify-end' : 'justify-start'}`}
               >
-                {!isMe && (
-                  shouldShowReceivedAvatar ? (
-                    <SmartAvatar
-                      jid={msg.remote_sender}
-                      name={(() => {
-                        const msgContactRecord = contacts?.find(
-                          (c: any) => c.remote_jid === msg.remote_sender,
-                        )
-                        return msgContactRecord?.nickname || msgContactRecord?.name || msg.sender_name
-                      })()}
-                      instanceKey={device?.instance_key}
-                      contactRecord={contacts?.find((c: any) => c.remote_jid === msg.remote_sender)}
-                      className="h-7 w-7 border border-chat-border shadow-sm flex-shrink-0 mb-1 hidden sm:block"
-                      fallbackClassName="bg-chat-panel text-chat-muted text-xs"
-                    />
+              {!isMe && (
+                shouldShowReceivedAvatar ? (
+                  <SmartAvatar
+                    jid={msg.remote_sender}
+                    name={resolveContactDisplayName(msg.remote_sender, contactIndex, {
+                      sender_name: msg.sender_name
+                    })}
+                    instanceKey={device?.instance_key}
+                    contactRecord={findContactByIdentifier(msg.remote_sender, contactIndex)}
+                    className="h-7 w-7 border border-chat-border shadow-sm flex-shrink-0 mb-1 hidden sm:block"
+                    fallbackClassName="bg-chat-panel text-chat-muted text-xs"
+                  />
                   ) : (
                     <div className="h-7 w-7 flex-shrink-0 mb-1 hidden sm:block" />
                   )
@@ -1104,7 +1208,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                     {messageAttachments.length > 0 && (
                      <div className="flex flex-col gap-2 mb-2">
                        {messageAttachments.map((att: any, idx: number) => {
-                         if (typeof att === 'object' && att.url) {
+                          if (att && typeof att === 'object' && att.url) {
                             if (att.type === 'audio') {
                              return (
                                <div key={idx}>
@@ -1261,7 +1365,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                      </div>
                    ) : msg.content?.trim() && !isTechnicalPlaceholder(msg.content) ? (
                      <div className="text-[15px] leading-relaxed break-words">
-                       {renderMessage(msg.content, isMe)}
+                        {renderMessage(msg.content, isMe, onOpenConversationByJid)}
                        <span
   className={`inline-flex translate-y-[30%] items-center gap-1 whitespace-nowrap ${
     isMe ? 'float-right ml-3' : 'ml-1'

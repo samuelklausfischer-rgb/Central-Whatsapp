@@ -24,6 +24,7 @@ import {
   ContextMenuContent,
 } from '@/components/ui/context-menu'
 import type { ConversationUserState } from '@/services/conversation_states'
+import { buildContactIndex, findContactByIdentifier, resolveContactDisplayName } from '@/lib/contacts/normalize'
 
 export interface ChatListProps {
   devices: any[]
@@ -40,8 +41,6 @@ export interface ChatListProps {
   onToggleArchived: () => void
   onStateChange?: () => void
 }
-
-const isGroupJid = (jid?: string) => Boolean(jid?.includes('@g.us'))
 
 function formatChatTimestamp(dateString: string | undefined | null): string {
   if (!dateString) return ''
@@ -78,15 +77,8 @@ function formatChatTimestamp(dateString: string | undefined | null): string {
   return format(date, 'dd/MM/yy')
 }
 
-const getConversationName = (conv: any, contact: any) => {
-  if (isGroupJid(conv.remote_sender)) {
-    return contact?.nickname || contact?.name || 'Grupo'
-  }
-
-  return contact?.nickname || contact?.name || conv.sender_name || conv.remote_sender
-}
-
-function previewLabel(content: string): string {
+function previewLabel(content: string | null | undefined): string {
+  if (!content) return ''
   const cleaned = content.replace(/[\u0080-\u009F]/g, '')
   const labels: Record<string, string> = {
     '[Áudio]': 'Voz',
@@ -115,6 +107,7 @@ const ChatRow = memo(function ChatRow({
   onOpenInfo,
   isMobile,
   onStateChange,
+  contactIndex,
 }: {
   conv: any
   contact: any
@@ -128,8 +121,11 @@ const ChatRow = memo(function ChatRow({
   onOpenInfo: (deviceId: string, remoteSender: string) => void
   isMobile: boolean
   onStateChange?: () => void
+  contactIndex: Map<string, any>
 }) {
-  const name = getConversationName(conv, contact)
+  const name = resolveContactDisplayName(conv.remote_sender, contactIndex, {
+    sender_name: conv.sender_name
+  })
   const conversationDeviceId = selectedDeviceId || conv.lastMessage?.device_id
   const isPendingReply = conv.pendingReply && !resolvedLocally.has(`${conversationDeviceId || ''}:${conv.remote_sender}`)
   const isUnread = conv.unread_count > 0
@@ -324,12 +320,8 @@ export function ChatList({
     [devices, selectedDeviceId],
   )
 
-  const contactsMap = useMemo(() => {
-    const map = new Map<string, any>()
-    for (const c of contacts) {
-      map.set(c.remote_jid, c)
-    }
-    return map
+  const contactIndex = useMemo(() => {
+    return buildContactIndex(contacts)
   }, [contacts])
 
   const statesByKey = useMemo(() => {
@@ -363,13 +355,14 @@ export function ChatList({
     if (deferredSearch.trim()) {
       const lowerQuery = deferredSearch.toLowerCase()
       filtered = filtered.filter((conv) => {
-        const contact = contactsMap.get(conv.remote_sender)
-        const name = getConversationName(conv, contact)
+        const name = resolveContactDisplayName(conv.remote_sender, contactIndex, {
+          sender_name: conv.sender_name
+        })
         return name.toLowerCase().includes(lowerQuery)
       })
     }
     return filtered
-  }, [deferredSearch, showUnrespondedOnly, showArchived, conversations, contactsMap, statesByKey, selectedDeviceId, activePeriodFilter, activeStatusFilter])
+  }, [deferredSearch, showUnrespondedOnly, showArchived, conversations, contactIndex, statesByKey, selectedDeviceId, activePeriodFilter, activeStatusFilter])
 
   const handleResolve = useCallback((deviceId: string, remoteSender: string) => {
     const key = `${deviceId}:${remoteSender}`
@@ -393,7 +386,7 @@ export function ChatList({
     >
       <div className="px-3.5 py-3 border-b border-chat-border flex flex-col gap-3 shrink-0">
         <h2 className="text-xl font-semibold text-chat-text">Mensagens</h2>
-        <Select value={selectedDeviceId || undefined} onValueChange={onSelectDevice}>
+        <Select value={selectedDeviceId ?? ''} onValueChange={onSelectDevice}>
           <SelectTrigger className="w-full bg-chat-sidebar border-chat-border h-12">
             <SelectValue placeholder="Selecione um dispositivo..." />
           </SelectTrigger>
@@ -494,7 +487,7 @@ export function ChatList({
       <ScrollArea className="flex-1">
         <div className={cn('pl-2 pr-3 py-1 flex flex-col gap-0.5', isSearching && 'opacity-60 transition-opacity')}>
           {filteredConversations.map((conv) => {
-            const contact = contactsMap.get(conv.remote_sender) || null
+            const contact = findContactByIdentifier(conv.remote_sender, contactIndex) || null
             const isSelected = selectedContact === conv.remote_sender
             const convState = selectedDeviceId
               ? statesByKey.get(`${selectedDeviceId}:${conv.remote_sender}`)
@@ -515,6 +508,7 @@ export function ChatList({
                 onOpenInfo={onOpenInfo}
                 isMobile={isMobile}
                 onStateChange={onStateChange}
+                contactIndex={contactIndex}
               />
             )
           })}

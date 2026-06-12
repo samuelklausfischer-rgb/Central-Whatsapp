@@ -5,10 +5,21 @@ import { ChatList } from '@/components/chat/ChatList'
 import { ChatWindow } from '@/components/chat/ChatWindow'
 import { syncDeviceAvatar } from '@/services/devices'
 import { getMessages, getConversationSummaries, getConversationMessages, type ConversationSummary } from '@/services/messages'
-import { getContacts } from '@/services/contacts'
+import { getContacts, updateContactByJid } from '@/services/contacts'
 import { getMyStates, type ConversationUserState } from '@/services/conversation_states'
 import { useRealtime } from '@/hooks/use-realtime'
 import { useAuth } from '@/hooks/use-auth'
+import { useToast } from '@/hooks/use-toast'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Button } from '@/components/ui/button'
 
 function debounce<A extends any[]>(fn: (...args: A) => void, ms: number): (...args: A) => void {
   let timer: ReturnType<typeof setTimeout>
@@ -66,6 +77,13 @@ export default function ChatHub() {
   const [userStates, setUserStates] = useState<ConversationUserState[]>([])
   const [showArchived, setShowArchived] = useState(false)
   const [isSheetOpen, setIsSheetOpen] = useState(false)
+  const [isNewContactOpen, setIsNewContactOpen] = useState(false)
+  const [newContactName, setNewContactName] = useState('')
+  const [newContactDdd, setNewContactDdd] = useState('')
+  const [newContactNumber, setNewContactNumber] = useState('')
+  const [isCreatingContact, setIsCreatingContact] = useState(false)
+
+  const { toast } = useToast()
 
   useEffect(() => {
     getContacts()
@@ -259,6 +277,59 @@ export default function ChatHub() {
   const handleOpenInfo = useCallback((deviceId: string, remoteSender: string) => {
     setSelectedContact(remoteSender)
     setIsSheetOpen(true)
+  }, [])
+
+  const handleCreateContact = useCallback(async () => {
+    const ddd = newContactDdd.replace(/\D/g, '')
+    const numero = newContactNumber.replace(/\D/g, '')
+    if (!ddd || !numero) {
+      toast({ title: 'Preencha DDD e número', variant: 'destructive' })
+      return
+    }
+    if (ddd.length < 2) {
+      toast({ title: 'DDD inválido', variant: 'destructive' })
+      return
+    }
+    if (numero.length < 8 || numero.length > 9) {
+      toast({ title: 'Número inválido (8-9 dígitos)', variant: 'destructive' })
+      return
+    }
+
+    const jid = `55${ddd}${numero}`
+
+    setIsCreatingContact(true)
+    try {
+      const created = await updateContactByJid(jid, {
+        name: newContactName.trim() || undefined,
+      })
+      setContacts((prev) => {
+        const exists = prev.some((c) => c.remote_jid === jid)
+        return exists ? prev : [created, ...prev]
+      })
+      setIsNewContactOpen(false)
+      setNewContactName('')
+      setNewContactDdd('')
+      setNewContactNumber('')
+      setSelectedContact(jid)
+      toast({ title: 'Conversa criada com sucesso' })
+    } catch {
+      toast({ title: 'Erro ao criar conversa', variant: 'destructive' })
+    } finally {
+      setIsCreatingContact(false)
+    }
+  }, [newContactName, newContactDdd, newContactNumber, toast])
+
+  const handleOpenNewContact = useCallback(() => {
+    setNewContactName('')
+    setNewContactDdd('')
+    setNewContactNumber('')
+    setIsNewContactOpen(true)
+  }, [])
+
+  const handleOpenConversationByJid = useCallback((jid: string) => {
+    if (!jid) return
+    setSelectedContact(jid)
+    setIsSheetOpen(false)
   }, [])
 
   const conversations = useMemo(() => {
@@ -489,8 +560,63 @@ export default function ChatHub() {
           isMobile={isMobile}
           sheetOpen={isSheetOpen}
           onSheetOpenChange={setIsSheetOpen}
+          onStartConversation={handleOpenNewContact}
+          onOpenConversationByJid={handleOpenConversationByJid}
         />
       )}
+      <Dialog open={isNewContactOpen} onOpenChange={setIsNewContactOpen}>
+        <DialogContent className="sm:max-w-[440px] bg-chat-panel border-chat-border">
+          <DialogHeader>
+            <DialogTitle>Adicionar nova conversa</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-1.5">
+              <Label htmlFor="new-contact-name">Nome (opcional)</Label>
+              <Input
+                id="new-contact-name"
+                value={newContactName}
+                onChange={(e) => setNewContactName(e.target.value)}
+                placeholder="Nome do contato"
+                className="bg-chat-sidebar border-chat-border text-chat-text"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-1.5">
+                <Label htmlFor="new-contact-ddd">DDD</Label>
+                <Input
+                  id="new-contact-ddd"
+                  value={newContactDdd}
+                  onChange={(e) => setNewContactDdd(e.target.value.replace(/\D/g, '').slice(0, 2))}
+                  placeholder="11"
+                  inputMode="numeric"
+                  maxLength={2}
+                  className="bg-chat-sidebar border-chat-border text-chat-text text-center"
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="new-contact-number">Número</Label>
+                <Input
+                  id="new-contact-number"
+                  value={newContactNumber}
+                  onChange={(e) => setNewContactNumber(e.target.value.replace(/\D/g, '').slice(0, 9))}
+                  placeholder="99999-9999"
+                  inputMode="numeric"
+                  maxLength={9}
+                  className="bg-chat-sidebar border-chat-border text-chat-text"
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsNewContactOpen(false)} disabled={isCreatingContact}>
+              Cancelar
+            </Button>
+            <Button onClick={handleCreateContact} disabled={isCreatingContact}>
+              {isCreatingContact ? 'Criando...' : 'Criar conversa'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
