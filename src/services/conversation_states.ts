@@ -79,6 +79,17 @@ export interface ConversationViewer {
   last_opened_at: string | null
 }
 
+export async function markAllConversationsReadForDevice(deviceId: string): Promise<void> {
+  const { data } = await supabase
+    .from('messages')
+    .select('remote_sender')
+    .eq('device_id', deviceId)
+    .eq('direction', 'inbound')
+    .is('deleted_at', null)
+  const senders = [...new Set((data || []).map((r: { remote_sender: string }) => r.remote_sender))]
+  await Promise.all(senders.map((s) => markConversationRead(deviceId, s)))
+}
+
 export async function toggleResponded(deviceId: string, remoteSender: string): Promise<string | null> {
   const { data, error } = await supabase.rpc('toggle_conversation_responded', {
     p_device_id: deviceId,

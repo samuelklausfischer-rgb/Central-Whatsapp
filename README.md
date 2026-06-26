@@ -1,6 +1,19 @@
 # Central Whats
 
-Frontend React/Vite para uma central de atendimento WhatsApp integrada ao Supabase e Evolution API.
+Central de atendimento WhatsApp para equipes — React + Supabase + Evolution API.
+
+**Versão:** 0.0.141 | [Documentação Completa](./docs/README.md)
+
+## Aplicações
+
+Este repositório contém **duas aplicações** que compartilham o mesmo código React:
+
+| Aplicação | Como usar | Documentação |
+|---|---|---|
+| **Web App** | Docker + Nginx (browser) | [docs/web-app/](./docs/web-app/README.md) |
+| **Desktop App** | Instalador Windows (Electron) | [docs/desktop-app/](./docs/desktop-app/README.md) |
+
+---
 
 ## Arquitetura
 
@@ -101,10 +114,22 @@ As Edge Functions do Supabase devem ser publicadas separadamente pelo fluxo de S
 ## Estrutura Principal
 
 ```text
-src/                  Frontend React
-public/               Assets publicos e env-config.js base
-supabase/functions/   Edge Functions Supabase
-pocketbase/           Hooks/migrations legados do PocketBase
-Dockerfile            Build e runtime Nginx do frontend
-nginx.conf            Configuracao SPA do Nginx
+src/                     Frontend React (compartilhado Web + Desktop)
+public/                  Assets publicos e env-config.js base
+supabase/functions/      Edge Functions Supabase (backend serverless)
+central-whats-app/       Configuracao e processo principal do Electron
+Dockerfile               Build e runtime Nginx do Web App
+nginx.conf               Configuracao SPA do Nginx
+docs/                    Documentacao completa do projeto
 ```
+
+## Documentacao Completa
+
+Toda a documentacao detalhada esta em [`docs/`](./docs/README.md):
+
+- [Web App — Visao Geral](./docs/web-app/README.md)
+- [Web App — Arquitetura](./docs/web-app/arquitetura.md)
+- [Web App — Deploy](./docs/web-app/deploy.md)
+- [Desktop App — Visao Geral](./docs/desktop-app/README.md)
+- [Desktop App — Build e Distribuicao](./docs/desktop-app/build-e-distribuicao.md)
+- [Desktop App — Auto-atualizacao](./docs/desktop-app/auto-atualizacao.md)

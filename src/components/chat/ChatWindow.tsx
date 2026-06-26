@@ -1,4 +1,5 @@
 ﻿import React, { useState, useEffect, useRef, useMemo, Fragment } from 'react'
+import logoUrl from '/logo.png'
 import {
   ArrowLeft,
   Plus,
@@ -25,6 +26,10 @@ import {
   Square,
   Trash2,
   Copy,
+  ChevronRight,
+  CheckCircle2,
+  Clock,
+  AlertCircle,
 } from 'lucide-react'
 import {
   Dialog,
@@ -59,6 +64,7 @@ import { SmartAvatar } from '@/components/chat/SmartAvatar'
 import { AudioMessage } from '@/components/chat/AudioMessage'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { getTriggers } from '@/services/message_triggers'
 import { getLabels } from '@/services/labels'
@@ -67,6 +73,9 @@ import { useRealtime } from '@/hooks/use-realtime'
 import { useAuth } from '@/hooks/use-auth'
 import { sendMessage, reactToMessage, deleteMessage, editMessage } from '@/services/messages'
 import { updateContactByJid } from '@/services/contacts'
+import { createNote, getNotesByContact, deleteNote } from '@/services/notes'
+import type { Note } from '@/lib/supabase/types'
+import { ContactNoteIcon } from '@/components/ui/ContactNoteIcon'
 import { markConversationRead, getConversationViewers, type ConversationViewer } from '@/services/conversation_states'
 import { buildContactIndex, resolveContactDisplayName, findContactByIdentifier, isGroupJid, normalizeToDigits } from '@/lib/contacts/normalize'
 import supabase from '@/lib/supabase/client'
@@ -373,7 +382,24 @@ const getDateLabel = (value: string) => {
   return format(date, 'dd/MM/yyyy')
 }
 
-export function ChatWindow({ device, contact, conversation, contacts, onBack, isMobile, sheetOpen, onSheetOpenChange, onStartConversation, onOpenConversationByJid }: any) {
+async function downloadFile(url: string, filename: string) {
+  try {
+    const res = await fetch(url)
+    const blob = await res.blob()
+    const objectUrl = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(objectUrl)
+  } catch {
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+}
+
+export function ChatWindow({ device, contact, conversation, contacts, onBack, isMobile, sheetOpen, onSheetOpenChange, onStartConversation, onOpenConversationByJid, onOptimisticSend, onOptimisticConfirm, onOptimisticFail }: any) {
   const { user } = useAuth()
   const { toast } = useToast()
 
@@ -385,6 +411,13 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
   const [isNicknameOpen, setIsNicknameOpen] = useState(false)
   const [nicknameInput, setNicknameInput] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  const [isNoteOpen, setIsNoteOpen] = useState(false)
+  const [noteTitle, setNoteTitle] = useState('')
+  const [noteContent, setNoteContent] = useState('')
+  const [noteCategory, setNoteCategory] = useState<'geral' | 'financeiro' | 'rh' | 'administrativo'>('geral')
+  const [contactNotes, setContactNotes] = useState<Note[]>([])
+  const [savingNote, setSavingNote] = useState(false)
 
   const [triggers, setTriggers] = useState<any[]>([])
   const [searchTrigger, setSearchTrigger] = useState('')
@@ -403,6 +436,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
 
   const [isSending, setIsSending] = useState(false)
   const [isScheduling, setIsScheduling] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
 
   const [isRecording, setIsRecording] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
@@ -512,9 +546,106 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
     }
   }, [sheetOpen, device, contact])
 
+  useEffect(() => {
+    if (contact) {
+      getNotesByContact(contact).then(setContactNotes).catch(() => {})
+    } else {
+      setContactNotes([])
+    }
+  }, [contact])
+
+  const handleSaveNote = async () => {
+    if (!user || !noteContent.trim()) return
+    setSavingNote(true)
+    try {
+      const created = await createNote({
+        title: noteTitle.trim() || displayName,
+        content: noteContent.trim(),
+        user_id: user.id,
+        contact_jid: contact || null,
+        contact_name: displayName || null,
+        category: noteCategory,
+      })
+      setContactNotes((prev) => [created, ...prev])
+      setIsNoteOpen(false)
+      setNoteTitle('')
+      setNoteContent('')
+      setNoteCategory('geral')
+      toast({ title: 'Anotação salva com sucesso!' })
+    } catch {
+      toast({ title: 'Erro ao salvar anotação.', variant: 'destructive' })
+    } finally {
+      setSavingNote(false)
+    }
+  }
+
+  const handleDeleteNote = async (noteId: string) => {
+    try {
+      await deleteNote(noteId)
+      setContactNotes((prev) => prev.filter((n) => n.id !== noteId))
+      toast({ title: 'Anotação removida.' })
+    } catch {
+      toast({ title: 'Erro ao remover anotação.', variant: 'destructive' })
+    }
+  }
+
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault()
     if ((!msgText.trim() && attachments.length === 0 && !audioBlob) || !device || !user || !contact) return
+
+    // Caminho otimista (texto puro, sem edição/áudio/anexo): mostra o balão na
+    // hora e limpa o input, sem esperar o round-trip RPC -> Evolution -> insert.
+    if (!editingMessageId && msgText.trim() && attachments.length === 0 && !audioBlob) {
+      const content = msgText.trim()
+      // A mensagem otimista precisa nascer com EXATAMENTE o conteúdo que o
+      // servidor grava: a RPC send_whatsapp_message prepende a assinatura como
+      // `assinatura + "\n\n" + texto` (devices.signature, senão profiles.signature).
+      // Replicar isso evita o balão sem assinatura que depois era substituído.
+      const signature = device?.signature || user?.signature || ''
+      const displayContent = signature ? `${signature}\n\n${content}` : content
+      const replyId = replyingTo?.id
+      const replySnapshot = replyingTo
+        ? { content: replyingTo.content, sender_name: replyingTo.sender_name, id: replyingTo.id }
+        : null
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      const tempMsg = {
+        id: tempId,
+        content: displayContent,
+        device_id: device.id,
+        remote_sender: contact,
+        sender_id: user.id,
+        direction: 'outbound',
+        created_at: new Date().toISOString(),
+        is_read: true,
+        status: 'sending',
+        reply_to_id: replyId || null,
+        reply_to_snapshot: replySnapshot,
+        attachments: [],
+      }
+      setMsgText('')
+      setReplyingTo(null)
+      onOptimisticSend?.(tempMsg)
+      try {
+        // Envia o texto CRU — o servidor adiciona a assinatura. A RPC retorna a
+        // linha real inserida, usada para substituir a temp de forma determinística.
+        const res: any = await sendMessage({
+          content,
+          device_id: device.id,
+          sender_id: user.id,
+          is_read: true,
+          remote_sender: contact,
+          reply_to_id: replyId,
+        })
+        onOptimisticConfirm?.(tempId, res?.message)
+      } catch (err) {
+        onOptimisticFail?.(tempId)
+        toast({
+          title: err instanceof Error ? err.message : 'Erro ao enviar mensagem',
+          variant: 'destructive',
+        })
+      }
+      return
+    }
 
     const content = msgText.trim() ? msgText.trim() : (audioBlob ? '[Áudio]' : attachments.length > 0 ? '[Anexo]' : '')
 
@@ -545,9 +676,15 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
         })
         discardAudio()
       } else if (attachments.length > 0) {
-        const uploaded = await Promise.all(
-          attachments.map((file) => uploadFile(file, user.id)),
-        )
+        const uploaded: { url: string; type: string; name: string }[] = []
+        for (let fi = 0; fi < attachments.length; fi++) {
+          setUploadProgress(0)
+          const result = await uploadFile(attachments[fi], user.id, (pct) => {
+            setUploadProgress(Math.round((fi / attachments.length) * 100 + pct / attachments.length))
+          })
+          uploaded.push(result)
+        }
+        setUploadProgress(null)
         for (let i = 0; i < uploaded.length; i++) {
           const att = uploaded[i]
           await sendMessage({
@@ -729,8 +866,8 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
       }
 
       const validFiles = newFiles.filter((f) => {
-        if (f.size > 10485760) {
-          toast({ title: `Arquivo ${f.name} excede o limite de 10MB`, variant: 'destructive' })
+        if (f.size > 209715200) {
+          toast({ title: `Arquivo ${f.name} excede o limite de 200MB`, variant: 'destructive' })
           return false
         }
         return true
@@ -875,22 +1012,18 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
   if (!device || !contact) {
     return (
       <div className="hidden md:flex flex-col items-center justify-center h-full bg-chat-conversation/80 backdrop-blur-sm flex-1 relative overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(59,130,246,0.05),transparent_70%)]" />
-        <div className="max-w-md text-center p-8 rounded-3xl bg-chat-panel border border-chat-border shadow-chat relative z-10">
-          <div className="h-24 w-24 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mx-auto mb-6 shadow-[0_0_30px_rgba(37,99,235,0.2)]">
-            <MessageSquare className="h-10 w-10 text-blue-400" />
-          </div>
-          <img src="/logo.png" alt="Logo" className="h-12 w-auto mx-auto mb-3 object-contain" />
-          <h2 className="text-2xl font-semibold text-chat-text tracking-tight">Central Cell</h2>
-          <p className="text-chat-muted mt-3 text-[15px] leading-relaxed">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(59,130,246,0.04),transparent_70%)]" />
+        <div className="relative z-10 flex flex-col items-center text-center px-8 max-w-sm">
+          <img src={logoUrl} alt="Logo" className="h-24 w-auto mb-8 object-contain drop-shadow-lg" />
+          <p className="text-chat-text/70 text-[15px] leading-relaxed">
             {device
               ? 'Selecione uma conversa para iniciar o atendimento.'
-              : 'Selecione um dispositivo e uma conversa para iniciar.'}
+              : 'Selecione uma conversa para iniciar o atendimento.'}
           </p>
           {device && onStartConversation && (
             <Button
               onClick={onStartConversation}
-              className="mt-6 bg-primary hover:bg-primary/90 text-primary-foreground rounded-full px-6 py-2.5 font-medium shadow-lg shadow-primary/25 transition-all hover:scale-105 active:scale-95"
+              className="mt-6 bg-primary hover:bg-primary/90 text-primary-foreground rounded-full px-6 h-10 font-medium shadow-lg shadow-primary/25 transition-all hover:scale-105 active:scale-95"
             >
               <Plus className="h-4 w-4 mr-2" />
               Adicionar nova conversa
@@ -1001,17 +1134,17 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                 <MoreVertical className="h-5 w-5" />
               </Button>
             </SheetTrigger>
-            <SheetContent className="bg-chat-panel border-chat-border">
-              <SheetHeader>
+            <SheetContent className="bg-chat-panel border-chat-border flex flex-col h-full p-0">
+              <SheetHeader className="px-6 pt-6 pb-0 flex-shrink-0">
                 <SheetTitle className="text-chat-text">Info do {isGroupContact ? 'Grupo' : 'Contato'}</SheetTitle>
               </SheetHeader>
-              <div className="py-8 flex flex-col items-center border-b border-chat-border">
+              <div className="px-6 py-6 flex flex-col items-center border-b border-chat-border flex-shrink-0">
                 <SmartAvatar
                   jid={contact}
                   name={displayName}
                   instanceKey={device?.instance_key}
                   contactRecord={contactRecord}
-                  className="h-32 w-32 mb-5 border border-chat-border shadow-chat text-4xl"
+                  className="h-28 w-28 mb-4 border border-chat-border shadow-chat text-4xl"
                   fallbackClassName="text-3xl bg-chat-panel text-chat-text"
                 />
                 <h3 className="font-bold text-xl text-chat-text tracking-tight text-center">
@@ -1042,49 +1175,118 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                   </div>
                 )}
               </div>
-              <div className="py-6 space-y-3">
-                <Button
-                  className="w-full justify-start h-12 bg-chat-hover hover:bg-chat-hover border-chat-border text-chat-text transition-all"
-                  variant="outline"
-                  onClick={() => setIsTaskModalOpen(true)}
-                >
-                  <ClipboardList className="mr-3 h-5 w-5 text-blue-400" /> Guardar tarefa
-                </Button>
-                <Button
-                  className="w-full justify-start h-12 bg-chat-hover hover:bg-chat-hover border-chat-border text-chat-text transition-all"
-                  variant="outline"
-                >
-                  <StickyNote className="mr-3 h-5 w-5 text-purple-400" /> Adicionar Anotação
-                </Button>
-                {device && contact && (
-                  <div className="pt-4 border-t border-chat-border">
-                    <h4 className="text-sm font-semibold text-chat-text mb-3 flex items-center gap-2">
-                      <Info className="h-4 w-4 text-chat-muted" /> Dados da conversa
-                    </h4>
-                    {viewers.length === 0 ? (
-                      <p className="text-xs text-chat-muted">
-                        Nenhum usuário visualizou esta conversa ainda.
-                      </p>
-                    ) : (
+
+              <ScrollArea className="flex-1 min-h-0">
+                <div className="px-6 py-5 space-y-3">
+                  <Button
+                    className="w-full justify-start h-12 bg-chat-hover hover:bg-chat-hover border-chat-border text-chat-text transition-all"
+                    variant="outline"
+                    onClick={() => setIsTaskModalOpen(true)}
+                  >
+                    <ClipboardList className="mr-3 h-5 w-5 text-blue-400" /> Guardar tarefa
+                  </Button>
+                  <Button
+                    className="w-full justify-start h-12 bg-chat-hover hover:bg-chat-hover border-chat-border text-chat-text transition-all"
+                    variant="outline"
+                    onClick={() => {
+                      setNoteTitle(displayName)
+                      setNoteContent('')
+                      setNoteCategory('geral')
+                      setIsNoteOpen(true)
+                    }}
+                  >
+                    <ContactNoteIcon className="mr-3 h-5 w-5 text-purple-400" /> Adicionar Anotação
+                  </Button>
+
+                  {contactNotes.length > 0 && (
+                    <div className="pt-3 border-t border-chat-border">
+                      <h4 className="text-sm font-semibold text-chat-text mb-2 flex items-center justify-between">
+                        <span className="flex items-center gap-2">
+                          <ContactNoteIcon className="h-4 w-4 text-purple-400" />
+                          Anotações
+                          <span className="text-[11px] font-normal bg-purple-500/15 text-purple-400 px-1.5 py-0.5 rounded-full">
+                            {contactNotes.length}
+                          </span>
+                        </span>
+                        <a
+                          href="/notes"
+                          className="text-[11px] text-chat-muted hover:text-blue-400 flex items-center gap-0.5 transition-colors"
+                        >
+                          Ver todas <ChevronRight className="h-3 w-3" />
+                        </a>
+                      </h4>
                       <div className="space-y-2">
-                        {viewers.map((v) => (
+                        {contactNotes.map((note) => (
                           <div
-                            key={v.user_id}
-                            className="flex items-center justify-between px-3 py-2 rounded-md bg-chat-hover border border-chat-border"
+                            key={note.id}
+                            className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-chat-hover border border-chat-border group transition-all duration-200"
                           >
-                            <span className="text-sm text-chat-text truncate">{v.user_name}</span>
-                            <span className="text-[11px] text-chat-muted shrink-0 ml-2">
-                              { v.last_opened_at && !isNaN(new Date(v.last_opened_at).getTime()) 
-                                ? format(new Date(v.last_opened_at), 'dd/MM HH:mm')
-                                : '—'}
-                            </span>
+                            <ContactNoteIcon className="h-4 w-4 text-purple-400 mt-0.5 flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5 mb-0.5">
+                                <span className="text-[11px] font-medium text-chat-text truncate">{note.title}</span>
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0 ${
+                                  note.category === 'financeiro' ? 'bg-emerald-500/15 text-emerald-400' :
+                                  note.category === 'rh' ? 'bg-blue-500/15 text-blue-400' :
+                                  note.category === 'administrativo' ? 'bg-amber-500/15 text-amber-400' :
+                                  'bg-chat-border text-chat-muted'
+                                }`}>
+                                  {note.category === 'financeiro' ? 'Fin.' :
+                                   note.category === 'rh' ? 'RH' :
+                                   note.category === 'administrativo' ? 'Adm.' : 'Geral'}
+                                </span>
+                              </div>
+                              <p className="text-[12px] text-chat-muted leading-relaxed">{note.content}</p>
+                              <p className="text-[10px] text-chat-muted/60 mt-1">
+                                {new Date(note.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+                                {' '}
+                                {new Date(note.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteNote(note.id)}
+                              title="Marcar como concluída"
+                              className="opacity-0 group-hover:opacity-100 transition-all duration-150 text-chat-muted hover:text-emerald-400 flex-shrink-0 mt-0.5 hover:scale-110"
+                            >
+                              <CheckCircle2 className="h-4 w-4" />
+                            </button>
                           </div>
                         ))}
                       </div>
-                    )}
-                  </div>
-                )}
-              </div>
+                    </div>
+                  )}
+
+                  {device && contact && (
+                    <div className="pt-4 border-t border-chat-border">
+                      <h4 className="text-sm font-semibold text-chat-text mb-3 flex items-center gap-2">
+                        <Info className="h-4 w-4 text-chat-muted" /> Dados da conversa
+                      </h4>
+                      {viewers.length === 0 ? (
+                        <p className="text-xs text-chat-muted">
+                          Nenhum usuário visualizou esta conversa ainda.
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {viewers.map((v) => (
+                            <div
+                              key={v.user_id}
+                              className="flex items-center justify-between px-3 py-2 rounded-md bg-chat-hover border border-chat-border"
+                            >
+                              <span className="text-sm text-chat-text truncate">{v.user_name}</span>
+                              <span className="text-[11px] text-chat-muted shrink-0 ml-2">
+                                { v.last_opened_at && !isNaN(new Date(v.last_opened_at).getTime())
+                                  ? format(new Date(v.last_opened_at), 'dd/MM HH:mm')
+                                  : '—'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
             </SheetContent>
           </Sheet>
         </div>
@@ -1265,12 +1467,10 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                             )
                           }
                            return (
-                            <a
+                            <button
                               key={idx}
-                              href={att.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-2 p-2.5 rounded-md hover:opacity-80 transition-colors text-sm border border-chat-text/20 bg-chat-text/10"
+                              onClick={() => downloadFile(att.url, att.name || att.url)}
+                              className="flex items-center gap-2 p-2.5 rounded-md hover:opacity-80 transition-colors text-sm border border-chat-text/20 bg-chat-text/10 w-full text-left"
                             >
                               <FileIcon
                                 className="h-4 w-4 flex-shrink-0 text-chat-text/70"
@@ -1279,7 +1479,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                                 {att.name || att.url}
                               </span>
                               <Download className="h-4 w-4 flex-shrink-0 ml-auto opacity-50" />
-                            </a>
+                            </button>
                           )
                         }
                         const filename = att as string
@@ -1340,12 +1540,10 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                           )
                         }
                         return (
-                          <a
+                          <button
                             key={idx}
-                            href={url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-2 p-2.5 rounded-md hover:opacity-80 transition-colors text-sm border border-chat-text/20 bg-chat-text/10"
+                            onClick={() => downloadFile(url, filename)}
+                            className="flex items-center gap-2 p-2.5 rounded-md hover:opacity-80 transition-colors text-sm border border-chat-text/20 bg-chat-text/10 w-full text-left"
                           >
                             <FileIcon
                               className="h-4 w-4 flex-shrink-0 text-chat-text/70"
@@ -1354,7 +1552,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                               {filename}
                             </span>
                             <Download className="h-4 w-4 flex-shrink-0 ml-auto opacity-50" />
-                          </a>
+                          </button>
                         )
                       })}
                     </div>
@@ -1372,6 +1570,14 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
   }`}>
                          {msg.edited_at && (
                            <span className="text-[10px] text-chat-muted/60">(editado)</span>
+                         )}
+                         {isMe && msg.status === 'sending' && (
+                           <Clock className="h-3 w-3 text-chat-muted/60 shrink-0" />
+                         )}
+                         {isMe && msg.status === 'failed' && (
+                           <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-red-400">
+                             <AlertCircle className="h-3 w-3" /> falhou
+                           </span>
                          )}
                          <span className="text-[10px] font-medium text-chat-muted/70">{timestamp}</span>
                          <DropdownMenu
@@ -1673,6 +1879,76 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
         </DialogContent>
       </Dialog>
 
+      <Dialog open={isNoteOpen} onOpenChange={setIsNoteOpen}>
+        <DialogContent className="sm:max-w-[440px] bg-chat-panel border-chat-border">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ContactNoteIcon className="h-5 w-5 text-purple-400" /> Nova Anotação
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label className="text-chat-muted">Contato</Label>
+              <div className="text-sm font-medium text-chat-text bg-chat-hover p-2 rounded-md border border-chat-border">
+                {displayName}
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="noteTitle">Título</Label>
+              <input
+                id="noteTitle"
+                value={noteTitle}
+                onChange={(e) => setNoteTitle(e.target.value)}
+                placeholder="Ex: Pendência financeira, Observação..."
+                className="flex h-10 w-full rounded-md border border-chat-border bg-chat-panel px-3 py-2 text-sm text-chat-text placeholder:text-chat-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 disabled:cursor-not-allowed disabled:opacity-50"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="noteCategory">Categoria</Label>
+              <select
+                id="noteCategory"
+                value={noteCategory}
+                onChange={(e) => setNoteCategory(e.target.value as typeof noteCategory)}
+                className="flex h-10 w-full rounded-md border border-chat-border bg-chat-panel px-3 py-2 text-sm text-chat-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50"
+              >
+                <option value="geral">Geral</option>
+                <option value="financeiro">Financeiro</option>
+                <option value="rh">RH</option>
+                <option value="administrativo">Administrativo</option>
+              </select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="noteContent">Anotação</Label>
+              <textarea
+                id="noteContent"
+                value={noteContent}
+                onChange={(e) => setNoteContent(e.target.value)}
+                placeholder="Descreva a observação sobre este contato..."
+                autoFocus
+                className="flex min-h-[100px] w-full rounded-md border border-chat-border bg-chat-panel px-3 py-2 text-sm text-chat-text placeholder:text-chat-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 disabled:cursor-not-allowed disabled:opacity-50 resize-none custom-scrollbar"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsNoteOpen(false)}
+              className="bg-transparent border-chat-border hover:bg-chat-hover text-chat-text"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSaveNote}
+              disabled={savingNote || !noteContent.trim()}
+              className="bg-purple-600 text-white hover:bg-purple-500"
+            >
+              {savingNote ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Salvar Anotação
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div className="flex flex-col bg-chat-composer border-t border-chat-border shadow-chat flex-shrink-0 px-4 py-3 z-10 relative">
         {(device?.signature || user?.signature) && (
           <div className="px-2 pb-2 text-[11px] text-chat-muted/75 flex flex-col gap-1">
@@ -1688,6 +1964,17 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
           </div>
         )}
         <form onSubmit={handleSend} className="flex flex-col gap-2.5 max-w-4xl mx-auto w-full">
+          {uploadProgress !== null && (
+            <div className="flex items-center gap-2 px-3 py-2 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+              <div className="flex-1 h-1.5 rounded-full bg-blue-500/20 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-blue-500 transition-all duration-300"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+              <span className="text-xs text-blue-400 font-medium shrink-0">{uploadProgress}%</span>
+            </div>
+          )}
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-2 px-3 py-2 bg-chat-panel border border-chat-border rounded-xl">
               {attachments.map((file, index) => (

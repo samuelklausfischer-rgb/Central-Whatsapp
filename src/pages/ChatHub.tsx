@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import logoUrl from '/logo.png'
 import { useSearchParams } from 'react-router-dom'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { ChatList } from '@/components/chat/ChatList'
@@ -7,8 +8,10 @@ import { syncDeviceAvatar } from '@/services/devices'
 import { getMessages, getConversationSummaries, getConversationMessages, type ConversationSummary } from '@/services/messages'
 import { getContacts, updateContactByJid } from '@/services/contacts'
 import { getMyStates, type ConversationUserState } from '@/services/conversation_states'
+import { getNotes } from '@/services/notes'
 import { useRealtime } from '@/hooks/use-realtime'
 import { useAuth } from '@/hooks/use-auth'
+import { getRawDevicePrefs } from '@/hooks/use-notification-prefs'
 import { useToast } from '@/hooks/use-toast'
 import {
   Dialog,
@@ -27,6 +30,12 @@ function debounce<A extends any[]>(fn: (...args: A) => void, ms: number): (...ar
     clearTimeout(timer)
     timer = setTimeout(() => fn(...args), ms)
   }
+}
+
+// Identifica uma mensagem enviada para casar o eco do realtime com a mensagem
+// otimista (temp) já exibida — evita duplicar o balão.
+function messageFingerprint(deviceId: string, remoteSender: string, content: string) {
+  return `${deviceId}|${remoteSender}|${(content || '').trim()}`
 }
 
 const SIDEBAR_MIN = 300
@@ -73,9 +82,18 @@ export default function ChatHub() {
   const [conversationSummaries, setConversationSummaries] = useState<ConversationSummary[]>([])
   const [conversationMessages, setConversationMessages] = useState<any[]>([])
   const [contacts, setContacts] = useState<any[]>([])
-  const [selectedContact, setSelectedContact] = useState<string | null>(null)
+  const [selectedContact, setSelectedContact] = useState<string | null>(() =>
+    sessionStorage.getItem('activeContactJid')
+  )
   const [userStates, setUserStates] = useState<ConversationUserState[]>([])
   const [showArchived, setShowArchived] = useState(false)
+  const [noteCountByJid, setNoteCountByJid] = useState<Map<string, number>>(new Map())
+  const prevDeviceIdRef = useRef<string | null>(null)
+  const devicesRef = useRef<any[]>(devices)
+  const userIdRef = useRef<string | undefined>(user?.id)
+  // Mensagens otimistas pendentes (temp) aguardando o eco do realtime.
+  const pendingTempsRef = useRef<{ tempId: string; fp: string; ts: number }[]>([])
+  const noteJids = useMemo(() => new Set(noteCountByJid.keys()), [noteCountByJid])
   const [isSheetOpen, setIsSheetOpen] = useState(false)
   const [isNewContactOpen, setIsNewContactOpen] = useState(false)
   const [newContactName, setNewContactName] = useState('')
@@ -94,6 +112,53 @@ export default function ChatHub() {
   useEffect(() => {
     getMyStates().then(setUserStates)
   }, [])
+
+  useEffect(() => {
+    if (selectedContact) sessionStorage.setItem('activeContactJid', selectedContact)
+    else sessionStorage.removeItem('activeContactJid')
+  }, [selectedContact])
+
+  useEffect(() => {
+    devicesRef.current = devices
+  }, [devices])
+
+  useEffect(() => {
+    userIdRef.current = user?.id
+  }, [user])
+
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission()
+    }
+  }, [])
+
+  useEffect(() => {
+    getNotes().then((notes) => {
+      const countMap = new Map<string, number>()
+      notes.forEach((n) => {
+        if (n.contact_jid) {
+          countMap.set(n.contact_jid, (countMap.get(n.contact_jid) || 0) + 1)
+        }
+      })
+      setNoteCountByJid(countMap)
+    }).catch(() => {})
+  }, [])
+
+  useRealtime('notes', (e) => {
+    const jid = e.record.contact_jid
+    if (!jid) return
+    setNoteCountByJid((prev) => {
+      const next = new Map(prev)
+      if (e.action === 'create') {
+        next.set(jid, (next.get(jid) || 0) + 1)
+      } else if (e.action === 'delete') {
+        const remaining = (next.get(jid) || 1) - 1
+        if (remaining <= 0) next.delete(jid)
+        else next.set(jid, remaining)
+      }
+      return next
+    })
+  })
 
   useEffect(() => {
     const uniqueDevicesMap = new Map()
@@ -153,15 +218,20 @@ export default function ChatHub() {
   useEffect(() => {
     if (selectedDeviceId) {
       sessionStorage.setItem('activeDeviceId', selectedDeviceId)
+      const deviceChanged = prevDeviceIdRef.current !== null && prevDeviceIdRef.current !== selectedDeviceId
+      prevDeviceIdRef.current = selectedDeviceId
       getMessages(selectedDeviceId).then(setMessages)
       getConversationSummaries(selectedDeviceId).then(setConversationSummaries)
-      setSelectedContact(null)
-      setConversationMessages([])
+      if (deviceChanged) {
+        setSelectedContact(null)
+        setConversationMessages([])
+      }
     } else {
       setMessages([])
       setConversationSummaries([])
       setConversationMessages([])
       setSelectedContact(null)
+      prevDeviceIdRef.current = null
     }
   }, [selectedDeviceId])
 
@@ -188,7 +258,33 @@ export default function ChatHub() {
 
   useRealtime('messages', (e) => {
     if (e.action === 'create' && e.record.direction === 'inbound') {
-      playNotificationSound()
+      const uid = userIdRef.current
+      const deviceId = e.record.device_id
+      const prefs = uid ? getRawDevicePrefs(uid, deviceId) : { sound: true, background: true }
+
+      if (prefs.sound) {
+        playNotificationSound()
+      }
+
+      if (prefs.background && 'Notification' in window && Notification.permission === 'granted') {
+        const device = devicesRef.current.find((d) => d.id === deviceId)
+        const deviceName = device?.name || 'WhatsApp'
+        const senderName =
+          e.record.sender_name ||
+          e.record.remote_sender?.split('@')[0] ||
+          'Contato'
+        const preview = e.record.content?.slice(0, 80) || '📎 Mídia'
+        const notif = new Notification(deviceName, {
+          body: `${senderName}: ${preview}`,
+          icon: logoUrl,
+          silent: true,
+        })
+        notif.onclick = () => {
+          window.focus()
+          ;(window as any).electronAPI?.focusWindow?.()
+          notif.close()
+        }
+      }
     }
 
     if (e.record.device_id === selectedDeviceId) {
@@ -201,7 +297,28 @@ export default function ChatHub() {
       // Atualizar mensagens da conversa aberta
       if (e.record.remote_sender === selectedContact) {
         if (e.action === 'create') {
-          setConversationMessages((prev) => [...prev, e.record])
+          // Reconciliação: se este eco corresponde a uma mensagem otimista
+          // (temp) ainda pendente, substitui o temp pelo registro real em vez
+          // de adicionar — evita balão duplicado. O lookup do pending acontece
+          // fora do updater (que pode rodar 2x em StrictMode).
+          let matchedTempId: string | null = null
+          if (e.record.direction === 'outbound') {
+            const fp = messageFingerprint(e.record.device_id, e.record.remote_sender, e.record.content)
+            const idx = pendingTempsRef.current.findIndex((p) => p.fp === fp)
+            if (idx >= 0) {
+              matchedTempId = pendingTempsRef.current[idx].tempId
+              pendingTempsRef.current.splice(idx, 1)
+            }
+          }
+          setConversationMessages((prev) => {
+            if (prev.some((m) => m.id === e.record.id)) {
+              return prev.map((m) => (m.id === e.record.id ? e.record : m))
+            }
+            if (matchedTempId) {
+              return prev.map((m) => (m.id === matchedTempId ? e.record : m))
+            }
+            return [...prev, e.record]
+          })
         } else if (e.action === 'update') {
           setConversationMessages((prev) => prev.map((m) => (m.id === e.record.id ? e.record : m)))
         } else if (e.action === 'delete') {
@@ -219,7 +336,7 @@ export default function ChatHub() {
   const debouncedRefreshSummaries = useMemo(
     () => debounce((deviceId: string) => {
       getConversationSummaries(deviceId).then(setConversationSummaries)
-    }, 500),
+    }, 150),
     [],
   )
 
@@ -230,6 +347,45 @@ export default function ChatHub() {
       debouncedRefreshSummaries(selectedDeviceId)
     }
   }, [selectedDeviceId, debouncedRefreshSummaries])
+
+  // ── Optimistic send: exibe a mensagem enviada na hora e reconcilia depois ──
+  const addOptimisticMessage = useCallback((tempMsg: any) => {
+    // Limpa temps antigos que nunca foram reconciliados (segurança).
+    const cutoff = Date.now() - 120000
+    pendingTempsRef.current = pendingTempsRef.current.filter((p) => p.ts >= cutoff)
+    pendingTempsRef.current.push({
+      tempId: tempMsg.id,
+      fp: messageFingerprint(tempMsg.device_id, tempMsg.remote_sender, tempMsg.content),
+      ts: Date.now(),
+    })
+    setConversationMessages((prev) => [...prev, tempMsg])
+  }, [])
+
+  const confirmOptimisticMessage = useCallback((tempId: string, realMsg?: any) => {
+    // Remove o pending para o eco do realtime não tentar reconciliar de novo.
+    pendingTempsRef.current = pendingTempsRef.current.filter((p) => p.tempId !== tempId)
+    setConversationMessages((prev) => {
+      if (realMsg && realMsg.id) {
+        // Substitui a mensagem otimista pela linha real retornada pela RPC.
+        // Determinístico (por tempId) — funciona mesmo se o realtime estiver fora.
+        if (prev.some((m) => m.id === realMsg.id)) {
+          // O eco do realtime já inseriu a mensagem real → só remove a temp.
+          return prev.filter((m) => m.id !== tempId)
+        }
+        return prev.map((m) => (m.id === tempId ? realMsg : m))
+      }
+      // Sem a linha real: ao menos marca como enviada.
+      return prev.map((m) => (m.id === tempId ? { ...m, status: 'sent' } : m))
+    })
+    if (selectedDeviceId) debouncedRefreshSummaries(selectedDeviceId)
+  }, [selectedDeviceId, debouncedRefreshSummaries])
+
+  const markOptimisticFailed = useCallback((tempId: string) => {
+    pendingTempsRef.current = pendingTempsRef.current.filter((p) => p.tempId !== tempId)
+    setConversationMessages((prev) =>
+      prev.map((m) => (m.id === tempId ? { ...m, status: 'failed' } : m)),
+    )
+  }, [])
 
   useRealtime('conversation_user_states', (e) => {
     if (e.record.user_id !== user?.id) return
@@ -246,6 +402,8 @@ export default function ChatHub() {
     } else if (e.action === 'delete') {
       setUserStates((prev) => prev.filter((s) => s.id !== e.record.id))
     }
+    // Reflete pin/arquivar/lida na ordenação da sidebar sem esperar a próxima mensagem.
+    if (selectedDeviceId) debouncedRefreshSummaries(selectedDeviceId)
   })
 
   // Carregar mensagens da conversa selecionada
@@ -256,6 +414,34 @@ export default function ChatHub() {
       setConversationMessages([])
     }
   }, [selectedDeviceId, selectedContact])
+
+  // Rede de segurança: se o realtime falhar (queda de WebSocket, sleep, troca de
+  // rede), re-busca a conversa aberta e os resumos ao voltar o foco/visibilidade/
+  // rede e a cada ~25s enquanto visível. Automatiza o "sair e entrar" manual.
+  useEffect(() => {
+    const refetchOpen = () => {
+      if (document.visibilityState !== 'visible') return
+      if (selectedDeviceId && selectedContact) {
+        getConversationMessages(selectedDeviceId, selectedContact)
+          .then(setConversationMessages)
+          .catch(() => {})
+      }
+      if (selectedDeviceId) debouncedRefreshSummaries(selectedDeviceId)
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') refetchOpen()
+    }
+    window.addEventListener('focus', refetchOpen)
+    window.addEventListener('online', refetchOpen)
+    document.addEventListener('visibilitychange', onVisibility)
+    const interval = setInterval(refetchOpen, 25000)
+    return () => {
+      window.removeEventListener('focus', refetchOpen)
+      window.removeEventListener('online', refetchOpen)
+      document.removeEventListener('visibilitychange', onVisibility)
+      clearInterval(interval)
+    }
+  }, [selectedDeviceId, selectedContact, debouncedRefreshSummaries])
 
   const handleCloseConversation = useCallback(() => {
     setSelectedContact(null)
@@ -520,6 +706,7 @@ export default function ChatHub() {
             showArchived={showArchived}
             onToggleArchived={() => setShowArchived(!showArchived)}
             onStateChange={refreshConversationStates}
+            noteJids={noteJids}
           />
         ) : (
           <div
@@ -540,6 +727,7 @@ export default function ChatHub() {
               showArchived={showArchived}
               onToggleArchived={() => setShowArchived(!showArchived)}
               onStateChange={refreshConversationStates}
+              noteJids={noteJids}
             />
             <div
               className="absolute -right-[6px] top-0 bottom-0 w-[14px] cursor-col-resize z-10 flex items-center justify-center"
@@ -562,6 +750,9 @@ export default function ChatHub() {
           onSheetOpenChange={setIsSheetOpen}
           onStartConversation={handleOpenNewContact}
           onOpenConversationByJid={handleOpenConversationByJid}
+          onOptimisticSend={addOptimisticMessage}
+          onOptimisticConfirm={confirmOptimisticMessage}
+          onOptimisticFail={markOptimisticFailed}
         />
       )}
       <Dialog open={isNewContactOpen} onOpenChange={setIsNewContactOpen}>

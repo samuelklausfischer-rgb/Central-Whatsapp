@@ -7,6 +7,69 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.154',
+    date: '2026-06-26 12:00',
+    title: 'Ferramenta Análise PRN integrada (admin)',
+    details: [
+      '🔍 Nova seção "Ferramentas" no menu lateral — visível apenas para admins',
+      '📊 Análise PRN Engine V2 integrada: cruzamento histórico, cockpit financeiro por unidade',
+      '🧾 Análise de duplicidade automática ao enviar arquivos diários',
+      '💾 Histórico de execuções, exportação PDF/Excel e observações por lançamento',
+    ],
+  },
+  {
+    version: '0.0.153',
+    date: '2026-06-25 18:30',
+    title: 'Correção: mensagem aparecia duplicada ao enviar',
+    details: [
+      '✅ A mensagem enviada agora aparece uma única vez, já com a assinatura',
+      '🧹 Eliminada a duplicata que surgia e depois sumia ao enviar',
+      '⚡ O envio continua instantâneo na tela, sem esperar o servidor',
+    ],
+  },
+  {
+    version: '0.0.152',
+    date: '2026-06-25 12:00',
+    title: 'Chat em tempo real e envio instantâneo',
+    details: [
+      '⚡ Mensagens enviadas aparecem na hora, sem esperar a confirmação do servidor',
+      '🔄 Conversa e lista de contatos atualizam sozinhas — sem precisar sair e entrar',
+      '📶 Reconexão automática quando a internet cai ou o computador volta do repouso',
+      '🟢 Indicador de "enviando" e aviso quando uma mensagem falha',
+    ],
+  },
+  {
+    version: '0.0.151',
+    date: '2026-06-18 14:00',
+    title: 'Envio de arquivos grandes (até 200 MB)',
+    details: [
+      '📁 Limite de upload aumentado de 10 MB para 200 MB por arquivo',
+      '📊 Barra de progresso exibida durante o envio de arquivos grandes',
+      '☁️ Bucket de armazenamento atualizado para aceitar arquivos de até 200 MB',
+    ],
+  },
+  {
+    version: '0.0.150',
+    date: '2026-06-18 12:00',
+    title: 'Dashboard melhorado + Indicador de finalização redesenhado',
+    details: [
+      '📊 "Não lidas agora" agora mostra o número real por usuário (não mais o contador global)',
+      '⏳ Novo card "Não respondidas" — conversas aguardando resposta, usando lógica de finalização real',
+      '✅ Indicador de finalização de conversa redesenhado: círculo verde sólido com pulsação e ícone de badge',
+      '🔄 Os dois cards do dashboard atualizam automaticamente ao marcar conversas como finalizadas',
+    ],
+  },
+  {
+    version: '0.0.149',
+    date: '2026-06-17 17:00',
+    title: 'Novo ícone do aplicativo',
+    details: [
+      '🎨 Ícone do app atualizado — novo visual azul com blocos e badge IA',
+      '🖥️ O novo ícone aparece no atalho da Área de Trabalho, na barra de tarefas e no instalador',
+      '🔄 Reinstale o app (caso já tenha instalado) para ver o ícone atualizado na barra de tarefas',
+    ],
+  },
+  {
     version: '0.0.139',
     date: '2026-06-10 18:00',
     title: 'Autores de grupo com nome certo',

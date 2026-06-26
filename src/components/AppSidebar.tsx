@@ -1,21 +1,26 @@
 import { Link, useLocation } from 'react-router-dom'
+import logoUrl from '/logo.png'
 import {
   LayoutDashboard,
   Smartphone,
   MessageSquare,
-  ListTodo,
-  StickyNote,
   Settings,
   ChevronRight,
   User,
-  Zap,
   ShieldAlert,
-  CalendarClock,
+  RefreshCw,
+  Download,
+  CheckCircle,
+  AlertCircle,
+  Wrench,
+  BarChart3,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/use-auth'
+import { useUpdater } from '@/hooks/use-updater'
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -29,22 +34,20 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 const navItems = [
   { title: 'Dashboard', url: '/dashboard', icon: LayoutDashboard },
   { title: 'Chat', url: '/chat', icon: MessageSquare },
-  { title: 'Tarefas Internas', url: '/crm', icon: ListTodo },
-  { title: 'Anotações', url: '/notes', icon: StickyNote },
-  { title: 'Gatilhos', url: '/triggers', icon: Zap },
-  { title: 'Agendamentos', url: '/scheduled-messages', icon: CalendarClock },
 ]
 
 export function AppSidebar() {
   const location = useLocation()
   const { user } = useAuth()
   const isSettingsActive = location.pathname.startsWith('/settings')
+  const isToolsActive = location.pathname.startsWith('/ferramentas')
+  const { isElectron, status, version, checkForUpdates, installUpdate } = useUpdater()
 
   return (
     <Sidebar className="border-r border-border bg-sidebar">
       <SidebarHeader className="px-4 py-0 border-b border-border h-16 flex flex-col justify-center">
         <div className="flex items-center gap-3">
-          <img src="/logo.png" alt="Logo" className="h-9 w-9 object-contain" />
+          <img src={logoUrl} alt="Logo" className="h-9 w-9 object-contain" />
           <span className="text-xl font-display font-bold tracking-tight text-sidebar-foreground">
             Central Cell
           </span>
@@ -95,6 +98,42 @@ export function AppSidebar() {
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
+          )}
+
+          {user?.is_admin && (
+            <>
+              <div className="my-4 mx-2 h-px bg-sidebar-accent" />
+              <Collapsible defaultOpen={isToolsActive} className="group/collapsible">
+                <SidebarMenuItem>
+                  <CollapsibleTrigger asChild>
+                    <SidebarMenuButton
+                      tooltip="Ferramentas"
+                      isActive={isToolsActive}
+                      className="py-5"
+                    >
+                      <Wrench className="h-5 w-5" />
+                      <span className="text-sm">Ferramentas</span>
+                      <ChevronRight className="ml-auto h-4 w-4 text-sidebar-foreground/60 transition-transform group-data-[state=open]/collapsible:rotate-90" />
+                    </SidebarMenuButton>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="mt-1">
+                    <SidebarMenuSub>
+                      <SidebarMenuSubItem>
+                        <SidebarMenuSubButton
+                          asChild
+                          isActive={location.pathname === '/ferramentas/analise-prn'}
+                        >
+                          <Link to="/ferramentas/analise-prn" className="py-4">
+                            <BarChart3 className="h-4 w-4" />
+                            <span>Análise PRN</span>
+                          </Link>
+                        </SidebarMenuSubButton>
+                      </SidebarMenuSubItem>
+                    </SidebarMenuSub>
+                  </CollapsibleContent>
+                </SidebarMenuItem>
+              </Collapsible>
+            </>
           )}
 
           <div className="my-4 mx-2 h-px bg-sidebar-accent" />
@@ -155,6 +194,50 @@ export function AppSidebar() {
           </Collapsible>
         </SidebarMenu>
       </SidebarContent>
+
+      {isElectron && (
+        <SidebarFooter className="px-3 py-3 border-t border-border">
+          {status.type === 'ready' ? (
+            <button
+              onClick={installUpdate}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors"
+            >
+              <Download className="h-3.5 w-3.5 shrink-0" />
+              <span>Instalar v{status.version} e reiniciar</span>
+            </button>
+          ) : (
+            <button
+              onClick={checkForUpdates}
+              disabled={status.type === 'checking' || status.type === 'downloading'}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-md hover:bg-sidebar-accent text-muted-foreground hover:text-foreground text-xs transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {status.type === 'checking' && (
+                <RefreshCw className="h-3.5 w-3.5 shrink-0 animate-spin" />
+              )}
+              {status.type === 'downloading' && (
+                <RefreshCw className="h-3.5 w-3.5 shrink-0 animate-spin" />
+              )}
+              {status.type === 'up-to-date' && (
+                <CheckCircle className="h-3.5 w-3.5 shrink-0 text-green-500" />
+              )}
+              {status.type === 'error' && (
+                <AlertCircle className="h-3.5 w-3.5 shrink-0 text-red-400" />
+              )}
+              {(status.type === 'idle' || status.type === 'available') && (
+                <RefreshCw className="h-3.5 w-3.5 shrink-0" />
+              )}
+              <span>
+                {status.type === 'idle' && `v${version ?? '...'} · Verificar atualização`}
+                {status.type === 'checking' && 'Verificando...'}
+                {status.type === 'up-to-date' && 'Você está atualizado'}
+                {status.type === 'available' && `Baixando v${status.version}...`}
+                {status.type === 'downloading' && `Baixando... ${status.percent}%`}
+                {status.type === 'error' && 'Erro ao verificar'}
+              </span>
+            </button>
+          )}
+        </SidebarFooter>
+      )}
     </Sidebar>
   )
 }

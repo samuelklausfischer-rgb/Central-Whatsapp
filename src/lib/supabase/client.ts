@@ -7,7 +7,7 @@ const supabaseAnonKey = appEnv.VITE_SUPABASE_PUBLISHABLE_KEY
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   realtime: {
     params: {
-      eventsPerSecond: 10,
+      eventsPerSecond: 40,
     },
   },
 })

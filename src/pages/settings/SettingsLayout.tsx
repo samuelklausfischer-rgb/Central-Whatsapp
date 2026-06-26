@@ -14,7 +14,9 @@ export default function SettingsLayout() {
         ? 'ai-assistant'
         : location.pathname.includes('/settings/instances')
           ? 'instances'
-          : 'general'
+          : location.pathname.includes('/settings/email-accounts')
+            ? 'email-accounts'
+            : 'general'
 
   return (
     <div className="flex flex-col gap-6">
@@ -38,6 +40,9 @@ export default function SettingsLayout() {
           </TabsTrigger>
           <TabsTrigger value="ai-assistant" asChild>
             <Link to="/settings/ai-assistant">Assistente IA</Link>
+          </TabsTrigger>
+          <TabsTrigger value="email-accounts" asChild>
+            <Link to="/settings/email-accounts">Contas de Email</Link>
           </TabsTrigger>
           {user?.is_admin && (
             <TabsTrigger value="instances" asChild>

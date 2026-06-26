@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback, useMemo, ReactNode } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo, ReactNode } from 'react'
 import supabase from '@/lib/supabase/client'
 import type { Profile, Device } from '@/lib/supabase/types'
 
@@ -83,6 +83,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [allowedDeviceIds, setAllowedDeviceIds] = useState<string[]>([])
   const [allowedDevices, setAllowedDevices] = useState<Device[]>([])
 
+  // Only show the loading spinner on the very first auth check.
+  // Subsequent token refreshes (TOKEN_REFRESHED, SIGNED_IN on reconnect) should
+  // update data silently — setting loading=true would unmount the whole app tree
+  // and reset all in-memory state (selected conversation, device, etc.).
+  const isInitialAuthRef = useRef(true)
+
   useEffect(() => {
     let mounted = true
     const signal = { get aborted() { return !mounted } }
@@ -90,7 +96,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!mounted) return
       if (session?.user) {
-        setLoading(true)
+        if (isInitialAuthRef.current) {
+          setLoading(true)
+        }
         // Defer async work outside the callback to prevent Supabase auth deadlock
         setTimeout(async () => {
           if (!mounted) return
@@ -108,7 +116,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             setAllowedDeviceIds([])
             setAllowedDevices([])
           } finally {
-            if (mounted) setLoading(false)
+            if (mounted) {
+              setLoading(false)
+              isInitialAuthRef.current = false
+            }
           }
         }, 0)
       } else {
@@ -117,6 +128,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setAllowedDeviceIds([])
         setAllowedDevices([])
         setLoading(false)
+        isInitialAuthRef.current = true
       }
     })
 

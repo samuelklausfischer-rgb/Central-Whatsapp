@@ -35,7 +35,11 @@ export function classifyFileType(file: File): { type: string; mime: string } {
   return { type: 'document', mime: 'application/octet-stream' }
 }
 
-export async function uploadFile(file: File, userId: string): Promise<{ url: string; type: string; name: string }> {
+export async function uploadFile(
+  file: File,
+  userId: string,
+  onProgress?: (percent: number) => void,
+): Promise<{ url: string; type: string; name: string }> {
   const ext = file.name.split('.').pop() || 'bin'
   const { type } = classifyFileType(file)
   const folder = type === 'image' ? 'images' : type === 'video' ? 'videos' : 'documents'
@@ -47,6 +51,9 @@ export async function uploadFile(file: File, userId: string): Promise<{ url: str
       contentType: file.type || 'application/octet-stream',
       cacheControl: '3600',
       upsert: false,
+      onUploadProgress: onProgress
+        ? (e) => onProgress(Math.round((e.loaded / e.total) * 100))
+        : undefined,
     })
 
   if (error) throw new Error(`Erro ao enviar anexo: ${error.message}`)

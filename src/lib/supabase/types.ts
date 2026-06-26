@@ -90,6 +90,9 @@ export interface Note {
   title: string
   content: string
   user_id: string
+  contact_jid: string | null
+  contact_name: string | null
+  category: 'geral' | 'financeiro' | 'rh' | 'administrativo'
   created_at: string
   updated_at: string
 }

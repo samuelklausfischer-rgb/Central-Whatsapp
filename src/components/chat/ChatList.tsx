@@ -13,7 +13,8 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { format, startOfDay, differenceInCalendarDays } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { Check, CheckCheck, Smartphone, Search, X, MessageCircle, Pin } from 'lucide-react'
+import { Check, CheckCheck, BadgeCheck, Smartphone, Search, X, MessageCircle, Pin } from 'lucide-react'
+import { ContactNoteIcon } from '@/components/ui/ContactNoteIcon'
 import { toggleResponded } from '@/services/conversation_states'
 import { ConversationActionsMenu } from '@/components/chat/ConversationActionsMenu'
 import { ConversationActionsContent } from '@/components/chat/ConversationActionsContent'
@@ -40,6 +41,7 @@ export interface ChatListProps {
   showArchived: boolean
   onToggleArchived: () => void
   onStateChange?: () => void
+  noteJids?: Set<string>
 }
 
 function formatChatTimestamp(dateString: string | undefined | null): string {
@@ -108,6 +110,7 @@ const ChatRow = memo(function ChatRow({
   isMobile,
   onStateChange,
   contactIndex,
+  hasNote,
 }: {
   conv: any
   contact: any
@@ -122,6 +125,7 @@ const ChatRow = memo(function ChatRow({
   isMobile: boolean
   onStateChange?: () => void
   contactIndex: Map<string, any>
+  hasNote?: boolean
 }) {
   const name = resolveContactDisplayName(conv.remote_sender, contactIndex, {
     sender_name: conv.sender_name
@@ -160,7 +164,14 @@ const ChatRow = memo(function ChatRow({
       />
 
       <div className="min-w-0 overflow-hidden">
-        <h3 className="font-medium text-chat-text truncate">{name}</h3>
+        <h3 className="font-medium text-chat-text truncate flex items-center gap-1.5">
+          <span className="truncate">{name}</span>
+          {hasNote && (
+            <span title="Possui anotação">
+              <ContactNoteIcon className="h-3.5 w-3.5 text-purple-400 flex-shrink-0 opacity-80" />
+            </span>
+          )}
+        </h3>
         <div className="flex items-center gap-1 mt-0.5">
           {conv.lastMessage.direction === 'outbound' &&
             (conv.lastMessage.is_read ? (
@@ -202,10 +213,11 @@ const ChatRow = memo(function ChatRow({
                 e.stopPropagation()
                 handleResolve(conversationDeviceId || '', conv.remote_sender)
               }}
-              className="h-7 w-7 rounded-full bg-green-500/20 border border-green-500/40 flex items-center justify-center hover:bg-green-500/30 shrink-0 cursor-pointer transition-colors"
-              title="Marcar como respondido"
+              className="relative h-7 w-7 rounded-full bg-emerald-500 flex items-center justify-center hover:bg-emerald-600 shrink-0 cursor-pointer transition-all shadow-sm"
+              title="Finalizar conversa"
             >
-              <CheckCheck className="h-3.5 w-3.5 text-green-500" />
+              <span className="absolute inset-0 rounded-full bg-emerald-400 animate-ping opacity-25 pointer-events-none" />
+              <BadgeCheck className="h-4 w-4 text-white relative z-10" />
             </div>
           ) : null}
           {conversationDeviceId && (
@@ -289,6 +301,7 @@ export function ChatList({
   showArchived,
   onToggleArchived,
   onStateChange,
+  noteJids,
 }: ChatListProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const deferredSearch = useDeferredValue(searchQuery)
@@ -509,6 +522,7 @@ export function ChatList({
                 isMobile={isMobile}
                 onStateChange={onStateChange}
                 contactIndex={contactIndex}
+                hasNote={noteJids ? noteJids.has(conv.remote_sender) : false}
               />
             )
           })}
