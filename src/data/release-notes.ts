@@ -7,6 +7,15 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.155',
+    date: '2026-06-26 14:00',
+    title: 'Análise PRN no menu Ferramentas (admin)',
+    details: [
+      '📊 "Análise PRN" agora aparece no dropdown Ferramentas — visível apenas para admins',
+      '🔧 Correção: na versão anterior o botão estava no menu lateral, não no menu superior',
+    ],
+  },
+  {
     version: '0.0.154',
     date: '2026-06-26 12:00',
     title: 'Ferramenta Análise PRN integrada (admin)',

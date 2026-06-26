@@ -18,6 +18,7 @@ import {
   CheckCircle,
   AlertCircle,
   Bell,
+  BarChart3,
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { useState, useRef, useEffect } from 'react'
@@ -50,11 +51,21 @@ const ferramentas: FerramentaItem[] = [
   { title: 'Notificações', description: 'Som e alertas', icon: Bell, action: 'notifications' },
 ]
 
+const prnItem: FerramentaItem = {
+  title: 'Análise PRN',
+  description: 'Cockpit financeiro',
+  icon: BarChart3,
+  url: '/ferramentas/analise-prn',
+}
+
 function FerramentasMenu() {
   const [open, setOpen] = useState(false)
   const [notifOpen, setNotifOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
+  const { user } = useAuth()
+
+  const items = user?.is_admin ? [...ferramentas, prnItem] : ferramentas
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -94,7 +105,7 @@ function FerramentasMenu() {
               </p>
             </div>
             <div className="grid grid-cols-2 gap-1.5 p-2">
-              {ferramentas.map((item) => (
+              {items.map((item) => (
                 <button
                   key={item.title}
                   onClick={() => handleItem(item)}
