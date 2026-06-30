@@ -7,6 +7,16 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.158',
+    date: '2026-06-30 11:30',
+    title: 'Badge de nova atualização no topo do app',
+    details: [
+      '🔔 Aparece um indicador pulsante no menu superior quando há uma nova versão disponível',
+      '📥 Mostra o progresso do download ("Baixando 45%") e o botão "Instalar vX.X.X" quando pronto',
+      '✅ O badge some automaticamente quando o app está atualizado — aparece só quando precisa',
+    ],
+  },
+  {
     version: '0.0.157',
     date: '2026-06-30 10:15',
     title: 'Visualizador de imagem: botões de fechar e baixar sempre visíveis',

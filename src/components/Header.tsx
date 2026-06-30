@@ -175,6 +175,39 @@ export function Header() {
       <div className="ml-auto flex items-center gap-2">
         <ReleaseNotesDialog />
 
+        {isElectron &&
+          (status.type === 'available' || status.type === 'downloading' || status.type === 'ready') && (
+            <button
+              type="button"
+              onClick={() => {
+                if (status.type === 'ready') installUpdate()
+              }}
+              title={
+                status.type === 'ready'
+                  ? `Clique para instalar v${status.version} e reiniciar`
+                  : status.type === 'downloading'
+                    ? `Baixando atualização: ${Math.round(status.percent)}%`
+                    : 'Nova versão disponível — baixando...'
+              }
+              className={`flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-all duration-200 select-none ${
+                status.type === 'ready'
+                  ? 'border-green-500/40 text-green-500 hover:bg-green-500/10 cursor-pointer'
+                  : 'border-blue-500/40 text-blue-400 cursor-default'
+              }`}
+            >
+              <span
+                className={`h-2 w-2 rounded-full flex-shrink-0 animate-pulse ${status.type === 'ready' ? 'bg-green-500' : 'bg-blue-400'}`}
+              />
+              <span className="hidden sm:inline">
+                {status.type === 'ready'
+                  ? `Instalar v${status.version}`
+                  : status.type === 'downloading'
+                    ? `Baixando ${Math.round(status.percent)}%`
+                    : 'Nova versão'}
+              </span>
+            </button>
+          )}
+
         <Button
           variant="ghost"
           size="icon"
