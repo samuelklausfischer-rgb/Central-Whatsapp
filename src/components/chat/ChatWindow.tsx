@@ -561,8 +561,24 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
       return
     }
     dismissedRef.current = false
-    getConversationAssignment(device.id, contact).then(setAssignment)
-    getConversationRecentViewers(device.id, contact).then(setRecentViewers)
+    let cancelled = false
+
+    const init = async () => {
+      // Always create/update the assignment record when opening a conversation.
+      // This ensures the record exists even for already-read conversations.
+      await markConversationReadGlobal(device.id, contact)
+      if (cancelled) return
+      const [asgn, viewers] = await Promise.all([
+        getConversationAssignment(device.id, contact),
+        getConversationRecentViewers(device.id, contact),
+      ])
+      if (cancelled) return
+      setAssignment(asgn)
+      setRecentViewers(viewers)
+    }
+    init()
+
+    return () => { cancelled = true }
   }, [device?.id, contact])
 
   useEffect(() => {
