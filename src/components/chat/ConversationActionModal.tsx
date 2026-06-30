@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { format } from 'date-fns'
 import { UserCheck, Users, Clock, CheckCircle, Loader2 } from 'lucide-react'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { takeConversation, setConversationWaiting, finishConversation } from '@/services/conversation_states'
+import supabase from '@/lib/supabase/client'
 import type { ConversationAssignment, ConversationRecentViewer } from '@/lib/supabase/types'
 
 interface ConversationActionModalProps {
@@ -21,12 +21,19 @@ interface ConversationActionModalProps {
 
 type LoadingAction = 'take' | 'waiting' | 'finish' | null
 
+function safeFormatTime(dateStr: string | null | undefined): string {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  if (isNaN(d.getTime())) return ''
+  return format(d, 'HH:mm')
+}
+
 export function ConversationActionModal({
   open,
   deviceId,
   remoteSender,
   assignment,
-  viewers,
+  viewers = [],
   onClose,
   onTakeOver,
   onAssign,
@@ -35,12 +42,20 @@ export function ConversationActionModal({
 }: ConversationActionModalProps) {
   const [loading, setLoading] = useState<LoadingAction>(null)
 
+  const isLoading = loading !== null
+
   async function handleTake() {
     setLoading('take')
     try {
-      await takeConversation(deviceId, remoteSender)
+      const { error } = await supabase.rpc('take_conversation', {
+        p_device_id: deviceId,
+        p_remote_sender: remoteSender,
+      })
+      if (error) throw error
       onTakeOver()
       onClose()
+    } catch (err) {
+      console.error('Error taking conversation:', err)
     } finally {
       setLoading(null)
     }
@@ -49,9 +64,15 @@ export function ConversationActionModal({
   async function handleWaiting() {
     setLoading('waiting')
     try {
-      await setConversationWaiting(deviceId, remoteSender)
+      const { error } = await supabase.rpc('set_conversation_waiting', {
+        p_device_id: deviceId,
+        p_remote_sender: remoteSender,
+      })
+      if (error) throw error
       onWaiting()
       onClose()
+    } catch (err) {
+      console.error('Error setting conversation to waiting:', err)
     } finally {
       setLoading(null)
     }
@@ -60,9 +81,15 @@ export function ConversationActionModal({
   async function handleFinish() {
     setLoading('finish')
     try {
-      await finishConversation(deviceId, remoteSender)
+      const { error } = await supabase.rpc('finish_conversation', {
+        p_device_id: deviceId,
+        p_remote_sender: remoteSender,
+      })
+      if (error) throw error
       onFinish()
       onClose()
+    } catch (err) {
+      console.error('Error finishing conversation:', err)
     } finally {
       setLoading(null)
     }
@@ -73,28 +100,39 @@ export function ConversationActionModal({
     onClose()
   }
 
-  const isLoading = loading !== null
-
   return (
-    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose() }}>
-      <DialogContent className="max-w-sm w-full">
+    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen && !isLoading) onClose() }}>
+      <DialogContent
+        className="max-w-sm w-full"
+        onEscapeKeyDown={(e) => { if (isLoading) e.preventDefault() }}
+        onPointerDownOutside={(e) => { if (isLoading) e.preventDefault() }}
+      >
         <DialogHeader>
           <DialogTitle className="text-base font-semibold">
             Conversa aguardando atenção
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            Escolha como deseja lidar com esta conversa de atendimento.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col gap-3">
           {/* Viewers section */}
           {viewers.length > 0 && (
             <div className="text-sm text-muted-foreground">
-              {viewers.map((viewer, index) => (
-                <span key={viewer.user_id}>
-                  {index === 0
-                    ? `Mensagem visualizada por: ${viewer.user_name} às ${format(new Date(viewer.read_at), 'HH:mm')}`
-                    : `, ${viewer.user_name} às ${format(new Date(viewer.read_at), 'HH:mm')}`}
-                </span>
-              ))}
+              {viewers.map((viewer, index) => {
+                const timeStr = safeFormatTime(viewer.read_at)
+                const label = timeStr
+                  ? `${viewer.user_name} às ${timeStr}`
+                  : viewer.user_name
+                return (
+                  <span key={`${viewer.user_id}-${viewer.read_at}`}>
+                    {index === 0
+                      ? `Mensagem visualizada por: ${label}`
+                      : `, ${label}`}
+                  </span>
+                )
+              })}
             </div>
           )}
 
