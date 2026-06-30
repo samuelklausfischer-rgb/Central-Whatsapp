@@ -688,7 +688,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
         for (let i = 0; i < uploaded.length; i++) {
           const att = uploaded[i]
           await sendMessage({
-            content: i === 0 && content !== '[Anexo]' ? content : `[${att.type === 'image' ? 'Imagem' : att.type === 'video' ? 'VÃ­deo' : 'Documento'}]`,
+            content: i === 0 && content !== '[Anexo]' ? content : `[${att.type === 'image' ? 'Imagem' : att.type === 'video' ? 'Vídeo' : 'Documento'}]`,
             device_id: device.id,
             sender_id: user.id,
             is_read: true,
