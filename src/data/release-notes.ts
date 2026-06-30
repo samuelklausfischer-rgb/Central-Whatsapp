@@ -7,6 +7,14 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.162',
+    date: '2026-06-30 16:00',
+    title: 'Teste de notificação automática de atualização',
+    details: [
+      '🧪 Versão de teste — badge automático no topo sem clicar em nada',
+    ],
+  },
+  {
     version: '0.0.161',
     date: '2026-06-30 15:30',
     title: 'Verificação automática de atualização a cada 4 horas',
