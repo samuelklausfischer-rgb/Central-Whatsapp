@@ -681,3 +681,6 @@ CREATE TRIGGER reopen_conversation_on_new_message
   AFTER INSERT ON public.messages
   FOR EACH ROW
   EXECUTE FUNCTION public.reopen_finished_conversation_on_message();
+
+-- Fix set_conversation_waiting: reseta last_read_at de todos os usuarios
+-- para que GREATEST(NULL,NULL)=NULL e a conversa apareca como nao lida para todos
