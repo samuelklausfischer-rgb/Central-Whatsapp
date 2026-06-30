@@ -31,6 +31,7 @@ import {
   Clock,
   AlertCircle,
   Play,
+  Eye,
 } from 'lucide-react'
 import {
   Dialog,
@@ -77,9 +78,11 @@ import { useAuth } from '@/hooks/use-auth'
 import { sendMessage, reactToMessage, deleteMessage, editMessage } from '@/services/messages'
 import { updateContactByJid } from '@/services/contacts'
 import { createNote, getNotesByContact, deleteNote } from '@/services/notes'
-import type { Note } from '@/lib/supabase/types'
+import type { Note, ConversationAssignment } from '@/lib/supabase/types'
 import { ContactNoteIcon } from '@/components/ui/ContactNoteIcon'
-import { markConversationRead, getConversationViewers, type ConversationViewer } from '@/services/conversation_states'
+import { ConversationActionModal } from '@/components/chat/ConversationActionModal'
+import { TeamAssignDialog } from '@/components/chat/TeamAssignDialog'
+import { markConversationReadGlobal, getConversationViewers, getConversationAssignment, getConversationRecentViewers, type ConversationViewer, type ConversationRecentViewer } from '@/services/conversation_states'
 import { buildContactIndex, resolveContactDisplayName, findContactByIdentifier, isGroupJid, normalizeToDigits } from '@/lib/contacts/normalize'
 import supabase from '@/lib/supabase/client'
 import { useToast } from '@/hooks/use-toast'
@@ -448,6 +451,10 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
   const [reactionPopoverMessageId, setReactionPopoverMessageId] = useState<string | null>(null)
   const [messageMenuOpenId, setMessageMenuOpenId] = useState<string | null>(null)
   const [viewers, setViewers] = useState<ConversationViewer[]>([])
+  const [assignment, setAssignment] = useState<ConversationAssignment | null>(null)
+  const [recentViewers, setRecentViewers] = useState<ConversationRecentViewer[]>([])
+  const [assignmentModalOpen, setAssignmentModalOpen] = useState(false)
+  const [teamAssignOpen, setTeamAssignOpen] = useState(false)
   const [mediaView, setMediaView] = useState<ViewerMedia | null>(null)
 
   const messages = conversation?.messages || []
@@ -517,13 +524,24 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
     fetchAiPrompts()
   })
 
+  useRealtime(
+    'conversation_assignments',
+    () => {
+      if (device && contact) {
+        getConversationAssignment(device.id, contact).then(setAssignment)
+      }
+    },
+    true,
+    `device_id=eq.${device?.id}`,
+  )
+
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [messages])
 
   useEffect(() => {
     if (conversation && conversation.unread_count > 0 && device && contact) {
-      markConversationRead(device.id, contact)
+      markConversationReadGlobal(device.id, contact)
     }
   }, [contact, conversation?.unread_count, device])
 
@@ -532,6 +550,27 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
       getConversationViewers(device.id, contact).then(setViewers)
     }
   }, [sheetOpen, device, contact])
+
+  useEffect(() => {
+    if (!device || !contact) {
+      setAssignment(null)
+      setRecentViewers([])
+      setAssignmentModalOpen(false)
+      return
+    }
+    getConversationAssignment(device.id, contact).then(setAssignment)
+    getConversationRecentViewers(device.id, contact).then(setRecentViewers)
+  }, [device?.id, contact])
+
+  useEffect(() => {
+    if (
+      assignment &&
+      (assignment.status === 'open' || assignment.status === 'waiting') &&
+      conversation?.last_message_direction === 'inbound'
+    ) {
+      setAssignmentModalOpen(true)
+    }
+  }, [assignment?.status, conversation?.last_message_direction])
 
   useEffect(() => {
     if (contact) {
@@ -1061,6 +1100,17 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
               <span className="text-xs text-chat-muted font-medium truncate">
                 Canal {device.name}
               </span>
+              {assignment?.assigned_to_name && (
+                <span className="text-xs text-blue-400 truncate shrink-0">
+                  · Com: {assignment.assigned_to_name}
+                </span>
+              )}
+              {recentViewers.length > 0 && (
+                <span className="text-xs text-chat-muted/70 truncate shrink-0 flex items-center gap-0.5">
+                  <Eye className="h-3 w-3" />
+                  {recentViewers[0].user_name}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -2517,6 +2567,35 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+        <ConversationActionModal
+          open={assignmentModalOpen}
+          deviceId={device.id}
+          remoteSender={contact}
+          assignment={assignment}
+          viewers={recentViewers}
+          onClose={() => setAssignmentModalOpen(false)}
+          onTakeOver={() => {
+            getConversationAssignment(device.id, contact).then(setAssignment)
+          }}
+          onAssign={() => setTeamAssignOpen(true)}
+          onWaiting={() => {
+            getConversationAssignment(device.id, contact).then(setAssignment)
+            getConversationRecentViewers(device.id, contact).then(setRecentViewers)
+          }}
+          onFinish={() => {
+            getConversationAssignment(device.id, contact).then(setAssignment)
+          }}
+        />
+        <TeamAssignDialog
+          open={teamAssignOpen}
+          deviceId={device.id}
+          remoteSender={contact}
+          onClose={() => setTeamAssignOpen(false)}
+          onAssigned={() => {
+            setTeamAssignOpen(false)
+            getConversationAssignment(device.id, contact).then(setAssignment)
+          }}
+        />
         <MediaViewer media={mediaView} onClose={() => setMediaView(null)} />
       </div>
     </div>
