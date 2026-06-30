@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { supabase } from '@/lib/supabase/client'
 
 export type UpdateStatus =
   | { type: 'idle' }
@@ -21,6 +22,7 @@ export function useUpdater() {
   const [status, setStatus] = useState<UpdateStatus>({ type: 'idle' })
   const [version, setVersion] = useState<string | null>(null)
 
+  // Listener IPC do electron-updater (progresso, ready, etc.)
   useEffect(() => {
     if (!api) return
     api.getAppVersion().then(setVersion)
@@ -31,6 +33,21 @@ export function useUpdater() {
       }
     })
     return unsub
+  }, [])
+
+  // Push via Supabase Realtime: dispara checkForUpdates imediatamente quando
+  // um novo publish insere em app_releases — sem esperar o poll de 4h.
+  useEffect(() => {
+    if (!api) return
+    const channel = supabase
+      .channel('app-version-push')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'app_releases' }, () => {
+        api.checkForUpdates()
+      })
+      .subscribe()
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [])
 
   function checkForUpdates() {

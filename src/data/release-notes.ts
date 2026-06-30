@@ -7,6 +7,15 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.163',
+    date: '2026-06-30 16:30',
+    title: 'Notificação instantânea de atualização via push',
+    details: [
+      '⚡ Badge de atualização agora aparece em segundos após o publish — sem polling',
+      '📡 Usa Supabase Realtime: quando uma nova versão é publicada, todos os apps abertos são notificados instantaneamente',
+    ],
+  },
+  {
     version: '0.0.162',
     date: '2026-06-30 16:00',
     title: 'Teste de notificação automática de atualização',

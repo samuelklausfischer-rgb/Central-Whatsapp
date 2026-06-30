@@ -2,7 +2,7 @@
   "name": "central-whats",
   "description": "Central de atendimento WhatsApp com React, Supabase e Evolution API",
   "private": true,
-  "version": "0.0.162",
+  "version": "0.0.163",
   "main": "central-whats-app/main.cjs",
   "type": "module",
   "scripts": {
@@ -12,7 +12,7 @@
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "build:electron": "vite build --base ./ && node central-whats-app/create-icon.cjs && electron-builder --config central-whats-app/builder.json",
-    "publish:electron": "vite build --base ./ && node central-whats-app/create-icon.cjs && node central-whats-app/create-tag.cjs && electron-builder --config central-whats-app/builder.json --publish always",
+    "publish:electron": "vite build --base ./ && node central-whats-app/create-icon.cjs && node central-whats-app/create-tag.cjs && electron-builder --config central-whats-app/builder.json --publish always && node central-whats-app/publish-notify.cjs",
     "lint": "oxlint src",
     "lint:fix": "oxlint src --fix",
     "format": "oxfmt",
