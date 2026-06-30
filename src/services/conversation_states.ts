@@ -1,4 +1,5 @@
 import supabase from '@/lib/supabase/client'
+import type { ConversationAssignment, TeamMember, ConversationRecentViewer } from '@/lib/supabase/types'
 
 export interface ConversationUserState {
   id: string
@@ -112,4 +113,80 @@ export async function getConversationViewers(deviceId: string, remoteSender: str
     return []
   }
   return (data as ConversationViewer[]) || []
+}
+
+export async function markConversationReadGlobal(deviceId: string, remoteSender: string): Promise<void> {
+  const { error } = await supabase.rpc('mark_conversation_read_global', {
+    p_device_id: deviceId,
+    p_remote_sender: remoteSender,
+  })
+  if (error) console.error('Error marking conversation as globally read:', error)
+}
+
+export async function takeConversation(deviceId: string, remoteSender: string): Promise<void> {
+  const { error } = await supabase.rpc('take_conversation', {
+    p_device_id: deviceId,
+    p_remote_sender: remoteSender,
+  })
+  if (error) console.error('Error taking conversation:', error)
+}
+
+export async function assignConversation(deviceId: string, remoteSender: string, targetUserId: string): Promise<void> {
+  const { error } = await supabase.rpc('assign_conversation', {
+    p_device_id: deviceId,
+    p_remote_sender: remoteSender,
+    p_target_user_id: targetUserId,
+  })
+  if (error) console.error('Error assigning conversation:', error)
+}
+
+export async function setConversationWaiting(deviceId: string, remoteSender: string): Promise<void> {
+  const { error } = await supabase.rpc('set_conversation_waiting', {
+    p_device_id: deviceId,
+    p_remote_sender: remoteSender,
+  })
+  if (error) console.error('Error setting conversation to waiting:', error)
+}
+
+export async function finishConversation(deviceId: string, remoteSender: string): Promise<void> {
+  const { error } = await supabase.rpc('finish_conversation', {
+    p_device_id: deviceId,
+    p_remote_sender: remoteSender,
+  })
+  if (error) console.error('Error finishing conversation:', error)
+}
+
+export async function getConversationAssignment(deviceId: string, remoteSender: string): Promise<ConversationAssignment | null> {
+  const { data, error } = await supabase.rpc('get_conversation_assignment', {
+    p_device_id: deviceId,
+    p_remote_sender: remoteSender,
+  })
+  if (error) {
+    console.error('Error fetching conversation assignment:', error)
+    return null
+  }
+  return (data?.[0] as ConversationAssignment) ?? null
+}
+
+export async function getDeviceTeamMembers(deviceId: string): Promise<TeamMember[]> {
+  const { data, error } = await supabase.rpc('get_device_team_members', {
+    p_device_id: deviceId,
+  })
+  if (error) {
+    console.error('Error fetching team members:', error)
+    return []
+  }
+  return (data as TeamMember[]) || []
+}
+
+export async function getConversationRecentViewers(deviceId: string, remoteSender: string): Promise<ConversationRecentViewer[]> {
+  const { data, error } = await supabase.rpc('get_conversation_recent_viewers', {
+    p_device_id: deviceId,
+    p_remote_sender: remoteSender,
+  })
+  if (error) {
+    console.error('Error fetching conversation viewers:', error)
+    return []
+  }
+  return (data as ConversationRecentViewer[]) || []
 }

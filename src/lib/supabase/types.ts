@@ -151,3 +151,46 @@ export interface Task {
   created_at: string
   updated_at: string
 }
+
+export interface ConversationAssignment {
+  id: string
+  device_id: string
+  remote_sender: string
+  status: 'open' | 'taken' | 'assigned' | 'finished' | 'waiting'
+  assigned_to: string | null
+  assigned_by: string | null
+  assigned_at: string | null
+  finished_at: string | null
+  finished_by: string | null
+  global_read_at: string | null
+  global_read_by: string | null
+  created_at: string
+  updated_at: string
+  // Joined fields from get_conversation_assignment RPC
+  assigned_to_name: string | null
+  assigned_by_name: string | null
+}
+
+export interface ConversationActionLog {
+  id: string
+  device_id: string
+  remote_sender: string
+  user_id: string
+  action: 'opened' | 'taken' | 'assigned' | 'finished' | 'waiting'
+  target_user_id: string | null
+  created_at: string
+}
+
+export interface TeamMember {
+  id: string
+  name: string | null
+  email: string | null
+  avatar_url: string | null
+  department: string | null
+}
+
+export interface ConversationRecentViewer {
+  user_id: string
+  user_name: string
+  read_at: string
+}
