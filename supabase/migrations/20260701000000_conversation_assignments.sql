@@ -31,7 +31,7 @@ CREATE TABLE public.conversation_action_logs (
   device_id      uuid NOT NULL REFERENCES public.devices(id) ON DELETE CASCADE,
   remote_sender  text NOT NULL,
   user_id        uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  action         text NOT NULL,  -- 'opened', 'taken', 'assigned', 'finished', 'waiting'
+  action         text NOT NULL CHECK (action IN ('opened', 'taken', 'assigned', 'finished', 'waiting')),
   target_user_id uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
   created_at     timestamptz DEFAULT now()
 );
@@ -39,9 +39,6 @@ CREATE TABLE public.conversation_action_logs (
 -- ------------------------------------------------------------
 -- 2. Indexes
 -- ------------------------------------------------------------
-
-CREATE INDEX idx_conv_assignments_device_sender
-  ON public.conversation_assignments(device_id, remote_sender);
 
 CREATE INDEX idx_conv_action_logs_device_sender
   ON public.conversation_action_logs(device_id, remote_sender, created_at DESC);
@@ -115,7 +112,14 @@ CREATE POLICY "conv_action_logs_insert"
   ON public.conversation_action_logs
   FOR INSERT
   TO authenticated
-  WITH CHECK (true);  -- any authenticated user can insert logs for themselves
+  WITH CHECK (
+    user_id = auth.uid()
+    AND EXISTS (
+      SELECT 1 FROM public.user_allowed_devices uad
+      WHERE uad.device_id = conversation_action_logs.device_id
+        AND uad.user_id = auth.uid()
+    )
+  );
 
 -- No UPDATE/DELETE on action_logs (immutable audit trail)
 
@@ -253,6 +257,13 @@ DECLARE
   v_finished_at    timestamptz;
   v_last_inbound   timestamptz;
 BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM public.user_allowed_devices
+    WHERE device_id = p_device_id AND user_id = auth.uid()
+  ) THEN
+    RAISE EXCEPTION 'Access denied';
+  END IF;
+
   -- Upsert assignment record, marking global read
   INSERT INTO public.conversation_assignments (
     device_id, remote_sender, status, global_read_at, global_read_by, updated_at
@@ -271,7 +282,8 @@ BEGIN
   INTO   v_current_status, v_finished_at
   FROM   public.conversation_assignments ca
   WHERE  ca.device_id     = p_device_id
-    AND  ca.remote_sender  = p_remote_sender;
+    AND  ca.remote_sender  = p_remote_sender
+  FOR UPDATE;
 
   IF v_current_status = 'finished' THEN
     SELECT max(m.created_at)
@@ -308,6 +320,13 @@ SECURITY DEFINER
 SET search_path TO 'public'
 AS $function$
 BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM public.user_allowed_devices
+    WHERE device_id = p_device_id AND user_id = auth.uid()
+  ) THEN
+    RAISE EXCEPTION 'Access denied';
+  END IF;
+
   INSERT INTO public.conversation_assignments (
     device_id, remote_sender, status,
     assigned_to, assigned_by, assigned_at, updated_at
@@ -341,6 +360,20 @@ SECURITY DEFINER
 SET search_path TO 'public'
 AS $function$
 BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM public.user_allowed_devices
+    WHERE device_id = p_device_id AND user_id = auth.uid()
+  ) THEN
+    RAISE EXCEPTION 'Access denied';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.user_allowed_devices
+    WHERE device_id = p_device_id AND user_id = p_target_user_id
+  ) THEN
+    RAISE EXCEPTION 'Target user does not have access to this device';
+  END IF;
+
   INSERT INTO public.conversation_assignments (
     device_id, remote_sender, status,
     assigned_to, assigned_by, assigned_at, updated_at
@@ -375,6 +408,13 @@ SECURITY DEFINER
 SET search_path TO 'public'
 AS $function$
 BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM public.user_allowed_devices
+    WHERE device_id = p_device_id AND user_id = auth.uid()
+  ) THEN
+    RAISE EXCEPTION 'Access denied';
+  END IF;
+
   INSERT INTO public.conversation_assignments (
     device_id, remote_sender, status, updated_at
   )
@@ -406,6 +446,13 @@ SECURITY DEFINER
 SET search_path TO 'public'
 AS $function$
 BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM public.user_allowed_devices
+    WHERE device_id = p_device_id AND user_id = auth.uid()
+  ) THEN
+    RAISE EXCEPTION 'Access denied';
+  END IF;
+
   INSERT INTO public.conversation_assignments (
     device_id, remote_sender, status,
     finished_by, finished_at, updated_at
@@ -495,7 +542,14 @@ STABLE
 SECURITY DEFINER
 SET search_path TO 'public'
 AS $function$
+DECLARE
+  v_department text;
 BEGIN
+  SELECT d.department INTO v_department FROM public.devices d WHERE d.id = p_device_id;
+  IF v_department IS NULL THEN
+    RETURN;  -- device has no department, return empty set gracefully
+  END IF;
+
   RETURN QUERY
   SELECT
     p.id,
@@ -504,9 +558,7 @@ BEGIN
     p.avatar_url,
     p.department
   FROM  public.profiles p
-  WHERE p.department = (
-          SELECT d.department FROM public.devices d WHERE d.id = p_device_id
-        )
+  WHERE p.department = v_department
     AND p.id IN (
           SELECT uad.user_id
           FROM   public.user_allowed_devices uad
@@ -551,7 +603,7 @@ BEGIN
   WHERE cal.device_id     = p_device_id
     AND cal.remote_sender  = p_remote_sender
     AND cal.action         = 'opened'
-    AND cal.created_at    >= now() - interval '24 hours'
+    AND cal.created_at    >= COALESCE(v_global_read_at - interval '1 second', now() - interval '24 hours')
   ORDER BY cal.created_at DESC;
 END;
 $function$;
