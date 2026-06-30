@@ -32,6 +32,9 @@ import {
   AlertCircle,
   Play,
   Eye,
+  UserCheck,
+  Users,
+  CheckCircle,
 } from 'lucide-react'
 import {
   Dialog,
@@ -80,7 +83,6 @@ import { updateContactByJid } from '@/services/contacts'
 import { createNote, getNotesByContact, deleteNote } from '@/services/notes'
 import type { Note, ConversationAssignment } from '@/lib/supabase/types'
 import { ContactNoteIcon } from '@/components/ui/ContactNoteIcon'
-import { ConversationActionModal } from '@/components/chat/ConversationActionModal'
 import { TeamAssignDialog } from '@/components/chat/TeamAssignDialog'
 import { markConversationReadGlobal, getConversationViewers, getConversationAssignment, getConversationRecentViewers, type ConversationViewer, type ConversationRecentViewer } from '@/services/conversation_states'
 import { buildContactIndex, resolveContactDisplayName, findContactByIdentifier, isGroupJid, normalizeToDigits } from '@/lib/contacts/normalize'
@@ -453,8 +455,8 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
   const [viewers, setViewers] = useState<ConversationViewer[]>([])
   const [assignment, setAssignment] = useState<ConversationAssignment | null>(null)
   const [recentViewers, setRecentViewers] = useState<ConversationRecentViewer[]>([])
-  const [assignmentModalOpen, setAssignmentModalOpen] = useState(false)
   const [teamAssignOpen, setTeamAssignOpen] = useState(false)
+  const [loadingAction, setLoadingAction] = useState<'take' | 'waiting' | 'finish' | null>(null)
   const dismissedRef = useRef(false)
   const [mediaView, setMediaView] = useState<ViewerMedia | null>(null)
 
@@ -556,7 +558,6 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
     if (!device || !contact) {
       setAssignment(null)
       setRecentViewers([])
-      setAssignmentModalOpen(false)
       dismissedRef.current = false
       return
     }
@@ -564,8 +565,6 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
     let cancelled = false
 
     const init = async () => {
-      // Always create/update the assignment record when opening a conversation.
-      // This ensures the record exists even for already-read conversations.
       await markConversationReadGlobal(device.id, contact)
       if (cancelled) return
       const [asgn, viewers] = await Promise.all([
@@ -582,18 +581,10 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
   }, [device?.id, contact])
 
   useEffect(() => {
-    if (
-      assignment &&
-      (assignment.status === 'open' || assignment.status === 'waiting') &&
-      conversation?.last_message_direction === 'inbound' &&
-      !dismissedRef.current
-    ) {
-      setAssignmentModalOpen(true)
-    }
     if (assignment && assignment.status !== 'open' && assignment.status !== 'waiting') {
       dismissedRef.current = false
     }
-  }, [assignment?.status, conversation?.last_message_direction])
+  }, [assignment?.status])
 
   useEffect(() => {
     if (contact) {
@@ -635,6 +626,60 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
       toast({ title: 'Anotação removida.' })
     } catch {
       toast({ title: 'Erro ao remover anotação.', variant: 'destructive' })
+    }
+  }
+
+  const handleActionTake = async () => {
+    if (!device || !contact || loadingAction) return
+    setLoadingAction('take')
+    try {
+      const { error } = await supabase.rpc('take_conversation', {
+        p_device_id: device.id,
+        p_remote_sender: contact,
+      })
+      if (error) throw error
+      const asgn = await getConversationAssignment(device.id, contact)
+      setAssignment(asgn)
+    } catch (e) {
+      console.error('take_conversation error:', e)
+    } finally {
+      setLoadingAction(null)
+    }
+  }
+
+  const handleActionWaiting = async () => {
+    if (!device || !contact || loadingAction) return
+    setLoadingAction('waiting')
+    try {
+      const { error } = await supabase.rpc('set_conversation_waiting', {
+        p_device_id: device.id,
+        p_remote_sender: contact,
+      })
+      if (error) throw error
+      const asgn = await getConversationAssignment(device.id, contact)
+      setAssignment(asgn)
+    } catch (e) {
+      console.error('set_conversation_waiting error:', e)
+    } finally {
+      setLoadingAction(null)
+    }
+  }
+
+  const handleActionFinish = async () => {
+    if (!device || !contact || loadingAction) return
+    setLoadingAction('finish')
+    try {
+      const { error } = await supabase.rpc('finish_conversation', {
+        p_device_id: device.id,
+        p_remote_sender: contact,
+      })
+      if (error) throw error
+      const asgn = await getConversationAssignment(device.id, contact)
+      setAssignment(asgn)
+    } catch (e) {
+      console.error('finish_conversation error:', e)
+    } finally {
+      setLoadingAction(null)
     }
   }
 
@@ -1354,6 +1399,48 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
         </div>
       </div>
 
+      {/* Inline action bar — visible when conversation needs team attention */}
+      {assignment && (assignment.status === 'open' || assignment.status === 'waiting') && (
+        <div className="flex items-center justify-between px-4 py-2 bg-blue-950/20 border-b border-blue-800/20 flex-shrink-0">
+          <span className="text-xs text-blue-300/80 font-medium">
+            {assignment.status === 'waiting' ? 'Aguardando atendimento' : 'Sem atendente'}
+          </span>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={handleActionTake}
+              disabled={!!loadingAction}
+              className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-blue-500/15 text-blue-300 hover:bg-blue-500/25 disabled:opacity-50 transition-colors"
+            >
+              {loadingAction === 'take' ? <Loader2 className="h-3 w-3 animate-spin" /> : <UserCheck className="h-3 w-3" />}
+              Pegar
+            </button>
+            <button
+              onClick={() => setTeamAssignOpen(true)}
+              disabled={!!loadingAction}
+              className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-gray-500/15 text-gray-300 hover:bg-gray-500/25 disabled:opacity-50 transition-colors"
+            >
+              <Users className="h-3 w-3" />
+              Designar
+            </button>
+            <button
+              onClick={handleActionWaiting}
+              disabled={!!loadingAction}
+              className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 disabled:opacity-50 transition-colors"
+            >
+              {loadingAction === 'waiting' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Clock className="h-3 w-3" />}
+              Não posso
+            </button>
+            <button
+              onClick={handleActionFinish}
+              disabled={!!loadingAction}
+              className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-green-500/15 text-green-300 hover:bg-green-500/25 disabled:opacity-50 transition-colors"
+            >
+              {loadingAction === 'finish' ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3 w-3" />}
+              Finalizar
+            </button>
+          </div>
+        </div>
+      )}
       <div className="relative flex-1 overflow-hidden bg-chat-conversation">
         <div className="pointer-events-none absolute inset-0 z-0 chat-conversation-bg-layer" />
         <div
@@ -2590,28 +2677,6 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-        <ConversationActionModal
-          open={assignmentModalOpen}
-          deviceId={device.id}
-          remoteSender={contact}
-          assignment={assignment}
-          viewers={recentViewers}
-          onClose={() => {
-            setAssignmentModalOpen(false)
-            dismissedRef.current = true
-          }}
-          onTakeOver={() => {
-            getConversationAssignment(device.id, contact).then(setAssignment)
-          }}
-          onAssign={() => setTeamAssignOpen(true)}
-          onWaiting={() => {
-            getConversationAssignment(device.id, contact).then(setAssignment)
-            getConversationRecentViewers(device.id, contact).then(setRecentViewers)
-          }}
-          onFinish={() => {
-            getConversationAssignment(device.id, contact).then(setAssignment)
-          }}
-        />
         <TeamAssignDialog
           open={teamAssignOpen}
           deviceId={device.id}
