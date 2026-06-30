@@ -1399,10 +1399,64 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
         </div>
       </div>
 
-      {/* Inline action bar — visible when conversation needs team attention */}
+      {/* Inline action bar — adapts to assignment status */}
+      {assignment && assignment.status === 'finished' && (
+        <div className="flex items-center gap-2 px-4 py-1.5 bg-gray-900/20 border-b border-gray-700/20 flex-shrink-0">
+          <CheckCircle className="h-3.5 w-3.5 text-gray-500 flex-shrink-0" />
+          <span className="text-xs text-gray-500 font-medium">
+            Finalizado{assignment.assigned_to_name ? ` por ${assignment.assigned_to_name.split(' ')[0]}` : ''}
+          </span>
+        </div>
+      )}
+
+      {assignment && (assignment.status === 'taken' || assignment.status === 'assigned') && (
+        <div className="flex items-center justify-between px-4 py-2 bg-green-950/20 border-b border-green-800/20 flex-shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <UserCheck className="h-3.5 w-3.5 text-green-400 flex-shrink-0" />
+            <span className="text-xs text-green-300 font-medium truncate">
+              {assignment.assigned_to === user?.id
+                ? 'Você está atendendo'
+                : `Em atendimento: ${assignment.assigned_to_name?.split(' ')[0] ?? '—'}`}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <button
+              onClick={() => setTeamAssignOpen(true)}
+              disabled={!!loadingAction}
+              className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-gray-500/15 text-gray-300 hover:bg-gray-500/25 disabled:opacity-50 transition-colors"
+            >
+              <Users className="h-3 w-3" />
+              Designar
+            </button>
+            {assignment.assigned_to === user?.id && (
+              <button
+                onClick={handleActionWaiting}
+                disabled={!!loadingAction}
+                className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 disabled:opacity-50 transition-colors"
+              >
+                {loadingAction === 'waiting' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Clock className="h-3 w-3" />}
+                Não posso
+              </button>
+            )}
+            <button
+              onClick={handleActionFinish}
+              disabled={!!loadingAction}
+              className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-green-500/15 text-green-300 hover:bg-green-500/25 disabled:opacity-50 transition-colors"
+            >
+              {loadingAction === 'finish' ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3 w-3" />}
+              Finalizar
+            </button>
+          </div>
+        </div>
+      )}
+
       {assignment && (assignment.status === 'open' || assignment.status === 'waiting') && (
-        <div className="flex items-center justify-between px-4 py-2 bg-blue-950/20 border-b border-blue-800/20 flex-shrink-0">
-          <span className="text-xs text-blue-300/80 font-medium">
+        <div className={`flex items-center justify-between px-4 py-2 border-b flex-shrink-0 ${
+          assignment.status === 'waiting'
+            ? 'bg-amber-950/20 border-amber-800/20'
+            : 'bg-blue-950/20 border-blue-800/20'
+        }`}>
+          <span className={`text-xs font-medium ${assignment.status === 'waiting' ? 'text-amber-300/80' : 'text-blue-300/80'}`}>
             {assignment.status === 'waiting' ? 'Aguardando atendimento' : 'Sem atendente'}
           </span>
           <div className="flex items-center gap-1.5">
