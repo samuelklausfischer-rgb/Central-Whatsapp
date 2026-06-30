@@ -379,11 +379,11 @@ BEGIN
     device_id, remote_sender, status, updated_at
   )
   VALUES (
-    p_device_id, p_remote_sender, 'open', now()
+    p_device_id, p_remote_sender, 'waiting', now()
   )
   ON CONFLICT (device_id, remote_sender)
   DO UPDATE SET
-    status      = 'open',
+    status      = 'waiting',
     global_read_at = NULL,
     assigned_to = NULL,
     assigned_by = NULL,
@@ -516,8 +516,8 @@ BEGIN
 END;
 $function$;
 
--- 5h. get_conversation_viewers
-CREATE OR REPLACE FUNCTION public.get_conversation_viewers(
+-- 5h. get_conversation_recent_viewers
+CREATE OR REPLACE FUNCTION public.get_conversation_recent_viewers(
   p_device_id     uuid,
   p_remote_sender text
 )
@@ -567,5 +567,5 @@ GRANT EXECUTE ON FUNCTION public.set_conversation_waiting(uuid, text)        TO 
 GRANT EXECUTE ON FUNCTION public.finish_conversation(uuid, text)             TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_conversation_assignment(uuid, text)     TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_device_team_members(uuid)               TO authenticated;
-GRANT EXECUTE ON FUNCTION public.get_conversation_viewers(uuid, text)        TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_conversation_recent_viewers(uuid, text)        TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_conversation_summaries(uuid)            TO authenticated;
