@@ -30,6 +30,7 @@ import {
   CheckCircle2,
   Clock,
   AlertCircle,
+  Play,
 } from 'lucide-react'
 import {
   Dialog,
@@ -62,6 +63,8 @@ import { Label } from '@/components/ui/label'
 import { createScheduledMessage, type CreateScheduledMessageInput } from '@/services/scheduled_messages'
 import { SmartAvatar } from '@/components/chat/SmartAvatar'
 import { AudioMessage } from '@/components/chat/AudioMessage'
+import { MediaViewer, type ViewerMedia } from '@/components/chat/MediaViewer'
+import { downloadFile } from '@/lib/download'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -382,23 +385,6 @@ const getDateLabel = (value: string) => {
   return format(date, 'dd/MM/yyyy')
 }
 
-async function downloadFile(url: string, filename: string) {
-  try {
-    const res = await fetch(url)
-    const blob = await res.blob()
-    const objectUrl = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = objectUrl
-    link.download = filename
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    URL.revokeObjectURL(objectUrl)
-  } catch {
-    window.open(url, '_blank', 'noopener,noreferrer')
-  }
-}
-
 export function ChatWindow({ device, contact, conversation, contacts, onBack, isMobile, sheetOpen, onSheetOpenChange, onStartConversation, onOpenConversationByJid, onOptimisticSend, onOptimisticConfirm, onOptimisticFail }: any) {
   const { user } = useAuth()
   const { toast } = useToast()
@@ -462,6 +448,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
   const [reactionPopoverMessageId, setReactionPopoverMessageId] = useState<string | null>(null)
   const [messageMenuOpenId, setMessageMenuOpenId] = useState<string | null>(null)
   const [viewers, setViewers] = useState<ConversationViewer[]>([])
+  const [mediaView, setMediaView] = useState<ViewerMedia | null>(null)
 
   const messages = conversation?.messages || []
 
@@ -1422,33 +1409,40 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                             }
                           if (att.type === 'video') {
                             return (
-                              <div
+                              <button
                                 key={idx}
-                                className="block max-w-[300px] overflow-hidden rounded-xl border border-chat-border bg-black shadow-sm"
+                                type="button"
+                                onClick={() => setMediaView({ url: att.url, type: 'video', name: att.name })}
+                                className="group relative block max-w-[300px] overflow-hidden rounded-xl border border-chat-border bg-black shadow-sm"
                               >
                                 <video
-                                  controls
                                   src={att.url}
-                                  className="w-full max-h-[320px] object-contain"
+                                  muted
+                                  preload="metadata"
+                                  className="w-full max-h-[320px] object-contain pointer-events-none"
                                 />
-                              </div>
+                                <span className="absolute inset-0 flex items-center justify-center">
+                                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-black/55 text-white transition-colors group-hover:bg-black/70">
+                                    <Play className="h-6 w-6 translate-x-0.5" fill="currentColor" />
+                                  </span>
+                                </span>
+                              </button>
                             )
                           }
                            if (att.type === 'image') {
                              return (
-                              <a
+                              <button
                                 key={idx}
-                                href={att.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="block max-w-[240px] overflow-hidden rounded-xl border border-chat-border hover:opacity-90 hover:scale-[1.02] transition-all duration-300 shadow-sm"
+                                type="button"
+                                onClick={() => setMediaView({ url: att.url, type: 'image', name: att.name })}
+                                className="block max-w-[240px] overflow-hidden rounded-xl border border-chat-border hover:opacity-90 hover:scale-[1.02] transition-all duration-300 shadow-sm cursor-zoom-in"
                               >
                                 <img
                                   src={att.url}
                                   alt={att.name || 'Imagem'}
-                                  className="w-full h-auto object-cover"
+                                  className="w-full h-auto object-cover pointer-events-none"
                                 />
-                              </a>
+                              </button>
                              )
                            }
                           if (att.type === 'sticker') {
@@ -1499,29 +1493,40 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                         }
                         if (isVideo) {
                           return (
-                            <div
+                            <button
                               key={idx}
-                              className="block max-w-[300px] overflow-hidden rounded-xl border border-chat-border bg-black shadow-sm"
+                              type="button"
+                              onClick={() => setMediaView({ url, type: 'video', name: filename })}
+                              className="group relative block max-w-[300px] overflow-hidden rounded-xl border border-chat-border bg-black shadow-sm"
                             >
-                              <video controls src={url} className="w-full max-h-[320px] object-contain" />
-                            </div>
+                              <video
+                                src={url}
+                                muted
+                                preload="metadata"
+                                className="w-full max-h-[320px] object-contain pointer-events-none"
+                              />
+                              <span className="absolute inset-0 flex items-center justify-center">
+                                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-black/55 text-white transition-colors group-hover:bg-black/70">
+                                  <Play className="h-6 w-6 translate-x-0.5" fill="currentColor" />
+                                </span>
+                              </span>
+                            </button>
                           )
                         }
                         if (isImage) {
                           return (
-                            <a
+                            <button
                               key={idx}
-                              href={url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="block max-w-[240px] overflow-hidden rounded-xl border border-chat-border hover:opacity-90 hover:scale-[1.02] transition-all duration-300 shadow-sm"
+                              type="button"
+                              onClick={() => setMediaView({ url, type: 'image', name: filename })}
+                              className="block max-w-[240px] overflow-hidden rounded-xl border border-chat-border hover:opacity-90 hover:scale-[1.02] transition-all duration-300 shadow-sm cursor-zoom-in"
                             >
                               <img
                                 src={url}
                                 alt={filename}
-                                className="w-full h-auto object-cover"
+                                className="w-full h-auto object-cover pointer-events-none"
                               />
-                            </a>
+                            </button>
                           )
                         }
                         if (isSticker) {
@@ -2512,6 +2517,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+        <MediaViewer media={mediaView} onClose={() => setMediaView(null)} />
       </div>
     </div>
   )
