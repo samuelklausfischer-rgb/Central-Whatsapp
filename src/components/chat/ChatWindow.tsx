@@ -656,8 +656,8 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
         p_remote_sender: contact,
       })
       if (error) throw error
-      const asgn = await getConversationAssignment(device.id, contact)
-      setAssignment(asgn)
+      // Fecha a conversa (volta à lista) após marcar como aguardando
+      onBack?.()
     } catch (e) {
       console.error('set_conversation_waiting error:', e)
     } finally {
