@@ -7,6 +7,15 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.157',
+    date: '2026-06-30 10:15',
+    title: 'Visualizador de imagem: botões de fechar e baixar sempre visíveis',
+    details: [
+      '🔧 Correção: o X (fechar) e o botão de baixar agora aparecem por cima de tudo — antes ficavam escondidos atrás do menu do topo',
+      '🔍 Botões maiores e mais visíveis no visualizador (zoom, baixar, fechar)',
+    ],
+  },
+  {
     version: '0.0.156',
     date: '2026-06-30 09:45',
     title: 'Mídia: visualizador no app, colar imagem e correção do "[Imagem]"',

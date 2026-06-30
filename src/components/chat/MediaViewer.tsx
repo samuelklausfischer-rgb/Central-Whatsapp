@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { X, Download, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react'
 import { downloadFile } from '@/lib/download'
 
@@ -103,11 +104,11 @@ export function MediaViewer({ media, onClose }: { media: ViewerMedia | null; onC
   }
 
   const toolBtn =
-    'flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors'
+    'flex h-10 w-10 items-center justify-center rounded-full bg-black/40 text-white ring-1 ring-white/25 hover:bg-black/70 transition-colors'
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex flex-col bg-black/90 backdrop-blur-sm animate-in fade-in duration-200"
+      className="fixed inset-0 z-[200] flex flex-col bg-black/90 backdrop-blur-sm animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div className="flex items-center justify-end gap-1.5 p-3" onClick={(e) => e.stopPropagation()}>
@@ -167,6 +168,7 @@ export function MediaViewer({ media, onClose }: { media: ViewerMedia | null; onC
           <video src={media.url} controls autoPlay className="max-h-full max-w-full rounded object-contain" />
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
