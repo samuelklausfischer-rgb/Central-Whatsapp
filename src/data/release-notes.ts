@@ -7,6 +7,14 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.160',
+    date: '2026-06-30 15:00',
+    title: 'Teste do badge de atualização',
+    details: [
+      '🧪 Versão de teste para validar o badge pulsante de nova atualização no topo do app',
+    ],
+  },
+  {
     version: '0.0.159',
     date: '2026-06-30 14:30',
     title: 'Correção: atualização não travava mais em 90%',
