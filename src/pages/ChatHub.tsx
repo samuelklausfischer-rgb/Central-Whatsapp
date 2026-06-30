@@ -7,7 +7,8 @@ import { ChatWindow } from '@/components/chat/ChatWindow'
 import { syncDeviceAvatar } from '@/services/devices'
 import { getMessages, getConversationSummaries, getConversationMessages, type ConversationSummary } from '@/services/messages'
 import { getContacts, updateContactByJid } from '@/services/contacts'
-import { getMyStates, type ConversationUserState } from '@/services/conversation_states'
+import { getMyStates, getDeviceAssignments, type ConversationUserState } from '@/services/conversation_states'
+import type { ConversationAssignment } from '@/lib/supabase/types'
 import { getNotes } from '@/services/notes'
 import { useRealtime } from '@/hooks/use-realtime'
 import { useAuth } from '@/hooks/use-auth'
@@ -86,6 +87,7 @@ export default function ChatHub() {
     sessionStorage.getItem('activeContactJid')
   )
   const [userStates, setUserStates] = useState<ConversationUserState[]>([])
+  const [assignments, setAssignments] = useState<Map<string, ConversationAssignment>>(new Map())
   const [showArchived, setShowArchived] = useState(false)
   const [noteCountByJid, setNoteCountByJid] = useState<Map<string, number>>(new Map())
   const prevDeviceIdRef = useRef<string | null>(null)
@@ -222,6 +224,7 @@ export default function ChatHub() {
       prevDeviceIdRef.current = selectedDeviceId
       getMessages(selectedDeviceId).then(setMessages)
       getConversationSummaries(selectedDeviceId).then(setConversationSummaries)
+      getDeviceAssignments(selectedDeviceId).then(setAssignments)
       if (deviceChanged) {
         setSelectedContact(null)
         setConversationMessages([])
@@ -260,13 +263,18 @@ export default function ChatHub() {
     if (e.action === 'create' && e.record.direction === 'inbound') {
       const uid = userIdRef.current
       const deviceId = e.record.device_id
+      const remoteSender = e.record.remote_sender as string
       const prefs = uid ? getRawDevicePrefs(uid, deviceId) : { sound: true, background: true }
 
-      if (prefs.sound) {
+      const assignment = assignments.get(remoteSender)
+      const isAssignedToSomeoneElse =
+        assignment?.assigned_to != null && assignment.assigned_to !== uid
+
+      if (!isAssignedToSomeoneElse && prefs.sound) {
         playNotificationSound()
       }
 
-      if (prefs.background && 'Notification' in window && Notification.permission === 'granted') {
+      if (!isAssignedToSomeoneElse && prefs.background && 'Notification' in window && Notification.permission === 'granted') {
         const device = devicesRef.current.find((d) => d.id === deviceId)
         const deviceName = device?.name || 'WhatsApp'
         const senderName =
@@ -404,6 +412,24 @@ export default function ChatHub() {
     }
     // Reflete pin/arquivar/lida na ordenação da sidebar sem esperar a próxima mensagem.
     if (selectedDeviceId) debouncedRefreshSummaries(selectedDeviceId)
+  })
+
+  useRealtime('conversation_assignments', (e) => {
+    if (e.action === 'create' || e.action === 'update') {
+      const row = e.record as ConversationAssignment
+      setAssignments((prev) => {
+        const next = new Map(prev)
+        next.set(row.remote_sender, row)
+        return next
+      })
+    } else if (e.action === 'delete') {
+      const row = e.record as ConversationAssignment
+      setAssignments((prev) => {
+        const next = new Map(prev)
+        next.delete(row.remote_sender)
+        return next
+      })
+    }
   })
 
   // Carregar mensagens da conversa selecionada
@@ -707,6 +733,7 @@ export default function ChatHub() {
             onToggleArchived={() => setShowArchived(!showArchived)}
             onStateChange={refreshConversationStates}
             noteJids={noteJids}
+            assignments={assignments}
           />
         ) : (
           <div
@@ -728,6 +755,7 @@ export default function ChatHub() {
               onToggleArchived={() => setShowArchived(!showArchived)}
               onStateChange={refreshConversationStates}
               noteJids={noteJids}
+              assignments={assignments}
             />
             <div
               className="absolute -right-[6px] top-0 bottom-0 w-[14px] cursor-col-resize z-10 flex items-center justify-center"

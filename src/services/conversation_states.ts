@@ -190,3 +190,19 @@ export async function getConversationRecentViewers(deviceId: string, remoteSende
   }
   return (data as ConversationRecentViewer[]) || []
 }
+
+export async function getDeviceAssignments(deviceId: string): Promise<Map<string, ConversationAssignment>> {
+  const { data, error } = await supabase
+    .from('conversation_assignments')
+    .select('*')
+    .eq('device_id', deviceId)
+  if (error) {
+    console.error('getDeviceAssignments error:', error)
+    return new Map()
+  }
+  const map = new Map<string, ConversationAssignment>()
+  for (const row of data ?? []) {
+    map.set(row.remote_sender, row as ConversationAssignment)
+  }
+  return map
+}

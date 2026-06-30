@@ -25,6 +25,7 @@ import {
   ContextMenuContent,
 } from '@/components/ui/context-menu'
 import type { ConversationUserState } from '@/services/conversation_states'
+import type { ConversationAssignment } from '@/lib/supabase/types'
 import { buildContactIndex, findContactByIdentifier, resolveContactDisplayName } from '@/lib/contacts/normalize'
 
 export interface ChatListProps {
@@ -42,6 +43,7 @@ export interface ChatListProps {
   onToggleArchived: () => void
   onStateChange?: () => void
   noteJids?: Set<string>
+  assignments?: Map<string, ConversationAssignment>
 }
 
 function formatChatTimestamp(dateString: string | undefined | null): string {
@@ -111,6 +113,7 @@ const ChatRow = memo(function ChatRow({
   onStateChange,
   contactIndex,
   hasNote,
+  assignment,
 }: {
   conv: any
   contact: any
@@ -126,6 +129,7 @@ const ChatRow = memo(function ChatRow({
   onStateChange?: () => void
   contactIndex: Map<string, any>
   hasNote?: boolean
+  assignment?: ConversationAssignment
 }) {
   const name = resolveContactDisplayName(conv.remote_sender, contactIndex, {
     sender_name: conv.sender_name
@@ -172,6 +176,21 @@ const ChatRow = memo(function ChatRow({
             </span>
           )}
         </h3>
+        {assignment && assignment.status === 'finished' && (
+          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 self-start mt-0.5">
+            Finalizado
+          </span>
+        )}
+        {assignment && (assignment.status === 'taken' || assignment.status === 'assigned') && (
+          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400 self-start mt-0.5">
+            Com: {assignment.assigned_to_name?.split(' ')[0] ?? '—'}
+          </span>
+        )}
+        {assignment && assignment.status === 'waiting' && (
+          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 dark:bg-amber-950 dark:text-amber-400 self-start mt-0.5">
+            Aguardando
+          </span>
+        )}
         <div className="flex items-center gap-1 mt-0.5">
           {conv.lastMessage.direction === 'outbound' &&
             (conv.lastMessage.is_read ? (
@@ -302,6 +321,7 @@ export function ChatList({
   onToggleArchived,
   onStateChange,
   noteJids,
+  assignments,
 }: ChatListProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const deferredSearch = useDeferredValue(searchQuery)
@@ -523,6 +543,7 @@ export function ChatList({
                 onStateChange={onStateChange}
                 contactIndex={contactIndex}
                 hasNote={noteJids ? noteJids.has(conv.remote_sender) : false}
+                assignment={assignments?.get(conv.remote_sender)}
               />
             )
           })}

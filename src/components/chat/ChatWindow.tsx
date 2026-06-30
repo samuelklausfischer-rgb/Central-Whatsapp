@@ -455,6 +455,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
   const [recentViewers, setRecentViewers] = useState<ConversationRecentViewer[]>([])
   const [assignmentModalOpen, setAssignmentModalOpen] = useState(false)
   const [teamAssignOpen, setTeamAssignOpen] = useState(false)
+  const dismissedRef = useRef(false)
   const [mediaView, setMediaView] = useState<ViewerMedia | null>(null)
 
   const messages = conversation?.messages || []
@@ -556,8 +557,10 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
       setAssignment(null)
       setRecentViewers([])
       setAssignmentModalOpen(false)
+      dismissedRef.current = false
       return
     }
+    dismissedRef.current = false
     getConversationAssignment(device.id, contact).then(setAssignment)
     getConversationRecentViewers(device.id, contact).then(setRecentViewers)
   }, [device?.id, contact])
@@ -566,9 +569,13 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
     if (
       assignment &&
       (assignment.status === 'open' || assignment.status === 'waiting') &&
-      conversation?.last_message_direction === 'inbound'
+      conversation?.last_message_direction === 'inbound' &&
+      !dismissedRef.current
     ) {
       setAssignmentModalOpen(true)
+    }
+    if (assignment && assignment.status !== 'open' && assignment.status !== 'waiting') {
+      dismissedRef.current = false
     }
   }, [assignment?.status, conversation?.last_message_direction])
 
@@ -2573,7 +2580,10 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
           remoteSender={contact}
           assignment={assignment}
           viewers={recentViewers}
-          onClose={() => setAssignmentModalOpen(false)}
+          onClose={() => {
+            setAssignmentModalOpen(false)
+            dismissedRef.current = true
+          }}
           onTakeOver={() => {
             getConversationAssignment(device.id, contact).then(setAssignment)
           }}
@@ -2592,7 +2602,6 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
           remoteSender={contact}
           onClose={() => setTeamAssignOpen(false)}
           onAssigned={() => {
-            setTeamAssignOpen(false)
             getConversationAssignment(device.id, contact).then(setAssignment)
           }}
         />
