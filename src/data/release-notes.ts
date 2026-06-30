@@ -7,6 +7,16 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.156',
+    date: '2026-06-30 09:45',
+    title: 'Mídia: visualizador no app, colar imagem e correção do "[Imagem]"',
+    details: [
+      '🖼️ Imagens e vídeos agora abrem dentro do app (não mais em nova aba), com zoom, baixar e fechar',
+      '📋 Agora dá para colar imagem (Ctrl+V) direto na conversa aberta',
+      '✅ Correção: ao enviar imagem/vídeo/documento não vai mais o texto "[Imagem]" junto no WhatsApp',
+    ],
+  },
+  {
     version: '0.0.155',
     date: '2026-06-26 14:00',
     title: 'Análise PRN no menu Ferramentas (admin)',
