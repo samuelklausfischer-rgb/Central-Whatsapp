@@ -621,3 +621,63 @@ GRANT EXECUTE ON FUNCTION public.get_conversation_assignment(uuid, text)     TO 
 GRANT EXECUTE ON FUNCTION public.get_device_team_members(uuid)               TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_conversation_recent_viewers(uuid, text)        TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_conversation_summaries(uuid)            TO authenticated;
+
+-- =============================================================================
+-- Fix 2026-06-30: suporte a is_admin
+-- Admins (profiles.is_admin = true) não estão em user_allowed_devices mas
+-- precisam ter acesso a todos os RPCs e tabelas.
+-- =============================================================================
+
+CREATE OR REPLACE FUNCTION public.can_access_device(p_device_id uuid)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $f$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM public.user_allowed_devices
+    WHERE device_id = p_device_id AND user_id = auth.uid()
+  ) OR EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() AND is_admin = true
+  );
+END;
+$f$;
+
+GRANT EXECUTE ON FUNCTION public.can_access_device(uuid) TO authenticated;
+
+-- =============================================================================
+-- Trigger: reabre conversa finalizada ao receber nova mensagem
+-- Inbound → global_read_at = NULL (não lido para todos)
+-- Outbound → global_read_at = now() (quem enviou já leu)
+-- =============================================================================
+
+CREATE OR REPLACE FUNCTION public.reopen_finished_conversation_on_message()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $f$
+BEGIN
+  UPDATE public.conversation_assignments
+  SET
+    status         = 'open',
+    global_read_at = CASE WHEN NEW.direction = 'outbound' THEN now() ELSE NULL END,
+    global_read_by = CASE WHEN NEW.direction = 'outbound' THEN NEW.sender_id ELSE NULL END,
+    assigned_to    = NULL,
+    assigned_by    = NULL,
+    assigned_at    = NULL,
+    updated_at     = now()
+  WHERE device_id    = NEW.device_id
+    AND remote_sender = NEW.remote_sender
+    AND status        = 'finished';
+  RETURN NEW;
+END;
+$f$;
+
+DROP TRIGGER IF EXISTS reopen_conversation_on_new_message ON public.messages;
+CREATE TRIGGER reopen_conversation_on_new_message
+  AFTER INSERT ON public.messages
+  FOR EACH ROW
+  EXECUTE FUNCTION public.reopen_finished_conversation_on_message();
