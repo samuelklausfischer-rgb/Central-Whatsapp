@@ -7,6 +7,15 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.159',
+    date: '2026-06-30 14:30',
+    title: 'Correção: atualização não travava mais em 90%',
+    details: [
+      '⚙️ Download de atualização agora é completo e direto — sem reconstrução de blocos que travava',
+      '✅ O progresso vai de 0% a 100% sem travar no meio do caminho',
+    ],
+  },
+  {
     version: '0.0.158',
     date: '2026-06-30 11:30',
     title: 'Badge de nova atualização no topo do app',

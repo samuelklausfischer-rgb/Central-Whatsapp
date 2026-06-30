@@ -1,0 +1,36 @@
+{
+  "appId": "com.centralwhats.app",
+  "productName": "Central Whats",
+  "copyright": "© 2025 Central Whats",
+  "electronDist": "node_modules/electron/dist",
+  "directories": {
+    "output": "central-whats-app/release"
+  },
+  "files": [
+    "dist/**/*",
+    "central-whats-app/main.cjs",
+    "central-whats-app/preload.cjs",
+    "public/logo.png"
+  ],
+  "extraMetadata": {
+    "main": "central-whats-app/main.cjs"
+  },
+  "publish": {
+    "provider": "github",
+    "owner": "samuelklausfischer-rgb",
+    "repo": "Central-Whatsapp",
+    "releaseType": "release"
+  },
+  "win": {
+    "target": "nsis",
+    "icon": "central-whats-app/icon.png"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Central Whats",
+    "differentialPackage": false
+  }
+}
