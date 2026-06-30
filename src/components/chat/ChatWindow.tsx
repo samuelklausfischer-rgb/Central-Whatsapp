@@ -857,23 +857,25 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
     }
   }
 
+  const addFiles = (incoming: File[]) => {
+    if (incoming.length === 0) return
+    if (attachments.length + incoming.length > 10) {
+      toast({ title: 'Máximo de 10 arquivos permitidos', variant: 'destructive' })
+      return
+    }
+    const validFiles = incoming.filter((f) => {
+      if (f.size > 209715200) {
+        toast({ title: `Arquivo ${f.name} excede o limite de 200MB`, variant: 'destructive' })
+        return false
+      }
+      return true
+    })
+    if (validFiles.length > 0) setAttachments((prev) => [...prev, ...validFiles])
+  }
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      const newFiles = Array.from(e.target.files)
-      if (attachments.length + newFiles.length > 10) {
-        toast({ title: 'MÃ¡ximo de 10 arquivos permitidos', variant: 'destructive' })
-        return
-      }
-
-      const validFiles = newFiles.filter((f) => {
-        if (f.size > 209715200) {
-          toast({ title: `Arquivo ${f.name} excede o limite de 200MB`, variant: 'destructive' })
-          return false
-        }
-        return true
-      })
-
-      setAttachments((prev) => [...prev, ...validFiles])
+      addFiles(Array.from(e.target.files))
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
@@ -2195,6 +2197,23 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault()
                       handleSend(e)
+                    }
+                  }}
+                  onPaste={(e) => {
+                    const items = e.clipboardData?.items
+                    if (!items) return
+                    const imageFiles: File[] = []
+                    for (let i = 0; i < items.length; i++) {
+                      const item = items[i]
+                      if (item.kind === 'file' && item.type.startsWith('image/')) {
+                        const file = item.getAsFile()
+                        if (file) imageFiles.push(file)
+                      }
+                    }
+                    if (imageFiles.length > 0) {
+                      e.preventDefault()
+                      addFiles(imageFiles)
+                      toast({ title: imageFiles.length > 1 ? `${imageFiles.length} imagens adicionadas` : 'Imagem adicionada' })
                     }
                   }}
                   rows={1}
