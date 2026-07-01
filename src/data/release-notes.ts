@@ -7,6 +7,36 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.167',
+    date: '2026-07-01 16:30',
+    title: 'Emoji picker com arte colorida + botão de IA mais inteligente',
+    details: [
+      '😀 Botão de emoji agora funciona: escolha entre os 50 emojis mais usados, com visual colorido igual o WhatsApp',
+      '🤖 Botão de assistente de IA só libera quando você já digitou uma mensagem',
+    ],
+  },
+  {
+    version: '0.0.166',
+    date: '2026-07-01 14:15',
+    title: 'Prévia de PDF e Excel antes de baixar',
+    details: [
+      '📄 PDF e Excel agora abrem numa prévia (igual imagem/vídeo) antes de baixar, com botão de download no topo',
+      '🎨 Balão de documento no chat ficou mais bonito: ícone e miniatura real do conteúdo por tipo de arquivo, estilo WhatsApp',
+      '✅ Correção: texto "[Documento]" não aparece mais solto embaixo do anexo',
+    ],
+  },
+  {
+    version: '0.0.165',
+    date: '2026-07-01 10:35',
+    title: 'Atendimento em equipe: trava de posse e convite com confirmação',
+    details: [
+      '🔒 Só quem pegou a conversa pode designar, marcar "não posso" ou finalizar — antes qualquer pessoa da equipe conseguia mexer',
+      '📨 Designar agora envia um convite: a pessoa escolhida precisa confirmar antes de assumir a conversa',
+      '🏷️ Badge azul "atribuída a você" (fixa no topo) e roxo "atendido por outro" na lista de conversas',
+      '✅ Correção: admins conseguem pegar/designar/finalizar conversas em qualquer setor',
+    ],
+  },
+  {
     version: '0.0.163',
     date: '2026-06-30 16:30',
     title: 'Notificação instantânea de atualização via push',
