@@ -2,7 +2,7 @@
   "name": "central-whats",
   "description": "Central de atendimento WhatsApp com React, Supabase e Evolution API",
   "private": true,
-  "version": "0.0.166",
+  "version": "0.0.167",
   "main": "central-whats-app/main.cjs",
   "type": "module",
   "scripts": {
@@ -77,6 +77,7 @@
     "sonner": "^2.0.7",
     "tailwind-merge": "^2.6.1",
     "tailwindcss-animate": "^1.0.7",
+    "twemoji": "^14.0.2",
     "vaul": "^1.1.2",
     "xlsx": "^0.18.5",
     "zod": "^4.4.2"
@@ -86,6 +87,7 @@
     "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@types/twemoji": "^13.1.1",
     "@vitejs/plugin-react": "^6.0.1",
     "autoprefixer": "^10.5.0",
     "concurrently": "^10.0.3",

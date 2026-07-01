@@ -88,6 +88,7 @@ import { markConversationReadGlobal, getConversationViewers, getConversationAssi
 import { buildContactIndex, resolveContactDisplayName, findContactByIdentifier, isGroupJid, normalizeToDigits } from '@/lib/contacts/normalize'
 import { isPdfFile, isExcelFile } from '@/lib/file-type'
 import { DocumentBubble } from '@/components/chat/DocumentBubble'
+import { TOP_EMOJIS, getEmojiImageUrl } from '@/lib/emojis'
 import supabase from '@/lib/supabase/client'
 import { useToast } from '@/hooks/use-toast'
 import { format } from 'date-fns'
@@ -407,6 +408,8 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
   const { toast } = useToast()
 
   const [msgText, setMsgText] = useState('')
+  const [isEmojiOpen, setIsEmojiOpen] = useState(false)
+  const msgTextareaRef = useRef<HTMLTextAreaElement>(null)
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false)
   const [taskTitle, setTaskTitle] = useState('')
   const [taskDescription, setTaskDescription] = useState('')
@@ -720,6 +723,23 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
     } finally {
       setLoadingAction(null)
     }
+  }
+
+  const insertEmoji = (emoji: string) => {
+    const textarea = msgTextareaRef.current
+    if (!textarea) {
+      setMsgText((prev) => prev + emoji)
+      return
+    }
+    const start = textarea.selectionStart ?? msgText.length
+    const end = textarea.selectionEnd ?? msgText.length
+    const next = msgText.slice(0, start) + emoji + msgText.slice(end)
+    setMsgText(next)
+    requestAnimationFrame(() => {
+      textarea.focus()
+      const pos = start + emoji.length
+      textarea.setSelectionRange(pos, pos)
+    })
   }
 
   const handleSend = async (e: React.FormEvent) => {
@@ -2453,6 +2473,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
             ) : (
               <div className="flex-1 bg-chat-panel border border-chat-border hover:border-chat-border rounded-2xl flex items-end focus-within:ring-1 focus-within:ring-blue-400/30 focus-within:border-blue-400/30 transition-all duration-300 overflow-hidden shadow-inner group">
                 <textarea
+                  ref={msgTextareaRef}
                   className="flex-1 bg-transparent border-none min-h-[44px] max-h-[120px] px-4 py-2.5 text-[15px] text-chat-text placeholder:text-chat-muted focus-visible:outline-none resize-none leading-relaxed custom-scrollbar pt-3"
                   placeholder="Digite uma mensagem..."
                   value={msgText}
@@ -2488,8 +2509,9 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                       type="button"
                       variant="ghost"
                       size="icon"
-                      disabled={isAiLoading}
-                      className="text-chat-muted hover:text-blue-400 hover:bg-transparent h-11 w-11 flex-shrink-0 transition-all duration-300 hover:scale-110 active:scale-95"
+                      disabled={isAiLoading || !msgText.trim()}
+                      title={!msgText.trim() ? 'Digite uma mensagem para usar o assistente' : undefined}
+                      className="text-chat-muted hover:text-blue-400 hover:bg-transparent h-11 w-11 flex-shrink-0 transition-all duration-300 hover:scale-110 active:scale-95 disabled:opacity-40 disabled:hover:scale-100"
                     >
                       {isAiLoading ? (
                         <Loader2 className="h-5 w-5 animate-spin text-blue-400" />
@@ -2530,14 +2552,47 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                     )}
                   </DropdownMenuContent>
                 </DropdownMenu>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="text-chat-muted hover:text-chat-text hover:bg-transparent h-11 w-11 flex-shrink-0 transition-all duration-300 hover:scale-110 active:scale-95"
-                >
-                  <Smile className="h-5 w-5" />
-                </Button>
+                <Popover open={isEmojiOpen} onOpenChange={setIsEmojiOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="text-chat-muted hover:text-chat-text hover:bg-transparent h-11 w-11 flex-shrink-0 transition-all duration-300 hover:scale-110 active:scale-95"
+                    >
+                      <Smile className="h-5 w-5" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    align="end"
+                    className="w-72 p-2 bg-chat-panel border-chat-border"
+                  >
+                    <div className="grid grid-cols-8 gap-0.5">
+                      {TOP_EMOJIS.map((emoji, idx) => (
+                        <button
+                          key={`${emoji}-${idx}`}
+                          type="button"
+                          onClick={() => insertEmoji(emoji)}
+                          title={emoji}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-chat-hover transition-colors"
+                        >
+                          <img
+                            src={getEmojiImageUrl(emoji)}
+                            alt={emoji}
+                            draggable={false}
+                            className="h-5 w-5 pointer-events-none"
+                            onError={(e) => {
+                              const span = document.createElement('span')
+                              span.textContent = emoji
+                              span.className = 'text-xl leading-none'
+                              e.currentTarget.replaceWith(span)
+                            }}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
             )}
             <Dialog open={isNicknameOpen} onOpenChange={setIsNicknameOpen}>
