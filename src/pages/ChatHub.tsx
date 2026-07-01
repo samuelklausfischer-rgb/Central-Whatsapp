@@ -25,6 +25,14 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 
+// Combina o "respondido" individual do usuário com o "respondido" compartilhado
+// (gravado quando alguém finaliza o atendimento) e retorna o mais recente dos dois.
+function latestDateString(a: string | null | undefined, b: string | null | undefined): string | null {
+  if (!a) return b ?? null
+  if (!b) return a
+  return new Date(a) > new Date(b) ? a : b
+}
+
 function debounce<A extends any[]>(fn: (...args: A) => void, ms: number): (...args: A) => void {
   let timer: ReturnType<typeof setTimeout>
   return (...args: A) => {
@@ -553,6 +561,10 @@ export default function ChatHub() {
     if (conversationSummaries.length > 0) {
       const mapped = conversationSummaries.map((summary) => {
         const state = userStatesMap.get(`${selectedDeviceId}|${summary.remote_sender}`)
+        const assignment = assignments.get(summary.remote_sender)
+        const assignedToMe = !!assignment
+          && (assignment.status === 'taken' || assignment.status === 'assigned')
+          && assignment.assigned_to === user?.id
 
         let unreadCount = summary.unread_count
         if (state?.manual_unread) {
@@ -564,6 +576,8 @@ export default function ChatHub() {
             unreadCount = 0
           }
         }
+
+        const respondedAt = latestDateString(state?.responded_at, assignment?.global_responded_at)
 
         return {
           remote_sender: summary.remote_sender,
@@ -579,9 +593,9 @@ export default function ChatHub() {
           },
           unread_count: unreadCount,
           message_count: summary.message_count,
-          pinned: state?.pinned ?? false,
+          pinned: (state?.pinned ?? false) || assignedToMe,
           archived: state?.archived ?? false,
-          pendingReply: summary.last_message_direction === 'inbound' && (!state?.responded_at || new Date(summary.last_message_created_at) > new Date(state.responded_at)),
+          pendingReply: summary.last_message_direction === 'inbound' && (!respondedAt || new Date(summary.last_message_created_at) > new Date(respondedAt)),
         }
       })
 
@@ -616,6 +630,10 @@ export default function ChatHub() {
     return Array.from(map.values())
       .map((conv) => {
         const state = userStatesMap.get(`${selectedDeviceId}|${conv.remote_sender}`)
+        const assignment = assignments.get(conv.remote_sender)
+        const assignedToMe = !!assignment
+          && (assignment.status === 'taken' || assignment.status === 'assigned')
+          && assignment.assigned_to === user?.id
 
         if (state?.manual_unread) {
           conv.unread_count = Math.max(1, conv.messages.filter(
@@ -630,20 +648,21 @@ export default function ChatHub() {
           conv.unread_count = 0
         }
 
-        conv.pinned = state?.pinned ?? false
+        conv.pinned = (state?.pinned ?? false) || assignedToMe
         conv.archived = state?.archived ?? false
 
         if (conv.lastMessage?.sender_name && conv.lastMessage.direction === 'inbound') {
           conv.sender_name = conv.lastMessage.sender_name
         }
-        conv.pendingReply = conv.lastMessage?.direction === 'inbound' && (!state?.responded_at || new Date(conv.lastMessage.created_at) > new Date(state.responded_at))
+        const respondedAt = latestDateString(state?.responded_at, assignment?.global_responded_at)
+        conv.pendingReply = conv.lastMessage?.direction === 'inbound' && (!respondedAt || new Date(conv.lastMessage.created_at) > new Date(respondedAt))
         return conv
       })
       .sort((a, b) => {
         if (a.pinned !== b.pinned) return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)
         return new Date(b.lastMessage.created_at).getTime() - new Date(a.lastMessage.created_at).getTime()
       })
-  }, [conversationSummaries, messages, userStates, selectedDeviceId])
+  }, [conversationSummaries, messages, userStates, selectedDeviceId, assignments, user?.id])
 
   const selectedDevice = devices.find((d) => d.id === selectedDeviceId)
 
@@ -734,6 +753,7 @@ export default function ChatHub() {
             onStateChange={refreshConversationStates}
             noteJids={noteJids}
             assignments={assignments}
+            currentUserId={user?.id}
           />
         ) : (
           <div
@@ -756,6 +776,7 @@ export default function ChatHub() {
               onStateChange={refreshConversationStates}
               noteJids={noteJids}
               assignments={assignments}
+              currentUserId={user?.id}
             />
             <div
               className="absolute -right-[6px] top-0 bottom-0 w-[14px] cursor-col-resize z-10 flex items-center justify-center"

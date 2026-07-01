@@ -156,7 +156,7 @@ export interface ConversationAssignment {
   id: string
   device_id: string
   remote_sender: string
-  status: 'open' | 'taken' | 'assigned' | 'finished' | 'waiting'
+  status: 'open' | 'taken' | 'assigned' | 'finished' | 'waiting' | 'invited'
   assigned_to: string | null
   assigned_by: string | null
   assigned_at: string | null
@@ -164,11 +164,18 @@ export interface ConversationAssignment {
   finished_by: string | null
   global_read_at: string | null
   global_read_by: string | null
+  invited_to: string | null
+  invited_by: string | null
+  invited_at: string | null
+  global_responded_at: string | null
+  global_responded_by: string | null
   created_at: string
   updated_at: string
   // Joined fields from get_conversation_assignment RPC
   assigned_to_name: string | null
   assigned_by_name: string | null
+  invited_to_name: string | null
+  invited_by_name: string | null
 }
 
 export interface ConversationActionLog {

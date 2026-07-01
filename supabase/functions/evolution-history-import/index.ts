@@ -3,7 +3,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || ''
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
 const STORAGE_BUCKET = 'chat-attachments'
-const ALLOWED_INSTANCES = ['Financeiro Medimagem', 'Financeiro PRN']
+const ALLOWED_INSTANCES = ['Financeiro Medimagem', 'Financeiro PRN', 'WhatsApp Adm']
 const DEFAULT_PAGE_SIZE = 50
 const DEFAULT_RECENT_MEDIA_DAYS = 7
 

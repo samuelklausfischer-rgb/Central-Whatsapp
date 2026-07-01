@@ -456,7 +456,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
   const [assignment, setAssignment] = useState<ConversationAssignment | null>(null)
   const [recentViewers, setRecentViewers] = useState<ConversationRecentViewer[]>([])
   const [teamAssignOpen, setTeamAssignOpen] = useState(false)
-  const [loadingAction, setLoadingAction] = useState<'take' | 'waiting' | 'finish' | null>(null)
+  const [loadingAction, setLoadingAction] = useState<'take' | 'waiting' | 'finish' | 'invite_accept' | 'invite_decline' | null>(null)
   const dismissedRef = useRef(false)
   const [mediaView, setMediaView] = useState<ViewerMedia | null>(null)
 
@@ -640,8 +640,9 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
       if (error) throw error
       const asgn = await getConversationAssignment(device.id, contact)
       setAssignment(asgn)
-    } catch (e) {
+    } catch (e: any) {
       console.error('take_conversation error:', e)
+      toast({ title: 'Não foi possível pegar a conversa', description: e?.message, variant: 'destructive' })
     } finally {
       setLoadingAction(null)
     }
@@ -658,8 +659,9 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
       if (error) throw error
       // Fecha a conversa (volta à lista) após marcar como aguardando
       onBack?.()
-    } catch (e) {
+    } catch (e: any) {
       console.error('set_conversation_waiting error:', e)
+      toast({ title: 'Não foi possível marcar como "não posso"', description: e?.message, variant: 'destructive' })
     } finally {
       setLoadingAction(null)
     }
@@ -676,8 +678,33 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
       if (error) throw error
       const asgn = await getConversationAssignment(device.id, contact)
       setAssignment(asgn)
-    } catch (e) {
+    } catch (e: any) {
       console.error('finish_conversation error:', e)
+      toast({ title: 'Não foi possível finalizar a conversa', description: e?.message, variant: 'destructive' })
+    } finally {
+      setLoadingAction(null)
+    }
+  }
+
+  const handleActionInviteRespond = async (accept: boolean) => {
+    if (!device || !contact || loadingAction) return
+    setLoadingAction(accept ? 'invite_accept' : 'invite_decline')
+    try {
+      const { error } = await supabase.rpc('respond_conversation_invite', {
+        p_device_id: device.id,
+        p_remote_sender: contact,
+        p_accept: accept,
+      })
+      if (error) throw error
+      if (accept) {
+        const asgn = await getConversationAssignment(device.id, contact)
+        setAssignment(asgn)
+      } else {
+        onBack?.()
+      }
+    } catch (e: any) {
+      console.error('respond_conversation_invite error:', e)
+      toast({ title: 'Não foi possível responder ao convite', description: e?.message, variant: 'destructive' })
     } finally {
       setLoadingAction(null)
     }
@@ -1168,10 +1195,21 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
               <span className="text-xs text-chat-muted font-medium truncate">
                 Canal {device.name}
               </span>
-              {assignment?.assigned_to_name && (
+              {(assignment?.status === 'taken' || assignment?.status === 'assigned') && assignment.assigned_to_name && (
                 <span className="text-xs text-blue-400 truncate shrink-0">
                   · Com: {assignment.assigned_to_name}
                 </span>
+              )}
+              {assignment?.status === 'waiting' && (
+                <span className="text-xs text-amber-400 truncate shrink-0">· Aguardando atendimento</span>
+              )}
+              {assignment?.status === 'invited' && (
+                <span className="text-xs text-blue-400 truncate shrink-0">
+                  · Convite {assignment.invited_to === user?.id ? 'para você' : `p/ ${assignment.invited_to_name?.split(' ')[0] ?? '—'}`}
+                </span>
+              )}
+              {assignment?.status === 'finished' && (
+                <span className="text-xs text-gray-400 truncate shrink-0">· Finalizado</span>
               )}
               {recentViewers.length > 0 && (
                 <span className="text-xs text-chat-muted/70 truncate shrink-0 flex items-center gap-0.5">
@@ -1184,6 +1222,70 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
         </div>
 
         <div className="flex items-center gap-1">
+          {assignment && (assignment.status === 'open' || assignment.status === 'waiting') && (
+            <>
+              <button
+                onClick={handleActionTake}
+                disabled={!!loadingAction}
+                className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-blue-500/15 text-blue-300 hover:bg-blue-500/25 disabled:opacity-50 transition-colors"
+              >
+                {loadingAction === 'take' ? <Loader2 className="h-3 w-3 animate-spin" /> : <UserCheck className="h-3 w-3" />}
+                Pegar
+              </button>
+              <button
+                onClick={() => setTeamAssignOpen(true)}
+                disabled={!!loadingAction}
+                className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-gray-500/15 text-gray-300 hover:bg-gray-500/25 disabled:opacity-50 transition-colors"
+              >
+                <Users className="h-3 w-3" />
+                Designar
+              </button>
+              <button
+                onClick={handleActionWaiting}
+                disabled={!!loadingAction}
+                className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 disabled:opacity-50 transition-colors"
+              >
+                {loadingAction === 'waiting' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Clock className="h-3 w-3" />}
+                Não posso
+              </button>
+              <button
+                onClick={handleActionFinish}
+                disabled={!!loadingAction}
+                className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-green-500/15 text-green-300 hover:bg-green-500/25 disabled:opacity-50 transition-colors"
+              >
+                {loadingAction === 'finish' ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3 w-3" />}
+                Finalizar
+              </button>
+            </>
+          )}
+          {assignment && (assignment.status === 'taken' || assignment.status === 'assigned') && assignment.assigned_to === user?.id && (
+            <>
+              <button
+                onClick={() => setTeamAssignOpen(true)}
+                disabled={!!loadingAction}
+                className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-gray-500/15 text-gray-300 hover:bg-gray-500/25 disabled:opacity-50 transition-colors"
+              >
+                <Users className="h-3 w-3" />
+                Designar
+              </button>
+              <button
+                onClick={handleActionWaiting}
+                disabled={!!loadingAction}
+                className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 disabled:opacity-50 transition-colors"
+              >
+                {loadingAction === 'waiting' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Clock className="h-3 w-3" />}
+                Não posso
+              </button>
+              <button
+                onClick={handleActionFinish}
+                disabled={!!loadingAction}
+                className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-green-500/15 text-green-300 hover:bg-green-500/25 disabled:opacity-50 transition-colors"
+              >
+                {loadingAction === 'finish' ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3 w-3" />}
+                Finalizar
+              </button>
+            </>
+          )}
           <Popover open={isLabelsOpen} onOpenChange={setIsLabelsOpen}>
             <PopoverTrigger asChild>
               <Button
@@ -1399,98 +1501,28 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
         </div>
       </div>
 
-      {/* Inline action bar — adapts to assignment status */}
-      {assignment && assignment.status === 'finished' && (
-        <div className="flex items-center gap-2 px-4 py-1.5 bg-gray-900/20 border-b border-gray-700/20 flex-shrink-0">
-          <CheckCircle className="h-3.5 w-3.5 text-gray-500 flex-shrink-0" />
-          <span className="text-xs text-gray-500 font-medium">
-            Finalizado{assignment.assigned_to_name ? ` por ${assignment.assigned_to_name.split(' ')[0]}` : ''}
+      {/* Convite de designação pendente — só aparece pra quem foi convidado */}
+      {assignment && assignment.status === 'invited' && assignment.invited_to === user?.id && (
+        <div className="flex items-center justify-between px-4 py-2 bg-blue-950/20 border-b border-blue-800/20 flex-shrink-0">
+          <span className="text-xs text-blue-300 font-medium truncate">
+            {assignment.invited_by_name?.split(' ')[0] ?? 'Alguém'} designou essa conversa para você
           </span>
-        </div>
-      )}
-
-      {assignment && (assignment.status === 'taken' || assignment.status === 'assigned') && (
-        <div className="flex items-center justify-between px-4 py-2 bg-green-950/20 border-b border-green-800/20 flex-shrink-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <UserCheck className="h-3.5 w-3.5 text-green-400 flex-shrink-0" />
-            <span className="text-xs text-green-300 font-medium truncate">
-              {assignment.assigned_to === user?.id
-                ? 'Você está atendendo'
-                : `Em atendimento: ${assignment.assigned_to_name?.split(' ')[0] ?? '—'}`}
-            </span>
-          </div>
           <div className="flex items-center gap-1.5 flex-shrink-0">
             <button
-              onClick={() => setTeamAssignOpen(true)}
-              disabled={!!loadingAction}
-              className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-gray-500/15 text-gray-300 hover:bg-gray-500/25 disabled:opacity-50 transition-colors"
-            >
-              <Users className="h-3 w-3" />
-              Designar
-            </button>
-            {assignment.assigned_to === user?.id && (
-              <button
-                onClick={handleActionWaiting}
-                disabled={!!loadingAction}
-                className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 disabled:opacity-50 transition-colors"
-              >
-                {loadingAction === 'waiting' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Clock className="h-3 w-3" />}
-                Não posso
-              </button>
-            )}
-            <button
-              onClick={handleActionFinish}
+              onClick={() => handleActionInviteRespond(true)}
               disabled={!!loadingAction}
               className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-green-500/15 text-green-300 hover:bg-green-500/25 disabled:opacity-50 transition-colors"
             >
-              {loadingAction === 'finish' ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3 w-3" />}
-              Finalizar
-            </button>
-          </div>
-        </div>
-      )}
-
-      {assignment && (assignment.status === 'open' || assignment.status === 'waiting') && (
-        <div className={`flex items-center justify-between px-4 py-2 border-b flex-shrink-0 ${
-          assignment.status === 'waiting'
-            ? 'bg-amber-950/20 border-amber-800/20'
-            : 'bg-blue-950/20 border-blue-800/20'
-        }`}>
-          <span className={`text-xs font-medium ${assignment.status === 'waiting' ? 'text-amber-300/80' : 'text-blue-300/80'}`}>
-            {assignment.status === 'waiting' ? 'Aguardando atendimento' : 'Sem atendente'}
-          </span>
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={handleActionTake}
-              disabled={!!loadingAction}
-              className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-blue-500/15 text-blue-300 hover:bg-blue-500/25 disabled:opacity-50 transition-colors"
-            >
-              {loadingAction === 'take' ? <Loader2 className="h-3 w-3 animate-spin" /> : <UserCheck className="h-3 w-3" />}
-              Pegar
+              {loadingAction === 'invite_accept' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+              Confirmar
             </button>
             <button
-              onClick={() => setTeamAssignOpen(true)}
+              onClick={() => handleActionInviteRespond(false)}
               disabled={!!loadingAction}
-              className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-gray-500/15 text-gray-300 hover:bg-gray-500/25 disabled:opacity-50 transition-colors"
+              className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-red-500/15 text-red-300 hover:bg-red-500/25 disabled:opacity-50 transition-colors"
             >
-              <Users className="h-3 w-3" />
-              Designar
-            </button>
-            <button
-              onClick={handleActionWaiting}
-              disabled={!!loadingAction}
-              className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 disabled:opacity-50 transition-colors"
-            >
-              {loadingAction === 'waiting' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Clock className="h-3 w-3" />}
-              Não posso
-            </button>
-            <button
-              onClick={handleActionFinish}
-              disabled={!!loadingAction}
-              className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-green-500/15 text-green-300 hover:bg-green-500/25 disabled:opacity-50 transition-colors"
-            >
-              {loadingAction === 'finish' ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3 w-3" />}
-              Finalizar
+              {loadingAction === 'invite_decline' ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
+              Não confirmar
             </button>
           </div>
         </div>

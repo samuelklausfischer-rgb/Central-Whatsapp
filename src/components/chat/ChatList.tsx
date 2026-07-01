@@ -44,6 +44,7 @@ export interface ChatListProps {
   onStateChange?: () => void
   noteJids?: Set<string>
   assignments?: Map<string, ConversationAssignment>
+  currentUserId?: string
 }
 
 function formatChatTimestamp(dateString: string | undefined | null): string {
@@ -114,6 +115,7 @@ const ChatRow = memo(function ChatRow({
   contactIndex,
   hasNote,
   assignment,
+  currentUserId,
 }: {
   conv: any
   contact: any
@@ -130,6 +132,7 @@ const ChatRow = memo(function ChatRow({
   contactIndex: Map<string, any>
   hasNote?: boolean
   assignment?: ConversationAssignment
+  currentUserId?: string
 }) {
   const name = resolveContactDisplayName(conv.remote_sender, contactIndex, {
     sender_name: conv.sender_name
@@ -182,8 +185,19 @@ const ChatRow = memo(function ChatRow({
           </span>
         )}
         {assignment && (assignment.status === 'taken' || assignment.status === 'assigned') && (
+          assignment.assigned_to === currentUserId ? (
+            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400 self-start mt-0.5">
+              Atribuída a você
+            </span>
+          ) : (
+            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-600 dark:bg-purple-950 dark:text-purple-400 self-start mt-0.5">
+              Atendido: {assignment.assigned_to_name?.split(' ')[0] ?? '—'}
+            </span>
+          )
+        )}
+        {assignment && assignment.status === 'invited' && (
           <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400 self-start mt-0.5">
-            Com: {assignment.assigned_to_name?.split(' ')[0] ?? '—'}
+            {assignment.invited_to === currentUserId ? 'Convite para você' : `Convite: ${assignment.invited_to_name?.split(' ')[0] ?? '—'}`}
           </span>
         )}
         {assignment && assignment.status === 'waiting' && (
@@ -322,6 +336,7 @@ export function ChatList({
   onStateChange,
   noteJids,
   assignments,
+  currentUserId,
 }: ChatListProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const deferredSearch = useDeferredValue(searchQuery)
@@ -544,6 +559,7 @@ export function ChatList({
                 contactIndex={contactIndex}
                 hasNote={noteJids ? noteJids.has(conv.remote_sender) : false}
                 assignment={assignments?.get(conv.remote_sender)}
+                currentUserId={currentUserId}
               />
             )
           })}

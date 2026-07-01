@@ -6,6 +6,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import supabase from '@/lib/supabase/client'
 import { getDeviceTeamMembers } from '@/services/conversation_states'
 import type { TeamMember } from '@/lib/supabase/types'
+import { useToast } from '@/hooks/use-toast'
 
 interface TeamAssignDialogProps {
   open: boolean
@@ -30,6 +31,7 @@ export function TeamAssignDialog({
   const [members, setMembers] = useState<TeamMember[]>([])
   const [loading, setLoading] = useState(false)
   const [assigningId, setAssigningId] = useState<string | null>(null)
+  const { toast } = useToast()
 
   const isAssigning = assigningId !== null
 
@@ -51,10 +53,12 @@ export function TeamAssignDialog({
         p_target_user_id: member.id,
       })
       if (error) throw error
+      toast({ title: `Convite enviado para ${member.name ?? 'o usuário'}`, description: 'A conversa fica reservada até a pessoa confirmar.' })
       onAssigned()
       onClose()
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error assigning conversation:', err)
+      toast({ title: 'Não foi possível designar a conversa', description: err?.message, variant: 'destructive' })
     } finally {
       setAssigningId(null)
     }
@@ -72,7 +76,7 @@ export function TeamAssignDialog({
             Designar para membro da equipe
           </DialogTitle>
           <DialogDescription className="sr-only">
-            Selecione um membro da equipe para atribuir esta conversa.
+            Selecione um membro da equipe para enviar um convite de atendimento desta conversa. A pessoa precisa confirmar antes de assumir.
           </DialogDescription>
         </DialogHeader>
 
