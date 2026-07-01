@@ -1,9 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Download, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react'
+import { X, Download, ZoomIn, ZoomOut, RotateCcw, Loader2 } from 'lucide-react'
+import * as XLSX from 'xlsx'
 import { downloadFile } from '@/lib/download'
 
-export type ViewerMedia = { url: string; type: 'image' | 'video'; name?: string }
+export type ViewerMedia = { url: string; type: 'image' | 'video' | 'pdf' | 'excel'; name?: string }
+
+const EXCEL_ROW_LIMIT = 500
+
+type ExcelWorkbookPreview = {
+  sheetNames: string[]
+  sheets: Record<string, unknown[][]>
+}
 
 const MIN_SCALE = 1
 const MAX_SCALE = 5
@@ -26,7 +34,14 @@ export function MediaViewer({ media, onClose }: { media: ViewerMedia | null; onC
   const wrapRef = useRef<HTMLDivElement>(null)
 
   const isImage = media?.type === 'image'
+  const isPdf = media?.type === 'pdf'
+  const isExcel = media?.type === 'excel'
   const url = media?.url
+
+  const [excelWorkbook, setExcelWorkbook] = useState<ExcelWorkbookPreview | null>(null)
+  const [activeSheet, setActiveSheet] = useState<string | null>(null)
+  const [excelLoading, setExcelLoading] = useState(false)
+  const [excelError, setExcelError] = useState<string | null>(null)
 
   // Reseta o transform sempre que a mídia muda.
   useEffect(() => {
@@ -34,6 +49,43 @@ export function MediaViewer({ media, onClose }: { media: ViewerMedia | null; onC
     setTx(0)
     setTy(0)
   }, [url])
+
+  // Busca e faz o parse da planilha quando o preview é de Excel.
+  useEffect(() => {
+    if (!isExcel || !url) {
+      setExcelWorkbook(null)
+      setActiveSheet(null)
+      setExcelError(null)
+      return
+    }
+    let cancelled = false
+    setExcelLoading(true)
+    setExcelError(null)
+    fetch(url)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return res.arrayBuffer()
+      })
+      .then((buffer) => {
+        if (cancelled) return
+        const wb = XLSX.read(buffer, { type: 'array' })
+        const sheets: Record<string, unknown[][]> = {}
+        for (const name of wb.SheetNames) {
+          sheets[name] = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true }) as unknown[][]
+        }
+        setExcelWorkbook({ sheetNames: wb.SheetNames, sheets })
+        setActiveSheet(wb.SheetNames[0] ?? null)
+      })
+      .catch((err) => {
+        if (!cancelled) setExcelError(err?.message || 'Não foi possível ler a planilha')
+      })
+      .finally(() => {
+        if (!cancelled) setExcelLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isExcel, url])
 
   // ESC fecha.
   useEffect(() => {
@@ -111,7 +163,11 @@ export function MediaViewer({ media, onClose }: { media: ViewerMedia | null; onC
       className="fixed inset-0 z-[200] flex flex-col bg-black/90 backdrop-blur-sm animate-in fade-in duration-200"
       onClick={onClose}
     >
-      <div className="flex items-center justify-end gap-1.5 p-3" onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-center justify-between gap-1.5 p-3" onClick={(e) => e.stopPropagation()}>
+        <span className="min-w-0 truncate text-sm font-medium text-white/80">
+          {media.name || ''}
+        </span>
+        <div className="flex items-center gap-1.5">
         {isImage && (
           <>
             <button type="button" onClick={() => zoomBy(-STEP)} title="Diminuir zoom" className={toolBtn}>
@@ -140,11 +196,16 @@ export function MediaViewer({ media, onClose }: { media: ViewerMedia | null; onC
         <button type="button" onClick={onClose} title="Fechar" className={toolBtn}>
           <X className="h-5 w-5" />
         </button>
+        </div>
       </div>
 
       <div
         ref={wrapRef}
-        className="flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4 sm:p-8"
+        className={
+          isPdf || isExcel
+            ? 'flex min-h-0 flex-1 overflow-hidden p-2 sm:p-4'
+            : 'flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4 sm:p-8'
+        }
         onClick={(e) => e.stopPropagation()}
       >
         {isImage ? (
@@ -164,6 +225,69 @@ export function MediaViewer({ media, onClose }: { media: ViewerMedia | null; onC
             }}
             className="max-h-full max-w-full select-none object-contain"
           />
+        ) : isPdf ? (
+          <iframe
+            src={media.url}
+            title={media.name || 'PDF'}
+            className="h-full w-full rounded bg-white"
+          />
+        ) : isExcel ? (
+          <div className="flex h-full w-full min-h-0 flex-col rounded bg-white">
+            {excelLoading ? (
+              <div className="flex flex-1 items-center justify-center gap-2 text-sm text-chat-muted">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Carregando planilha…
+              </div>
+            ) : excelError ? (
+              <div className="flex flex-1 items-center justify-center text-sm text-red-500">
+                Não foi possível abrir a planilha: {excelError}
+              </div>
+            ) : excelWorkbook ? (
+              <>
+                {excelWorkbook.sheetNames.length > 1 && (
+                  <div className="flex flex-shrink-0 gap-1 overflow-x-auto border-b border-gray-200 bg-gray-50 px-2 py-1.5">
+                    {excelWorkbook.sheetNames.map((name) => (
+                      <button
+                        key={name}
+                        type="button"
+                        onClick={() => setActiveSheet(name)}
+                        className={
+                          'flex-shrink-0 rounded px-2.5 py-1 text-xs font-medium transition-colors ' +
+                          (activeSheet === name
+                            ? 'bg-primary text-primary-foreground'
+                            : 'text-gray-600 hover:bg-gray-200')
+                        }
+                      >
+                        {name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="min-h-0 flex-1 overflow-auto">
+                  <table className="min-w-full border-collapse text-xs">
+                    <tbody>
+                      {(excelWorkbook.sheets[activeSheet || ''] || [])
+                        .slice(0, EXCEL_ROW_LIMIT)
+                        .map((row, rowIdx) => (
+                          <tr key={rowIdx} className={rowIdx === 0 ? 'bg-gray-100 font-semibold' : 'odd:bg-white even:bg-gray-50'}>
+                            {(row as unknown[]).map((cell, cellIdx) => (
+                              <td key={cellIdx} className="whitespace-nowrap border border-gray-200 px-2 py-1 text-gray-800">
+                                {cell === null || cell === undefined ? '' : String(cell)}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                  {(excelWorkbook.sheets[activeSheet || ''] || []).length > EXCEL_ROW_LIMIT && (
+                    <div className="p-2 text-center text-xs text-chat-muted">
+                      Mostrando as primeiras {EXCEL_ROW_LIMIT} linhas — baixe o arquivo para ver tudo.
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : null}
+          </div>
         ) : (
           <video src={media.url} controls autoPlay className="max-h-full max-w-full rounded object-contain" />
         )}

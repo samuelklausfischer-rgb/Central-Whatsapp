@@ -86,6 +86,8 @@ import { ContactNoteIcon } from '@/components/ui/ContactNoteIcon'
 import { TeamAssignDialog } from '@/components/chat/TeamAssignDialog'
 import { markConversationReadGlobal, getConversationViewers, getConversationAssignment, getConversationRecentViewers, type ConversationViewer, type ConversationRecentViewer } from '@/services/conversation_states'
 import { buildContactIndex, resolveContactDisplayName, findContactByIdentifier, isGroupJid, normalizeToDigits } from '@/lib/contacts/normalize'
+import { isPdfFile, isExcelFile } from '@/lib/file-type'
+import { DocumentBubble } from '@/components/chat/DocumentBubble'
 import supabase from '@/lib/supabase/client'
 import { useToast } from '@/hooks/use-toast'
 import { format } from 'date-fns'
@@ -254,9 +256,19 @@ const isMediaPlaceholder = (content?: string) => {
   if (!content) return false
   const cleaned = content.trim().replace(/[\u0080-\u009F]/g, '')
   return (
-    ['[Anexo]', '[Imagem]', '[Vídeo]', '[Áudio]', '[Ãudio]', '[Música]', '[Figurinha]', '[Mensagem de mídia]'].includes(
-      cleaned,
-    ) || cleaned.startsWith('[Documento:')
+    [
+      '[Anexo]',
+      '[Imagem]',
+      '[Vídeo]',
+      '[VÃ­deo]',
+      '[Áudio]',
+      '[Ãudio]',
+      '[Música]',
+      '[Figurinha]',
+      '[Mensagem de mídia]',
+      '[Documento]',
+      '[Mídia]',
+    ].includes(cleaned) || cleaned.startsWith('[Documento:')
   )
 }
 
@@ -1708,21 +1720,22 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                               </a>
                             )
                           }
-                           return (
-                            <button
-                              key={idx}
-                              onClick={() => downloadFile(att.url, att.name || att.url)}
-                              className="flex items-center gap-2 p-2.5 rounded-md hover:opacity-80 transition-colors text-sm border border-chat-text/20 bg-chat-text/10 w-full text-left"
-                            >
-                              <FileIcon
-                                className="h-4 w-4 flex-shrink-0 text-chat-text/70"
+                          {
+                            const docName = att.name || att.url
+                            const hasPreview = isPdfFile(docName) || isExcelFile(docName)
+                            return (
+                              <DocumentBubble
+                                key={idx}
+                                url={att.url}
+                                name={docName}
+                                onOpenPreview={
+                                  hasPreview
+                                    ? () => setMediaView({ url: att.url, type: isPdfFile(docName) ? 'pdf' : 'excel', name: att.name })
+                                    : null
+                                }
                               />
-                              <span className="truncate max-w-[150px]" title={att.name || att.url}>
-                                {att.name || att.url}
-                              </span>
-                              <Download className="h-4 w-4 flex-shrink-0 ml-auto opacity-50" />
-                            </button>
-                          )
+                            )
+                          }
                         }
                         const filename = att as string
                         const url = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/chat-attachments/${msg.id}/${filename}`
@@ -1792,21 +1805,21 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                             </a>
                           )
                         }
-                        return (
-                          <button
-                            key={idx}
-                            onClick={() => downloadFile(url, filename)}
-                            className="flex items-center gap-2 p-2.5 rounded-md hover:opacity-80 transition-colors text-sm border border-chat-text/20 bg-chat-text/10 w-full text-left"
-                          >
-                            <FileIcon
-                              className="h-4 w-4 flex-shrink-0 text-chat-text/70"
+                        {
+                          const hasPreview = isPdfFile(filename) || isExcelFile(filename)
+                          return (
+                            <DocumentBubble
+                              key={idx}
+                              url={url}
+                              name={filename}
+                              onOpenPreview={
+                                hasPreview
+                                  ? () => setMediaView({ url, type: isPdfFile(filename) ? 'pdf' : 'excel', name: filename })
+                                  : null
+                              }
                             />
-                            <span className="truncate max-w-[150px]" title={filename}>
-                              {filename}
-                            </span>
-                            <Download className="h-4 w-4 flex-shrink-0 ml-auto opacity-50" />
-                          </button>
-                        )
+                          )
+                        }
                       })}
                     </div>
                   )}

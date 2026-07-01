@@ -91,9 +91,12 @@ function previewLabel(content: string | null | undefined): string {
     '[Anexo]': 'Anexo',
     '[Imagem]': 'Imagem',
     '[Vídeo]': 'Vídeo',
+    '[VÃ­deo]': 'Vídeo',
     '[Música]': 'Música',
     '[Figurinha]': 'Figurinha',
     '[Mensagem de mídia]': 'Mídia',
+    '[Documento]': 'Documento',
+    '[Mídia]': 'Mídia',
   }
   if (cleaned.startsWith('[Documento:')) return 'Documento'
   return labels[cleaned] || content
