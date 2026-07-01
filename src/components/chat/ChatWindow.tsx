@@ -88,6 +88,7 @@ import { markConversationReadGlobal, getConversationViewers, getConversationAssi
 import { buildContactIndex, resolveContactDisplayName, findContactByIdentifier, isGroupJid, normalizeToDigits } from '@/lib/contacts/normalize'
 import { isPdfFile, isExcelFile } from '@/lib/file-type'
 import { DocumentBubble } from '@/components/chat/DocumentBubble'
+import { ContactShareBubble } from '@/components/chat/ContactShareBubble'
 import { TOP_EMOJIS, getEmojiImageUrl } from '@/lib/emojis'
 import supabase from '@/lib/supabase/client'
 import { useToast } from '@/hooks/use-toast'
@@ -269,7 +270,8 @@ const isMediaPlaceholder = (content?: string) => {
       '[Mensagem de mídia]',
       '[Documento]',
       '[Mídia]',
-    ].includes(cleaned) || cleaned.startsWith('[Documento:')
+      '[Contato]',
+    ].includes(cleaned) || cleaned.startsWith('[Documento:') || cleaned.startsWith('[Contato:')
   )
 }
 
@@ -1677,6 +1679,16 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
                     {messageAttachments.length > 0 && (
                      <div className="flex flex-col gap-2 mb-2">
                        {messageAttachments.map((att: any, idx: number) => {
+                          if (att && typeof att === 'object' && att.type === 'contact') {
+                            return (
+                              <ContactShareBubble
+                                key={idx}
+                                name={att.name || 'Contato'}
+                                phone={att.phone || null}
+                                onOpenConversation={(jid) => onOpenConversationByJid?.(jid)}
+                              />
+                            )
+                          }
                           if (att && typeof att === 'object' && att.url) {
                             if (att.type === 'audio') {
                              return (

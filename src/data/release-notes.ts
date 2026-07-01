@@ -7,6 +7,18 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.169',
+    date: '2026-07-01 19:00',
+    title: 'Contato compartilhado com cartão bonito + foto de todas as instâncias',
+    details: [
+      '👤 Contato compartilhado no chat agora aparece com nome, telefone e botões "Mensagem" e "Salvar contato" (antes só mostrava "[Contato]")',
+      '💬 Botão "Mensagem" abre a conversa direto com o número compartilhado',
+      '💾 Botão "Salvar contato" abre um popup pra confirmar o nome antes de salvar',
+      '🖼️ Corrigida a foto de perfil que faltava em algumas instâncias no seletor (WhatsApp Adm e WhatsApp Comercial)',
+      'ℹ️ Contatos compartilhados antes desta atualização continuam aparecendo como "[Contato]" — só os novos vêm com essa prévia',
+    ],
+  },
+  {
     version: '0.0.167',
     date: '2026-07-01 16:30',
     title: 'Emoji picker com arte colorida + botão de IA mais inteligente',

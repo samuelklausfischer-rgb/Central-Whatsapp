@@ -188,6 +188,43 @@ function getMediaInfo(msgObj: Record<string, unknown>): MediaInfo | null {
   return null
 }
 
+type ContactInfo = { name: string; phone: string | null }
+
+/** Extrai nome (FN) e telefone (TEL, preferindo o parâmetro waid=) de uma vcard. */
+function parseVcard(vcard: string): { name: string | null; phone: string | null } {
+  const lines = vcard.split(/\r?\n/)
+  let name: string | null = null
+  let phone: string | null = null
+  for (const line of lines) {
+    if (line.startsWith('FN:')) {
+      name = line.slice(3).trim() || null
+    }
+    if (line.startsWith('TEL')) {
+      const waidMatch = line.match(/waid=(\d+)/)
+      if (waidMatch) {
+        phone = waidMatch[1]
+      } else if (!phone) {
+        const raw = line.split(':').pop() || ''
+        const digits = raw.replace(/[^\d]/g, '')
+        if (digits) phone = digits
+      }
+    }
+  }
+  return { name, phone }
+}
+
+function getContactInfo(msgObj: Record<string, unknown>): ContactInfo | null {
+  const m = msgObj as Record<string, any>
+  if (!m.contactMessage) return null
+  const cm = m.contactMessage
+  const vcard = typeof cm.vcard === 'string' ? cm.vcard : ''
+  const parsed = vcard ? parseVcard(vcard) : { name: null, phone: null }
+  return {
+    name: cm.displayName || parsed.name || 'Contato',
+    phone: parsed.phone,
+  }
+}
+
 function extractContent(msgObj: Record<string, unknown>): string {
   if (!msgObj) return ''
   const m = msgObj as Record<string, any>
@@ -196,7 +233,8 @@ function extractContent(msgObj: Record<string, unknown>): string {
   if (m.extendedTextMessage?.text) return m.extendedTextMessage.text
   if (mediaInfo) return mediaInfo.caption || mediaInfo.label
   if (m.reactionMessage) return '[Reação]'
-  if (m.contactMessage) return '[Contato]'
+  const contactInfo = getContactInfo(m)
+  if (contactInfo) return `[Contato: ${contactInfo.name}]`
   if (m.locationMessage) return '[Localização]'
   return '[Mensagem de mídia]'
 }
@@ -432,6 +470,7 @@ function normalizeMessage(raw: unknown, deviceId: string, instanceName: string, 
   const createdAt = messageTimestampToIso(record.messageTimestamp)
   const msgObj = unwrapMessage((asRecord(record.message) || {}) as Record<string, unknown>)
   const mediaInfo = getMediaInfo(msgObj)
+  const sharedContactInfo = getContactInfo(msgObj)
   const content = extractContent(msgObj)
   const shouldFetchMedia = job.media_mode === 'hybrid' && mediaInfo && isRecent(createdAt, job.recent_media_days)
   const senderName = stringFrom(record.pushName) || ''
@@ -455,6 +494,7 @@ function normalizeMessage(raw: unknown, deviceId: string, instanceName: string, 
       origin: 'webhook',
       external_id: externalId,
       created_at: createdAt,
+      ...(sharedContactInfo ? { attachments: [{ type: 'contact', name: sharedContactInfo.name, phone: sharedContactInfo.phone }] } : {}),
     } as JsonRecord,
   }
 }

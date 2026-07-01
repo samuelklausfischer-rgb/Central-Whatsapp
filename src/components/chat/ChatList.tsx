@@ -97,8 +97,10 @@ function previewLabel(content: string | null | undefined): string {
     '[Mensagem de mídia]': 'Mídia',
     '[Documento]': 'Documento',
     '[Mídia]': 'Mídia',
+    '[Contato]': 'Contato',
   }
   if (cleaned.startsWith('[Documento:')) return 'Documento'
+  if (cleaned.startsWith('[Contato:')) return 'Contato'
   return labels[cleaned] || content
 }
 

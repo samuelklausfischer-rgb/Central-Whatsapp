@@ -246,6 +246,43 @@ function getMediaInfo(msgObj: Record<string, unknown>): MediaInfo | null {
   return null
 }
 
+type ContactInfo = { name: string; phone: string | null }
+
+/** Extrai nome (FN) e telefone (TEL, preferindo o parâmetro waid=) de uma vcard. */
+function parseVcard(vcard: string): { name: string | null; phone: string | null } {
+  const lines = vcard.split(/\r?\n/)
+  let name: string | null = null
+  let phone: string | null = null
+  for (const line of lines) {
+    if (line.startsWith('FN:')) {
+      name = line.slice(3).trim() || null
+    }
+    if (line.startsWith('TEL')) {
+      const waidMatch = line.match(/waid=(\d+)/)
+      if (waidMatch) {
+        phone = waidMatch[1]
+      } else if (!phone) {
+        const raw = line.split(':').pop() || ''
+        const digits = raw.replace(/[^\d]/g, '')
+        if (digits) phone = digits
+      }
+    }
+  }
+  return { name, phone }
+}
+
+function getContactInfo(msgObj: Record<string, unknown>): ContactInfo | null {
+  const m = msgObj as Record<string, any>
+  if (!m.contactMessage) return null
+  const cm = m.contactMessage
+  const vcard = typeof cm.vcard === 'string' ? cm.vcard : ''
+  const parsed = vcard ? parseVcard(vcard) : { name: null, phone: null }
+  return {
+    name: cm.displayName || parsed.name || 'Contato',
+    phone: parsed.phone,
+  }
+}
+
 function findBase64(value: unknown, depth = 0): string | null {
   if (depth > 5 || value == null) return null
   if (typeof value === 'string') {
@@ -544,6 +581,7 @@ Deno.serve(async (req: Request) => {
   // ---- End reaction handling ----
 
   const mediaInfo = getMediaInfo(msgObj)
+  const sharedContactInfo = getContactInfo(msgObj)
   const content = extractContent(msgObj)
   const nameToUse = pushName || ''
   let contactName = (!isFromMe && !isGroup) ? nameToUse : ''
@@ -590,6 +628,8 @@ Deno.serve(async (req: Request) => {
       const nextAttachments =
         mediaInfo && currentAttachments.length === 0
           ? [await fetchMediaAttachment(body.instance, messageData, mediaInfo)].filter(Boolean)
+          : sharedContactInfo && currentAttachments.length === 0
+          ? [{ type: 'contact', name: sharedContactInfo.name, phone: sharedContactInfo.phone }]
           : []
       const patchData: Record<string, unknown> = {}
 
@@ -624,7 +664,10 @@ Deno.serve(async (req: Request) => {
   }
 
   const mediaAttachment = mediaInfo ? await fetchMediaAttachment(body.instance, messageData, mediaInfo) : null
-  const attachments = mediaAttachment ? [mediaAttachment] : undefined
+  const contactAttachment = sharedContactInfo
+    ? { type: 'contact', name: sharedContactInfo.name, phone: sharedContactInfo.phone }
+    : null
+  const attachments = mediaAttachment ? [mediaAttachment] : contactAttachment ? [contactAttachment] : undefined
 
   if (mediaInfo && !mediaAttachment) {
     mediaWarn('media_attachment_null_before_insert', { messageId: externalId, mediaType: mediaInfo.type })
@@ -682,7 +725,8 @@ function extractContent(msgObj: Record<string, unknown>): string {
   if (m.extendedTextMessage?.text) return m.extendedTextMessage.text
   if (mediaInfo) return mediaInfo.caption || mediaInfo.label
   if (m.reactionMessage) return '[Reação]'
-  if (m.contactMessage) return '[Contato]'
+  const contactInfo = getContactInfo(m)
+  if (contactInfo) return `[Contato: ${contactInfo.name}]`
   if (m.locationMessage) return '[Localização]'
   return '[Mensagem de mídia]'
 }
