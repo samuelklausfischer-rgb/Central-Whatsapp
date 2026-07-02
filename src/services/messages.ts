@@ -27,16 +27,19 @@ export const getConversationMessages = async (
   remoteSender: string,
   limit = 500
 ): Promise<Message[]> => {
+  // Postgrest aplica ORDER BY antes do LIMIT: para pegar as mensagens mais
+  // RECENTES (e não as mais antigas) é preciso ordenar desc, limitar, e só
+  // então reverter para ordem cronológica — mesmo padrão do getMessages().
   const { data, error } = await supabase
     .from('messages')
     .select('*')
     .eq('device_id', deviceId)
     .eq('remote_sender', remoteSender)
     .is('deleted_at', null)
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: false })
     .limit(limit)
   if (error) throw new Error(error.message)
-  return (data as Message[]) || []
+  return ((data as Message[]) || []).reverse()
 }
 
 export const getMessages = async (deviceId: string) => {
