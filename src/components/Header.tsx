@@ -19,6 +19,7 @@ import {
   AlertCircle,
   Bell,
   BarChart3,
+  Percent,
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { useState, useRef, useEffect } from 'react'
@@ -58,6 +59,13 @@ const prnItem: FerramentaItem = {
   url: '/ferramentas/analise-prn',
 }
 
+const rateioItem: FerramentaItem = {
+  title: 'Rateio Mobilemed',
+  description: 'Rateio PRN/MedImagem',
+  icon: Percent,
+  url: '/ferramentas/rateio-mobilemed',
+}
+
 function FerramentasMenu() {
   const [open, setOpen] = useState(false)
   const [notifOpen, setNotifOpen] = useState(false)
@@ -65,7 +73,7 @@ function FerramentasMenu() {
   const navigate = useNavigate()
   const { user } = useAuth()
 
-  const items = user?.is_admin ? [...ferramentas, prnItem] : ferramentas
+  const items = user?.is_admin ? [...ferramentas, prnItem, rateioItem] : ferramentas
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {

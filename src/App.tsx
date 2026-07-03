@@ -29,6 +29,7 @@ const AiAssistantSettings = lazy(() => import('./pages/settings/AiAssistantSetti
 const InstancesSettings = lazy(() => import('./pages/settings/InstancesSettings'))
 const AdminPage = lazy(() => import('./pages/admin/AdminPage'))
 const AnalisePrn = lazy(() => import('./pages/tools/AnalisePrn'))
+const RateioMobilemed = lazy(() => import('./pages/tools/RateioMobilemed'))
 
 const ProtectedRoute = () => {
   const { isAuthenticated, loading } = useAuth()
@@ -70,6 +71,7 @@ const App = () => (
                 <Route element={<AdminRoute />}>
                   <Route path="/admin" element={<AdminPage />} />
                   <Route path="/ferramentas/analise-prn" element={<AnalisePrn />} />
+                  <Route path="/ferramentas/rateio-mobilemed" element={<RateioMobilemed />} />
                 </Route>
                 <Route path="/settings" element={<SettingsLayout />}>
                   <Route path="devices" element={<Devices />} />
