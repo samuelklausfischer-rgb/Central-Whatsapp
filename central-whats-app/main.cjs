@@ -6,7 +6,7 @@ const path = require('path')
 const isDev = process.env.NODE_ENV === 'development'
 
 autoUpdater.logger = log
-autoUpdater.logger.transports.file.level = 'info'
+autoUpdater.logger.transports.file.level = 'warn'
 autoUpdater.autoDownload = true
 autoUpdater.autoInstallOnAppQuit = false
 

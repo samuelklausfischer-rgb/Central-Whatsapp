@@ -230,8 +230,18 @@ export default function ChatHub() {
       sessionStorage.setItem('activeDeviceId', selectedDeviceId)
       const deviceChanged = prevDeviceIdRef.current !== null && prevDeviceIdRef.current !== selectedDeviceId
       prevDeviceIdRef.current = selectedDeviceId
-      getMessages(selectedDeviceId).then(setMessages)
-      getConversationSummaries(selectedDeviceId).then(setConversationSummaries)
+      getConversationSummaries(selectedDeviceId)
+        .then((summaries) => {
+          setConversationSummaries(summaries)
+          if (summaries.length === 0) {
+            getMessages(selectedDeviceId).then(setMessages).catch(() => setMessages([]))
+          } else {
+            setMessages([])
+          }
+        })
+        .catch(() => {
+          getMessages(selectedDeviceId).then(setMessages).catch(() => setMessages([]))
+        })
       getDeviceAssignments(selectedDeviceId).then(setAssignments)
       if (deviceChanged) {
         setSelectedContact(null)
@@ -438,6 +448,7 @@ export default function ChatHub() {
         return next
       })
     }
+    if (selectedDeviceId) debouncedRefreshSummaries(selectedDeviceId)
   })
 
   // Carregar mensagens da conversa selecionada
@@ -675,6 +686,10 @@ export default function ChatHub() {
     }
   }, [conversations, selectedContact, conversationMessages])
 
+  const currentAssignment = useMemo(() => {
+    return selectedContact ? assignments.get(selectedContact) ?? null : null
+  }, [assignments, selectedContact])
+
   const containerRef = useRef<HTMLDivElement>(null)
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT)
   const sidebarWidthRef = useRef(sidebarWidth)
@@ -792,6 +807,7 @@ export default function ChatHub() {
           device={selectedDevice}
           contact={selectedContact}
           conversation={currentConversation}
+          assignment={currentAssignment}
           contacts={contacts}
           onBack={handleCloseConversation}
           isMobile={isMobile}

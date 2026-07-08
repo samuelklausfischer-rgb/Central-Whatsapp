@@ -84,7 +84,7 @@ import { createNote, getNotesByContact, deleteNote } from '@/services/notes'
 import type { Note, ConversationAssignment } from '@/lib/supabase/types'
 import { ContactNoteIcon } from '@/components/ui/ContactNoteIcon'
 import { TeamAssignDialog } from '@/components/chat/TeamAssignDialog'
-import { markConversationReadGlobal, getConversationViewers, getConversationAssignment, getConversationRecentViewers, type ConversationViewer, type ConversationRecentViewer } from '@/services/conversation_states'
+import { markConversationRead, markConversationReadGlobal, getConversationViewers, getConversationAssignment, getConversationRecentViewers, type ConversationViewer, type ConversationRecentViewer } from '@/services/conversation_states'
 import { buildContactIndex, resolveContactDisplayName, findContactByIdentifier, isGroupJid, normalizeToDigits } from '@/lib/contacts/normalize'
 import { isPdfFile, isExcelFile } from '@/lib/file-type'
 import { DocumentBubble } from '@/components/chat/DocumentBubble'
@@ -405,7 +405,7 @@ const getDateLabel = (value: string) => {
   return format(date, 'dd/MM/yyyy')
 }
 
-export function ChatWindow({ device, contact, conversation, contacts, onBack, isMobile, sheetOpen, onSheetOpenChange, onStartConversation, onOpenConversationByJid, onOptimisticSend, onOptimisticConfirm, onOptimisticFail }: any) {
+export function ChatWindow({ device, contact, conversation, assignment: assignmentProp, contacts, onBack, isMobile, sheetOpen, onSheetOpenChange, onStartConversation, onOpenConversationByJid, onOptimisticSend, onOptimisticConfirm, onOptimisticFail }: any) {
   const { user } = useAuth()
   const { toast } = useToast()
 
@@ -546,16 +546,11 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
     fetchAiPrompts()
   })
 
-  useRealtime(
-    'conversation_assignments',
-    () => {
-      if (device && contact) {
-        getConversationAssignment(device.id, contact).then(setAssignment)
-      }
-    },
-    true,
-    `device_id=eq.${device?.id}`,
-  )
+  // Reage à assinatura conversation_assignments já mantida em ChatHub.tsx (via prop)
+  // em vez de abrir um segundo canal Realtime pra mesma tabela.
+  useEffect(() => {
+    if (assignmentProp !== undefined) setAssignment(assignmentProp ?? null)
+  }, [assignmentProp])
 
   useEffect(() => {
     const el = scrollRef.current
@@ -594,6 +589,7 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
 
   useEffect(() => {
     if (conversation && conversation.unread_count > 0 && device && contact) {
+      markConversationRead(device.id, contact)
       markConversationReadGlobal(device.id, contact)
     }
   }, [contact, conversation?.unread_count, device])
@@ -615,7 +611,10 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
     let cancelled = false
 
     const init = async () => {
-      await markConversationReadGlobal(device.id, contact)
+      await Promise.all([
+        markConversationRead(device.id, contact),
+        markConversationReadGlobal(device.id, contact),
+      ])
       if (cancelled) return
       const [asgn, viewers] = await Promise.all([
         getConversationAssignment(device.id, contact),
