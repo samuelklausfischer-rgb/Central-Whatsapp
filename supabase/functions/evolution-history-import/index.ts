@@ -228,6 +228,31 @@ function getContactInfo(msgObj: Record<string, unknown>): ContactInfo | null {
   }
 }
 
+type ListRow = { rowId: string; title: string; description?: string }
+type ListSection = { title?: string; rows: ListRow[] }
+type ListInfo = { title: string; description: string; buttonText: string; sections: ListSection[] }
+
+/** Extrai título/descrição/opções de uma mensagem de lista interativa do WhatsApp. */
+function getListInfo(msgObj: Record<string, unknown>): ListInfo | null {
+  const m = msgObj as Record<string, any>
+  const lm = m.listMessage
+  if (!lm) return null
+  const sections: ListSection[] = Array.isArray(lm.sections)
+    ? lm.sections.map((s: any) => ({
+        title: s.title || undefined,
+        rows: Array.isArray(s.rows)
+          ? s.rows.map((r: any) => ({ rowId: r.rowId || '', title: r.title || '', description: r.description || undefined }))
+          : [],
+      }))
+    : []
+  return {
+    title: lm.title || '',
+    description: lm.description || '',
+    buttonText: lm.buttonText || 'Ver opções',
+    sections,
+  }
+}
+
 function extractContent(msgObj: Record<string, unknown>): string {
   if (!msgObj) return ''
   const m = msgObj as Record<string, any>
@@ -238,6 +263,8 @@ function extractContent(msgObj: Record<string, unknown>): string {
   if (m.reactionMessage) return '[Reação]'
   const contactInfo = getContactInfo(m)
   if (contactInfo) return `[Contato: ${contactInfo.name}]`
+  const listInfo = getListInfo(m)
+  if (listInfo) return `[Lista: ${listInfo.title || 'Menu'}]`
   if (m.locationMessage) return '[Localização]'
   return '[Mensagem de mídia]'
 }
@@ -474,6 +501,7 @@ function normalizeMessage(raw: unknown, deviceId: string, instanceName: string, 
   const msgObj = unwrapMessage((asRecord(record.message) || {}) as Record<string, unknown>)
   const mediaInfo = getMediaInfo(msgObj)
   const sharedContactInfo = getContactInfo(msgObj)
+  const listInfo = getListInfo(msgObj)
   const content = extractContent(msgObj)
   const shouldFetchMedia = job.media_mode === 'hybrid' && mediaInfo && isRecent(createdAt, job.recent_media_days)
   const senderName = stringFrom(record.pushName) || ''
@@ -497,7 +525,11 @@ function normalizeMessage(raw: unknown, deviceId: string, instanceName: string, 
       origin: 'webhook',
       external_id: externalId,
       created_at: createdAt,
-      ...(sharedContactInfo ? { attachments: [{ type: 'contact', name: sharedContactInfo.name, phone: sharedContactInfo.phone }] } : {}),
+      ...(sharedContactInfo
+        ? { attachments: [{ type: 'contact', name: sharedContactInfo.name, phone: sharedContactInfo.phone }] }
+        : listInfo
+        ? { attachments: [{ type: 'list', title: listInfo.title, description: listInfo.description, buttonText: listInfo.buttonText, sections: listInfo.sections }] }
+        : {}),
     } as JsonRecord,
   }
 }

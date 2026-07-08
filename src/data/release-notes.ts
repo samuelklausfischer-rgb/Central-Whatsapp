@@ -7,6 +7,16 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.175',
+    date: '2026-07-08 15:20',
+    title: 'Listas do WhatsApp agora aparecem no chat',
+    details: [
+      '📋 Mensagens de lista/menu interativo (comum em atendimentos automáticos) agora aparecem com título, descrição e opções — antes só mostrava "[Mensagem de mídia]"',
+      '👉 Clique em "Ver opções" para abrir a lista e escolher uma opção — envia o texto escolhido como mensagem normal na conversa',
+      'ℹ️ Listas recebidas antes desta atualização continuam aparecendo como antes — só as novas vêm com essa prévia',
+    ],
+  },
+  {
     version: '0.0.174',
     date: '2026-07-08 12:43',
     title: 'Correção: notificação de não lida presa + app mais leve',

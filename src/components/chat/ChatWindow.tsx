@@ -89,6 +89,7 @@ import { buildContactIndex, resolveContactDisplayName, findContactByIdentifier, 
 import { isPdfFile, isExcelFile } from '@/lib/file-type'
 import { DocumentBubble } from '@/components/chat/DocumentBubble'
 import { ContactShareBubble } from '@/components/chat/ContactShareBubble'
+import { ListMessageBubble } from '@/components/chat/ListMessageBubble'
 import { TOP_EMOJIS, getEmojiImageUrl } from '@/lib/emojis'
 import supabase from '@/lib/supabase/client'
 import { useToast } from '@/hooks/use-toast'
@@ -271,7 +272,10 @@ const isMediaPlaceholder = (content?: string) => {
       '[Documento]',
       '[Mídia]',
       '[Contato]',
-    ].includes(cleaned) || cleaned.startsWith('[Documento:') || cleaned.startsWith('[Contato:')
+    ].includes(cleaned) ||
+    cleaned.startsWith('[Documento:') ||
+    cleaned.startsWith('[Contato:') ||
+    cleaned.startsWith('[Lista:')
   )
 }
 
@@ -774,6 +778,50 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       const pos = start + emoji.length
       textarea.setSelectionRange(pos, pos)
     })
+  }
+
+  // Envia o título da opção escolhida numa lista interativa como uma mensagem de
+  // texto normal, citando a lista original — a Evolution API não permite montar
+  // uma resposta nativa de seleção (listResponseMessage é gerado pelo próprio
+  // celular ao tocar na opção).
+  const sendListOptionAsText = async (optionTitle: string, sourceMsg: any) => {
+    if (!device || !user || !contact) return
+    const signature = device?.signature || user?.signature || ''
+    const displayContent = signature ? `${signature}\n\n${optionTitle}` : optionTitle
+    const replySnapshot = { content: sourceMsg.content, sender_name: sourceMsg.sender_name, id: sourceMsg.id }
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const tempMsg = {
+      id: tempId,
+      content: displayContent,
+      device_id: device.id,
+      remote_sender: contact,
+      sender_id: user.id,
+      direction: 'outbound',
+      created_at: new Date().toISOString(),
+      is_read: true,
+      status: 'sending',
+      reply_to_id: sourceMsg.id,
+      reply_to_snapshot: replySnapshot,
+      attachments: [],
+    }
+    onOptimisticSend?.(tempMsg)
+    try {
+      const res: any = await sendMessage({
+        content: optionTitle,
+        device_id: device.id,
+        sender_id: user.id,
+        is_read: true,
+        remote_sender: contact,
+        reply_to_id: sourceMsg.id,
+      })
+      onOptimisticConfirm?.(tempId, res?.message)
+    } catch (err) {
+      onOptimisticFail?.(tempId)
+      toast({
+        title: err instanceof Error ? err.message : 'Erro ao enviar mensagem',
+        variant: 'destructive',
+      })
+    }
   }
 
   const handleSend = async (e: React.FormEvent) => {
@@ -1718,6 +1766,18 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                                 name={att.name || 'Contato'}
                                 phone={att.phone || null}
                                 onOpenConversation={(jid) => onOpenConversationByJid?.(jid)}
+                              />
+                            )
+                          }
+                          if (att && typeof att === 'object' && att.type === 'list') {
+                            return (
+                              <ListMessageBubble
+                                key={idx}
+                                title={att.title || ''}
+                                description={att.description || ''}
+                                buttonText={att.buttonText || 'Ver opções'}
+                                sections={Array.isArray(att.sections) ? att.sections : []}
+                                onSelectOption={(optionTitle) => sendListOptionAsText(optionTitle, msg)}
                               />
                             )
                           }
