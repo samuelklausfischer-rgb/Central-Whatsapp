@@ -7,6 +7,42 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.173',
+    date: '2026-07-08 10:37',
+    title: 'Correção: chat voltava sozinho pro início da conversa',
+    details: [
+      '📜 Corrigido: ao rolar pra cima pra ler mensagens antigas, o chat não pula mais pro final sozinho',
+      '⚡ A atualização automática da conversa e mensagens novas chegando não interrompem mais sua leitura',
+    ],
+  },
+  {
+    version: '0.0.172',
+    date: '2026-07-08 09:43',
+    title: 'Correção: botões do contato compartilhado não funcionavam com contatos de iPhone',
+    details: [
+      '📇 Contatos compartilhados de celulares iPhone agora vêm com o telefone certinho — os botões "Mensagem" e "Salvar contato" voltam a funcionar',
+      'ℹ️ Contatos compartilhados antes desta atualização continuam sem telefone — só os novos são corrigidos',
+    ],
+  },
+  {
+    version: '0.0.171',
+    date: '2026-07-03 12:25',
+    title: 'Nova ferramenta: Rateio Mobilemed',
+    details: [
+      '➗ Nova ferramenta "Rateio Mobilemed" no menu Ferramentas (admin) — suba o Bruto.xlsx e gere o rateio por unidade/empresa',
+      '📊 Mostra os totais, taxas fixas detalhadas, pendências e histórico das execuções anteriores',
+    ],
+  },
+  {
+    version: '0.0.170',
+    date: '2026-07-02 10:40',
+    title: 'Correção: mensagens recentes sumiam em conversas longas',
+    details: [
+      '💬 Corrigido: em conversas com muitas mensagens, as mais recentes às vezes não apareciam no chat (mesmo já tendo chegado)',
+      '✅ Agora o chat sempre carrega as mensagens mais atuais, não importa o tamanho do histórico',
+    ],
+  },
+  {
     version: '0.0.169',
     date: '2026-07-01 19:00',
     title: 'Contato compartilhado com cartão bonito + foto de todas as instâncias',
