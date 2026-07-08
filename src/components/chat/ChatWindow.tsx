@@ -419,6 +419,8 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
   const [isNicknameOpen, setIsNicknameOpen] = useState(false)
   const [nicknameInput, setNicknameInput] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
+  const isNearBottomRef = useRef(true)
+  const prevConvKeyRef = useRef<string | null>(null)
 
   const [isNoteOpen, setIsNoteOpen] = useState(false)
   const [noteTitle, setNoteTitle] = useState('')
@@ -556,8 +558,39 @@ export function ChatWindow({ device, contact, conversation, contacts, onBack, is
   )
 
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-  }, [messages])
+    const el = scrollRef.current
+    if (!el) return
+    const convKey = `${device?.id ?? ''}:${contact ?? ''}`
+    const conversationChanged = prevConvKeyRef.current !== convKey
+    prevConvKeyRef.current = convKey
+
+    if (conversationChanged) {
+      // Conversa nova/trocada: sempre abre no fundo e reseta o estado "grudado".
+      isNearBottomRef.current = true
+      el.scrollTop = el.scrollHeight
+      return
+    }
+
+    // Mesma conversa, array de mensagens mudou (poll de 25s, realtime, envio
+    // otimista): só rola pro fundo se o usuário já estava perto do fundo —
+    // evita jogar quem está lendo histórico de volta pro fim da conversa.
+    if (isNearBottomRef.current) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [messages, device?.id, contact])
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const NEAR_BOTTOM_THRESHOLD_PX = 120
+    const handleScroll = () => {
+      const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+      isNearBottomRef.current = distanceFromBottom <= NEAR_BOTTOM_THRESHOLD_PX
+    }
+    handleScroll()
+    el.addEventListener('scroll', handleScroll, { passive: true })
+    return () => el.removeEventListener('scroll', handleScroll)
+  }, [device?.id, contact])
 
   useEffect(() => {
     if (conversation && conversation.unread_count > 0 && device && contact) {
