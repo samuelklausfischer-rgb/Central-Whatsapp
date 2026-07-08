@@ -7,6 +7,15 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.174',
+    date: '2026-07-08 12:43',
+    title: 'Correção: notificação de não lida presa + app mais leve',
+    details: [
+      '🔔 Corrigido: abrir uma conversa agora limpa o aviso de "não lida" na hora, sem precisar esperar',
+      '⚡ Ajustes internos para reduzir o consumo de memória e processador do app',
+    ],
+  },
+  {
     version: '0.0.173',
     date: '2026-07-08 10:37',
     title: 'Correção: chat voltava sozinho pro início da conversa',
