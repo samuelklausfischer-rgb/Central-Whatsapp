@@ -253,11 +253,14 @@ function parseVcard(vcard: string): { name: string | null; phone: string | null 
   const lines = vcard.split(/\r?\n/)
   let name: string | null = null
   let phone: string | null = null
+  // Aceita "TEL" com prefixo opcional de grupo vCard (ex.: "item1.TEL"), como usado
+  // por vCards exportados do iPhone/Apple Contacts (RFC 6350 grouped properties).
+  const telLineRe = /^(?:[A-Za-z0-9-]+\.)?TEL/i
   for (const line of lines) {
     if (line.startsWith('FN:')) {
       name = line.slice(3).trim() || null
     }
-    if (line.startsWith('TEL')) {
+    if (telLineRe.test(line)) {
       const waidMatch = line.match(/waid=(\d+)/)
       if (waidMatch) {
         phone = waidMatch[1]

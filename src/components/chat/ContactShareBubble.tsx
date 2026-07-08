@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { User, MessageCircle, UserPlus } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { updateContactByJid } from '@/services/contacts'
 import { useToast } from '@/hooks/use-toast'
+import { normalizeToDigits } from '@/lib/contacts/normalize'
 
 /**
  * Balão de contato compartilhado (vCard) no chat, estilo WhatsApp: avatar
@@ -26,11 +27,20 @@ export function ContactShareBubble({
   const [saveNameInput, setSaveNameInput] = useState(name)
   const [saving, setSaving] = useState(false)
 
+  // O telefone de mensagens antigas (parseVcard sem o fix de "itemN.TEL") ou do
+  // fallback sem waid= pode não vir no formato de JID (DDI 55 + DDD + número) que
+  // o resto do app espera — normaliza aqui, no único ponto de uso deste dado.
+  const normalizedPhone = useMemo(() => {
+    if (!phone) return null
+    const digits = normalizeToDigits(phone)
+    return digits.length >= 10 ? digits : null
+  }, [phone])
+
   const handleSave = async () => {
-    if (!phone) return
+    if (!normalizedPhone) return
     setSaving(true)
     try {
-      await updateContactByJid(phone, { name: saveNameInput.trim() || name })
+      await updateContactByJid(normalizedPhone, { name: saveNameInput.trim() || name })
       toast({ title: 'Contato salvo' })
       setIsSaveOpen(false)
     } catch {
@@ -57,8 +67,8 @@ export function ContactShareBubble({
         <div className="flex border-t border-chat-border">
           <button
             type="button"
-            disabled={!phone}
-            onClick={() => phone && onOpenConversation(phone)}
+            disabled={!normalizedPhone}
+            onClick={() => normalizedPhone && onOpenConversation(normalizedPhone)}
             className="flex flex-1 items-center justify-center gap-1.5 py-2 text-sm font-medium text-blue-400 hover:bg-chat-hover transition-colors disabled:opacity-40"
           >
             <MessageCircle className="h-4 w-4" /> Mensagem
@@ -66,7 +76,7 @@ export function ContactShareBubble({
           <div className="w-px bg-chat-border" />
           <button
             type="button"
-            disabled={!phone}
+            disabled={!normalizedPhone}
             onClick={() => {
               setSaveNameInput(name)
               setIsSaveOpen(true)
