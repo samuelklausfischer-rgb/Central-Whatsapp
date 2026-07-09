@@ -1,12 +1,20 @@
-import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist'
-// eslint-disable-next-line import/no-unresolved
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-
-GlobalWorkerOptions.workerSrc = pdfWorkerUrl
-
 export type PdfPreview = { thumbnail: string | null; pageCount: number | null }
 
 const cache = new Map<string, Promise<PdfPreview>>()
+let workerConfigured = false
+
+// pdfjs-dist é carregado sob demanda — evita empacotar/inicializar a lib
+// (e seu worker) sempre que uma conversa abre, mesmo sem anexo de PDF.
+async function loadPdfjs() {
+  const pdfjs = await import('pdfjs-dist')
+  if (!workerConfigured) {
+    // eslint-disable-next-line import/no-unresolved
+    const pdfWorkerUrl = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default
+    pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
+    workerConfigured = true
+  }
+  return pdfjs
+}
 
 /** Renderiza a primeira página do PDF como imagem (data URL) + conta de páginas. Cacheado por URL. */
 export function getPdfPreview(url: string, maxWidth = 260): Promise<PdfPreview> {
@@ -19,6 +27,7 @@ export function getPdfPreview(url: string, maxWidth = 260): Promise<PdfPreview> 
 
 async function renderPdfPreview(url: string, maxWidth: number): Promise<PdfPreview> {
   try {
+    const { getDocument } = await loadPdfjs()
     const pdf = await getDocument({ url }).promise
     const pageCount = pdf.numPages
     const page = await pdf.getPage(1)

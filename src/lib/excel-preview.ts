@@ -1,5 +1,3 @@
-import * as XLSX from 'xlsx'
-
 export type ExcelPreview = { rows: unknown[][]; sheetName: string | null } | null
 
 const cache = new Map<string, Promise<ExcelPreview>>()
@@ -15,7 +13,9 @@ export function getExcelPreview(url: string, maxRows = 6, maxCols = 6): Promise<
 
 async function loadExcelPreview(url: string, maxRows: number, maxCols: number): Promise<ExcelPreview> {
   try {
-    const res = await fetch(url)
+    // xlsx é carregado sob demanda — evita empacotar/parsear a lib inteira
+    // sempre que uma conversa abre, mesmo sem anexo de planilha.
+    const [XLSX, res] = await Promise.all([import('xlsx'), fetch(url)])
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const buffer = await res.arrayBuffer()
     const wb = XLSX.read(buffer, { type: 'array' })

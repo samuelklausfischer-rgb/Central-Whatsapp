@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Download } from 'lucide-react'
 import { downloadFile } from '@/lib/download'
 import { getFileTypeMeta, isPdfFile, isExcelFile } from '@/lib/file-type'
@@ -32,7 +32,31 @@ export function DocumentBubble({
   const [excelPreview, setExcelPreview] = useState<ExcelPreview>(null)
   const [sizeLabel, setSizeLabel] = useState<string | null>(null)
 
+  // Só gera a prévia (canvas de PDF / parse de Excel) quando o balão entra em
+  // viewport — evita rasterizar/parsear todo anexo da conversa de uma vez no
+  // mount, principalmente em conversas longas com muitos documentos.
+  const [isNearViewport, setIsNearViewport] = useState(false)
+  const containerRef = useRef<HTMLButtonElement>(null)
+
   useEffect(() => {
+    if (isNearViewport) return
+    const el = containerRef.current
+    if (!el) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setIsNearViewport(true)
+          observer.disconnect()
+        }
+      },
+      { rootMargin: '300px' },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [isNearViewport])
+
+  useEffect(() => {
+    if (!isNearViewport) return
     let cancelled = false
     if (isPdf) {
       getPdfPreview(url).then((preview) => {
@@ -54,7 +78,7 @@ export function DocumentBubble({
     return () => {
       cancelled = true
     }
-  }, [url, isPdf, isExcel])
+  }, [url, isPdf, isExcel, isNearViewport])
 
   const metaParts = [meta.label]
   if (isPdf && pageCount) metaParts.push(`${pageCount} página${pageCount > 1 ? 's' : ''}`)
@@ -63,6 +87,7 @@ export function DocumentBubble({
 
   return (
     <button
+      ref={containerRef}
       type="button"
       onClick={() => (onOpenPreview ? onOpenPreview() : downloadFile(url, name))}
       className="block w-full max-w-[280px] overflow-hidden rounded-xl border border-black/10 bg-white text-left shadow-sm transition-opacity hover:opacity-90"

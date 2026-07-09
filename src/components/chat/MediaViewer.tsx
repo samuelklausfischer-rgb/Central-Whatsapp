@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Download, ZoomIn, ZoomOut, RotateCcw, Loader2 } from 'lucide-react'
-import * as XLSX from 'xlsx'
 import { downloadFile } from '@/lib/download'
 
 export type ViewerMedia = { url: string; type: 'image' | 'video' | 'pdf' | 'excel'; name?: string }
@@ -61,12 +60,12 @@ export function MediaViewer({ media, onClose }: { media: ViewerMedia | null; onC
     let cancelled = false
     setExcelLoading(true)
     setExcelError(null)
-    fetch(url)
-      .then((res) => {
+    Promise.all([import('xlsx'), fetch(url)])
+      .then(([XLSX, res]) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        return res.arrayBuffer()
+        return res.arrayBuffer().then((buffer) => [XLSX, buffer] as const)
       })
-      .then((buffer) => {
+      .then(([XLSX, buffer]) => {
         if (cancelled) return
         const wb = XLSX.read(buffer, { type: 'array' })
         const sheets: Record<string, unknown[][]> = {}
