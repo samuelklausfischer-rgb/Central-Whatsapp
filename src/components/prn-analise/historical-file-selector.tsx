@@ -4,6 +4,16 @@ import { FileSpreadsheet, Loader2, Trash2, UploadCloud, CheckCircle2 } from 'luc
 
 import { Button } from '@/components/ui/button'
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   type HistoryFileReference,
   listHistoryFiles,
   uploadHistoryFile,
@@ -53,6 +63,8 @@ export function HistoricalFileSelector({
   const [files, setFiles] = useState<HistoryFileReference[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isUploading, setIsUploading] = useState(false)
+  const [fileToDelete, setFileToDelete] = useState<HistoryFileReference | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
   const selection = useMemo(() => normalizeSelection(value), [value])
 
   const fetchFiles = async () => {
@@ -138,18 +150,21 @@ export function HistoricalFileSelector({
     }
   }
 
-  const handleDelete = async (fileName: string, e: MouseEvent) => {
+  const handleDeleteClick = (file: HistoryFileReference, e: MouseEvent) => {
     e.stopPropagation()
-    const confirm = window.confirm('Tem certeza que deseja excluir este arquivo histórico do cofre?')
-    if (!confirm) return
+    setFileToDelete(file)
+  }
 
+  const confirmDelete = async () => {
+    if (!fileToDelete) return
+    setIsDeleting(true)
     try {
-      await deleteHistoryFile(fileName)
+      await deleteHistoryFile(fileToDelete.name)
       toast({ title: 'Sucesso', description: 'Arquivo excluído do cofre.' })
 
       onChange({
         ...selection,
-        saved: selection.saved.filter((selected) => selected.name !== fileName),
+        saved: selection.saved.filter((selected) => selected.name !== fileToDelete.name),
       })
 
       await fetchFiles()
@@ -159,6 +174,9 @@ export function HistoricalFileSelector({
         description: error.message || 'Falha ao excluir o arquivo.',
         variant: 'destructive',
       })
+    } finally {
+      setIsDeleting(false)
+      setFileToDelete(null)
     }
   }
 
@@ -200,6 +218,7 @@ export function HistoricalFileSelector({
   }
 
   return (
+    <>
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
@@ -261,8 +280,8 @@ export function HistoricalFileSelector({
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={(e) => handleDelete(file.name, e)}
-                className="h-8 w-8 shrink-0 p-0 text-gray-300 hover:bg-red-50 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                onClick={(e) => handleDeleteClick(file, e)}
+                className="h-8 w-8 shrink-0 p-0 text-gray-300 hover:bg-red-50 hover:text-red-500 transition-all"
               >
                 <Trash2 className="h-4 w-4" />
               </Button>
@@ -346,5 +365,33 @@ export function HistoricalFileSelector({
         </label>
       </div>
     </div>
+
+    <AlertDialog open={!!fileToDelete} onOpenChange={(open) => !open && setFileToDelete(null)}>
+      <AlertDialogContent className="bg-white border-gray-200 text-gray-900">
+        <AlertDialogHeader>
+          <AlertDialogTitle className="text-xl font-bold">Excluir arquivo do cofre</AlertDialogTitle>
+          <AlertDialogDescription className="text-gray-500">
+            Você realmente deseja excluir "{fileToDelete?.originalFilename}" do cofre de históricos?
+            Esta ação não pode ser desfeita.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="bg-white border-gray-200 hover:bg-gray-50 text-gray-700">
+            Não
+          </AlertDialogCancel>
+          <AlertDialogAction
+            onClick={(e) => {
+              e.preventDefault()
+              confirmDelete()
+            }}
+            disabled={isDeleting}
+            className="bg-red-600 text-white hover:bg-red-700"
+          >
+            {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Sim, excluir'}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   )
 }

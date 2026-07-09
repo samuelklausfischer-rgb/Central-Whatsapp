@@ -7,6 +7,15 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.176',
+    date: '2026-07-09 11:49',
+    title: 'Excluir itens do histórico no Rateio MobileMed e na Análise PRN',
+    details: [
+      '🗑️ Rateio MobileMed: agora dá pra excluir uma análise do histórico direto pela lista, com confirmação antes de apagar',
+      '🗑️ Análise PRN: o botão de excluir arquivo do "Arquivo Histórico" ficou sempre visível e passou a mostrar um popup de confirmação (antes usava a caixa padrão do navegador)',
+    ],
+  },
+  {
     version: '0.0.175',
     date: '2026-07-08 15:20',
     title: 'Listas do WhatsApp agora aparecem no chat',

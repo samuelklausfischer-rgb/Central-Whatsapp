@@ -94,3 +94,8 @@ export async function fetchRateioArquivo(
   if (error) throw new Error(error.message)
   return data as { resultado_xlsx_nome: string; resultado_xlsx_base64: string } | null
 }
+
+export async function deleteRateioExecucao(id: string): Promise<void> {
+  const { error } = await supabaseFinanceiro.from(TABLE_RATEIO).delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}

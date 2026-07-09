@@ -9,7 +9,7 @@ import { FinanceiroAuthProvider, useFinanceiroAuth } from '@/contexts/financeiro
 import { useRateioUpload, useRateioHistorico } from '@/hooks/use-rateio'
 import { RateioHistoricoPanel } from '@/components/rateio/RateioHistoricoPanel'
 import { fmt, fmtNum, baixarBase64 } from '@/lib/rateio/format'
-import type { RateioEmpresa } from '@/services/rateio/rateio-service'
+import { deleteRateioExecucao, type RateioEmpresa } from '@/services/rateio/rateio-service'
 
 const EMPRESAS: { key: RateioEmpresa; label: string }[] = [
   { key: 'PRN', label: 'PRN' },
@@ -163,6 +163,20 @@ function RateioInner() {
   function handleBaixarAtual() {
     if (!resultado?.arquivo) return
     baixarBase64(resultado.arquivo.nome, resultado.arquivo.mime, resultado.arquivo.base64)
+  }
+
+  async function handleDeleteHistorico(id: string) {
+    try {
+      await deleteRateioExecucao(id)
+      toast({ title: 'Sucesso', description: 'Rateio excluído do histórico.' })
+      refetch()
+    } catch (err) {
+      toast({
+        title: 'Erro',
+        description: (err as Error).message || 'Não foi possível excluir o rateio.',
+        variant: 'destructive',
+      })
+    }
   }
 
   const r = resultado?.resumo
@@ -323,7 +337,12 @@ function RateioInner() {
         )}
       </div>
 
-      <RateioHistoricoPanel historico={historico} loading={carregandoHistorico} error={erroHistorico} />
+      <RateioHistoricoPanel
+        historico={historico}
+        loading={carregandoHistorico}
+        error={erroHistorico}
+        onDelete={handleDeleteHistorico}
+      />
     </div>
   )
 }
