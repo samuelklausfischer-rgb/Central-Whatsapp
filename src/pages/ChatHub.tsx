@@ -54,11 +54,24 @@ const CHAT_MIN = 420
 const SIDEBAR_STORAGE_KEY = 'central-whats.chatSidebarWidth.v1'
 
 let audioCtx: AudioContext | null = null
+let audioCtxSuspendGeneration = 0
 
 function getAudioContext() {
   if (!audioCtx) audioCtx = new AudioContext()
   if (audioCtx.state === 'suspended') audioCtx.resume()
   return audioCtx
+}
+
+// Suspende o AudioContext ~1s depois do beep terminar, para o Chromium poder
+// liberar o processo de áudio (Audio Service) enquanto o app fica ocioso. O
+// contador de geração evita suspender se um novo som começar nesse meio-tempo.
+function scheduleAudioContextSuspend() {
+  const generation = ++audioCtxSuspendGeneration
+  setTimeout(() => {
+    if (generation === audioCtxSuspendGeneration && audioCtx && audioCtx.state === 'running') {
+      audioCtx.suspend().catch(() => {})
+    }
+  }, 1000)
 }
 
 function playNotificationSound() {
@@ -76,6 +89,7 @@ function playNotificationSound() {
     osc.connect(gain)
     osc.start(ctx.currentTime)
     osc.stop(ctx.currentTime + 0.4)
+    scheduleAudioContextSuspend()
   } catch { /* silent fail */ }
 }
 
@@ -463,6 +477,8 @@ export default function ChatHub() {
   // Rede de segurança: se o realtime falhar (queda de WebSocket, sleep, troca de
   // rede), re-busca a conversa aberta e os resumos ao voltar o foco/visibilidade/
   // rede e a cada ~25s enquanto visível. Automatiza o "sair e entrar" manual.
+  // O interval só fica armado enquanto a janela está visível — evita acordar o
+  // processo a cada 25s indefinidamente quando minimizado/em background.
   useEffect(() => {
     const refetchOpen = () => {
       if (document.visibilityState !== 'visible') return
@@ -473,18 +489,33 @@ export default function ChatHub() {
       }
       if (selectedDeviceId) debouncedRefreshSummaries(selectedDeviceId)
     }
+    let interval: ReturnType<typeof setInterval> | null = null
+    const startInterval = () => {
+      if (!interval) interval = setInterval(refetchOpen, 25000)
+    }
+    const stopInterval = () => {
+      if (interval) {
+        clearInterval(interval)
+        interval = null
+      }
+    }
     const onVisibility = () => {
-      if (document.visibilityState === 'visible') refetchOpen()
+      if (document.visibilityState === 'visible') {
+        refetchOpen()
+        startInterval()
+      } else {
+        stopInterval()
+      }
     }
     window.addEventListener('focus', refetchOpen)
     window.addEventListener('online', refetchOpen)
     document.addEventListener('visibilitychange', onVisibility)
-    const interval = setInterval(refetchOpen, 25000)
+    if (document.visibilityState === 'visible') startInterval()
     return () => {
       window.removeEventListener('focus', refetchOpen)
       window.removeEventListener('online', refetchOpen)
       document.removeEventListener('visibilitychange', onVisibility)
-      clearInterval(interval)
+      stopInterval()
     }
   }, [selectedDeviceId, selectedContact, debouncedRefreshSummaries])
 
