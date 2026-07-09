@@ -7,6 +7,17 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.177',
+    date: '2026-07-09 17:00',
+    title: 'App mais leve, especialmente minimizado',
+    details: [
+      '⚡ Reduzido o consumo de CPU/memória com o app minimizado ou em segundo plano',
+      '🖼️ Prévias de PDF e Excel no chat agora carregam sob demanda, só quando o anexo aparece na tela',
+      '📜 Lista de mensagens otimizada para conversas longas — menos travamento ao abrir/rolar',
+      '🎙️ Corrigido: gravação de áudio não fica mais ativa em segundo plano ao trocar de conversa',
+    ],
+  },
+  {
     version: '0.0.176',
     date: '2026-07-09 11:49',
     title: 'Excluir itens do histórico no Rateio MobileMed e na Análise PRN',
