@@ -42,3 +42,6 @@ Whats/
 
 # Linux kernel core dumps (e.g. when oxfmt or pnpm crash)
 core.[0-9]*
+
+# Git worktrees (isolated workspaces, e.g. perf/* work)
+.worktrees/
