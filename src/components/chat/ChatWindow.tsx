@@ -497,6 +497,12 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   useEffect(() => {
     return () => {
       if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current)
+      // Se desmontar com uma gravação em andamento (troca de conversa/rota),
+      // libera o timer e o microfone em vez de deixá-los ativos indefinidamente.
+      if (timerRef.current) clearInterval(timerRef.current)
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop()
+      }
     }
   }, [])
 
