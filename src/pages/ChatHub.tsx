@@ -328,11 +328,16 @@ export default function ChatHub() {
     }
 
     if (e.record.device_id === selectedDeviceId) {
-      if (e.action === 'create') setMessages((prev) => [...prev, e.record])
-      else if (e.action === 'update')
-        setMessages((prev) => prev.map((m) => (m.id === e.record.id ? e.record : m)))
-      else if (e.action === 'delete')
-        setMessages((prev) => prev.filter((m) => m.id !== e.record.id))
+      // `messages` só é consumido pelo fallback de `conversations` (quando
+      // conversationSummaries está vazio) — atualizar fora desse modo é
+      // trabalho morto: cresce sem limite e força recompute do useMemo à toa.
+      if (conversationSummaries.length === 0) {
+        if (e.action === 'create') setMessages((prev) => [...prev, e.record].slice(-500))
+        else if (e.action === 'update')
+          setMessages((prev) => prev.map((m) => (m.id === e.record.id ? e.record : m)))
+        else if (e.action === 'delete')
+          setMessages((prev) => prev.filter((m) => m.id !== e.record.id))
+      }
 
       // Atualizar mensagens da conversa aberta
       if (e.record.remote_sender === selectedContact) {
