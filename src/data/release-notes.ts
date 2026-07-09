@@ -7,6 +7,15 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.177',
+    date: '2026-07-09 16:30',
+    title: 'Aviso quando o contato apaga uma mensagem',
+    details: [
+      '🗑️ Quando o contato apaga uma mensagem do lado dele no WhatsApp, ela continua aparecendo no chat (com o conteúdo original), mas agora ganha um badge vermelho "apagada" ao lado do horário',
+      'ℹ️ Mensagens apagadas antes desta atualização não recebem o badge retroativamente — só as apagadas a partir de agora',
+    ],
+  },
+  {
     version: '0.0.176',
     date: '2026-07-09 11:49',
     title: 'Excluir itens do histórico no Rateio MobileMed e na Análise PRN',

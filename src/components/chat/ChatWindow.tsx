@@ -1961,6 +1961,11 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                          {msg.edited_at && (
                            <span className="text-[10px] text-chat-muted/60">(editado)</span>
                          )}
+                         {msg.revoked_at && (
+                           <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-red-400">
+                             <Trash2 className="h-3 w-3" /> apagada
+                           </span>
+                         )}
                          {isMe && msg.status === 'sending' && (
                            <Clock className="h-3 w-3 text-chat-muted/60 shrink-0" />
                          )}
