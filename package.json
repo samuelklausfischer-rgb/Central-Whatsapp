@@ -52,6 +52,7 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "@supabase/supabase-js": "^2.106.2",
     "@tailwindcss/aspect-ratio": "^0.4.2",
+    "@tanstack/react-virtual": "^3.14.5",
     "caniuse-lite": "^1.0.30001791",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
