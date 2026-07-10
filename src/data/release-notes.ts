@@ -7,7 +7,7 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
-    version: '0.0.177',
+    version: '0.0.178',
     date: '2026-07-09 17:00',
     title: 'App mais leve, especialmente minimizado',
     details: [
@@ -15,6 +15,15 @@ export const releaseNotes: ReleaseNote[] = [
       '🖼️ Prévias de PDF e Excel no chat agora carregam sob demanda, só quando o anexo aparece na tela',
       '📜 Lista de mensagens otimizada para conversas longas — menos travamento ao abrir/rolar',
       '🎙️ Corrigido: gravação de áudio não fica mais ativa em segundo plano ao trocar de conversa',
+    ],
+  },
+  {
+    version: '0.0.177',
+    date: '2026-07-09 16:30',
+    title: 'Aviso quando o contato apaga uma mensagem',
+    details: [
+      '🗑️ Quando o contato apaga uma mensagem do lado dele no WhatsApp, ela continua aparecendo no chat (com o conteúdo original), mas agora ganha um badge vermelho "apagada" ao lado do horário',
+      'ℹ️ Mensagens apagadas antes desta atualização não recebem o badge retroativamente — só as apagadas a partir de agora',
     ],
   },
   {

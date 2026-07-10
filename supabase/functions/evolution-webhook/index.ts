@@ -560,6 +560,34 @@ Deno.serve(async (req: Request) => {
   const msgObj = unwrapMessage(messageData.message || {})
   const messageTypeKeys = getMessageTypeKeys(msgObj)
 
+  // ---- Revoke handling: contato (ou o próprio usuário, fora do app) apagou a mensagem no WhatsApp ----
+  // Duas formas observadas: (1) messages.upsert com envelope protocolMessage tipo REVOKE;
+  // (2) messages.update com o campo `message` explicitamente nulado (conteúdo apagado pela WhatsApp
+  // sem vir como protocolMessage) — este segundo formato não passa pelo unwrapMessage/msgObj.
+  const protocolMsg = msgObj.protocolMessage
+  const isProtocolRevoke = Boolean(protocolMsg && (protocolMsg.type === 'REVOKE' || protocolMsg.type === 0))
+  const isNulledUpdateRevoke = isUpdate && messageData.update != null && messageData.update.message === null
+  if (isProtocolRevoke || isNulledUpdateRevoke) {
+    const origExternalId = isProtocolRevoke ? (protocolMsg.key?.id || '') : externalId
+    if (origExternalId) {
+      const origResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/messages?device_id=eq.${device.id}&external_id=eq.${encodeURIComponent(origExternalId)}&select=id`,
+        { headers }
+      )
+      const origArr = await origResp.json()
+      const origMsg = Array.isArray(origArr) && origArr.length > 0 ? origArr[0] : null
+      if (origMsg) {
+        await fetch(`${SUPABASE_URL}/rest/v1/messages?id=eq.${origMsg.id}`, {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify({ revoked_at: new Date().toISOString() }),
+        })
+      }
+    }
+    return new Response(JSON.stringify({ status: 'success', action: 'message_revoked' }), { status: 200 })
+  }
+  // ---- End revoke handling ----
+
   // ---- Reaction handling: update original message instead of creating a new one ----
   const reactionMsg = msgObj.reactionMessage
   if (reactionMsg) {

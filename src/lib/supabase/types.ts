@@ -62,6 +62,7 @@ export interface Message {
   reply_to_snapshot: { content: string; sender_name: string; id: string } | null
   edited_at: string | null
   deleted_at: string | null
+  revoked_at: string | null
   created_at: string
   updated_at: string
 }
