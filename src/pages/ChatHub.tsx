@@ -99,12 +99,20 @@ export default function ChatHub() {
   const [showArchived, setShowArchived] = useState(false)
   const [noteCountByJid, setNoteCountByJid] = useState<Map<string, number>>(new Map())
   const prevDeviceIdRef = useRef<string | null>(null)
+  // Sempre refletem o valor mais recente de seleção — usados para descartar
+  // respostas assíncronas que chegam depois de o usuário já ter trocado de
+  // dispositivo/conversa (evita a corrida que mostrava dados do WhatsApp errado).
+  const selectedDeviceIdRef = useRef<string | null>(selectedDeviceId)
+  const selectedContactRef = useRef<string | null>(selectedContact)
+  selectedDeviceIdRef.current = selectedDeviceId
+  selectedContactRef.current = selectedContact
   const devicesRef = useRef<any[]>(devices)
   const userIdRef = useRef<string | undefined>(user?.id)
   // Mensagens otimistas pendentes (temp) aguardando o eco do realtime.
   const pendingTempsRef = useRef<{ tempId: string; fp: string; ts: number }[]>([])
   const noteJids = useMemo(() => new Set(noteCountByJid.keys()), [noteCountByJid])
   const [isSheetOpen, setIsSheetOpen] = useState(false)
+  const [isRefreshingAll, setIsRefreshingAll] = useState(false)
   const [isNewContactOpen, setIsNewContactOpen] = useState(false)
   const [newContactName, setNewContactName] = useState('')
   const [newContactDdd, setNewContactDdd] = useState('')
@@ -225,24 +233,40 @@ export default function ChatHub() {
     else if (e.action === 'delete') setContacts((prev) => prev.filter((c) => c.id !== e.record.id))
   })
 
+  // Busca resumos/mensagens/atribuições de um dispositivo específico. Cada
+  // setState só é aplicado se o dispositivo ainda for o selecionado no
+  // momento em que a resposta chega — evita que uma resposta atrasada de um
+  // WhatsApp já abandonado sobrescreva os dados do WhatsApp atual.
+  const loadDeviceData = useCallback((deviceId: string) => {
+    const fetchFallbackMessages = () =>
+      getMessages(deviceId)
+        .then((msgs) => { if (selectedDeviceIdRef.current === deviceId) setMessages(msgs) })
+        .catch(() => { if (selectedDeviceIdRef.current === deviceId) setMessages([]) })
+
+    const summariesPromise = getConversationSummaries(deviceId)
+      .then((summaries) => {
+        if (selectedDeviceIdRef.current !== deviceId) return
+        setConversationSummaries(summaries)
+        if (summaries.length === 0) {
+          return fetchFallbackMessages()
+        }
+        setMessages([])
+      })
+      .catch(fetchFallbackMessages)
+
+    const assignmentsPromise = getDeviceAssignments(deviceId)
+      .then((map) => { if (selectedDeviceIdRef.current === deviceId) setAssignments(map) })
+      .catch(() => {})
+
+    return Promise.all([summariesPromise, assignmentsPromise])
+  }, [])
+
   useEffect(() => {
     if (selectedDeviceId) {
       sessionStorage.setItem('activeDeviceId', selectedDeviceId)
       const deviceChanged = prevDeviceIdRef.current !== null && prevDeviceIdRef.current !== selectedDeviceId
       prevDeviceIdRef.current = selectedDeviceId
-      getConversationSummaries(selectedDeviceId)
-        .then((summaries) => {
-          setConversationSummaries(summaries)
-          if (summaries.length === 0) {
-            getMessages(selectedDeviceId).then(setMessages).catch(() => setMessages([]))
-          } else {
-            setMessages([])
-          }
-        })
-        .catch(() => {
-          getMessages(selectedDeviceId).then(setMessages).catch(() => setMessages([]))
-        })
-      getDeviceAssignments(selectedDeviceId).then(setAssignments)
+      loadDeviceData(selectedDeviceId)
       if (deviceChanged) {
         setSelectedContact(null)
         setConversationMessages([])
@@ -254,7 +278,7 @@ export default function ChatHub() {
       setSelectedContact(null)
       prevDeviceIdRef.current = null
     }
-  }, [selectedDeviceId])
+  }, [selectedDeviceId, loadDeviceData])
 
   useEffect(() => {
     if (selectedDeviceId) {
@@ -361,7 +385,14 @@ export default function ChatHub() {
 
   const debouncedRefreshSummaries = useMemo(
     () => debounce((deviceId: string) => {
-      getConversationSummaries(deviceId).then(setConversationSummaries)
+      getConversationSummaries(deviceId)
+        .then((summaries) => {
+          // Descarta se o usuário já trocou de dispositivo antes desta
+          // chamada (debounced) resolver — senão sobrescreve o resumo certo.
+          if (selectedDeviceIdRef.current !== deviceId) return
+          setConversationSummaries(summaries)
+        })
+        .catch(() => {})
     }, 150),
     [],
   )
@@ -451,14 +482,42 @@ export default function ChatHub() {
     if (selectedDeviceId) debouncedRefreshSummaries(selectedDeviceId)
   })
 
+  // Busca as mensagens de uma conversa específica; só aplica o resultado se
+  // dispositivo+contato ainda forem os selecionados quando a resposta chegar.
+  const loadConversationMessages = useCallback((deviceId: string, contact: string) => {
+    return getConversationMessages(deviceId, contact)
+      .then((msgs) => {
+        if (selectedDeviceIdRef.current !== deviceId || selectedContactRef.current !== contact) return
+        setConversationMessages(msgs)
+      })
+      .catch(() => {})
+  }, [])
+
+  // Botão manual de "atualizar tudo": recarrega resumos, mensagens e
+  // atribuições do WhatsApp selecionado (e a conversa aberta, se houver).
+  const handleRefreshAll = useCallback(async () => {
+    const deviceId = selectedDeviceId
+    if (!deviceId) return
+    setIsRefreshingAll(true)
+    try {
+      const contact = selectedContact
+      await Promise.all([
+        loadDeviceData(deviceId),
+        contact ? loadConversationMessages(deviceId, contact) : Promise.resolve(),
+      ])
+    } finally {
+      setIsRefreshingAll(false)
+    }
+  }, [selectedDeviceId, selectedContact, loadDeviceData, loadConversationMessages])
+
   // Carregar mensagens da conversa selecionada
   useEffect(() => {
     if (selectedDeviceId && selectedContact) {
-      getConversationMessages(selectedDeviceId, selectedContact).then(setConversationMessages)
+      loadConversationMessages(selectedDeviceId, selectedContact)
     } else {
       setConversationMessages([])
     }
-  }, [selectedDeviceId, selectedContact])
+  }, [selectedDeviceId, selectedContact, loadConversationMessages])
 
   // Rede de segurança: se o realtime falhar (queda de WebSocket, sleep, troca de
   // rede), re-busca a conversa aberta e os resumos ao voltar o foco/visibilidade/
@@ -466,12 +525,12 @@ export default function ChatHub() {
   useEffect(() => {
     const refetchOpen = () => {
       if (document.visibilityState !== 'visible') return
-      if (selectedDeviceId && selectedContact) {
-        getConversationMessages(selectedDeviceId, selectedContact)
-          .then(setConversationMessages)
-          .catch(() => {})
+      const deviceId = selectedDeviceIdRef.current
+      const contact = selectedContactRef.current
+      if (deviceId && contact) {
+        loadConversationMessages(deviceId, contact)
       }
-      if (selectedDeviceId) debouncedRefreshSummaries(selectedDeviceId)
+      if (deviceId) debouncedRefreshSummaries(deviceId)
     }
     const onVisibility = () => {
       if (document.visibilityState === 'visible') refetchOpen()
@@ -486,7 +545,7 @@ export default function ChatHub() {
       document.removeEventListener('visibilitychange', onVisibility)
       clearInterval(interval)
     }
-  }, [selectedDeviceId, selectedContact, debouncedRefreshSummaries])
+  }, [selectedDeviceId, selectedContact, loadConversationMessages, debouncedRefreshSummaries])
 
   const handleCloseConversation = useCallback(() => {
     setSelectedContact(null)
@@ -769,6 +828,8 @@ export default function ChatHub() {
             noteJids={noteJids}
             assignments={assignments}
             currentUserId={user?.id}
+            onRefreshAll={handleRefreshAll}
+            isRefreshingAll={isRefreshingAll}
           />
         ) : (
           <div
@@ -792,6 +853,8 @@ export default function ChatHub() {
               noteJids={noteJids}
               assignments={assignments}
               currentUserId={user?.id}
+              onRefreshAll={handleRefreshAll}
+              isRefreshingAll={isRefreshingAll}
             />
             <div
               className="absolute -right-[6px] top-0 bottom-0 w-[14px] cursor-col-resize z-10 flex items-center justify-center"

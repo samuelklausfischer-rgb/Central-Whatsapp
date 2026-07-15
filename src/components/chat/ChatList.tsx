@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { format, startOfDay, differenceInCalendarDays } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { Check, CheckCheck, BadgeCheck, Smartphone, Search, X, MessageCircle, Pin } from 'lucide-react'
+import { Check, CheckCheck, BadgeCheck, Smartphone, Search, X, MessageCircle, Pin, RefreshCw } from 'lucide-react'
 import { ContactNoteIcon } from '@/components/ui/ContactNoteIcon'
 import { toggleResponded } from '@/services/conversation_states'
 import { ConversationActionsMenu } from '@/components/chat/ConversationActionsMenu'
@@ -45,6 +45,8 @@ export interface ChatListProps {
   noteJids?: Set<string>
   assignments?: Map<string, ConversationAssignment>
   currentUserId?: string
+  onRefreshAll?: () => void
+  isRefreshingAll?: boolean
 }
 
 function formatChatTimestamp(dateString: string | undefined | null): string {
@@ -342,6 +344,8 @@ export function ChatList({
   noteJids,
   assignments,
   currentUserId,
+  onRefreshAll,
+  isRefreshingAll,
 }: ChatListProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const deferredSearch = useDeferredValue(searchQuery)
@@ -438,7 +442,19 @@ export function ChatList({
       )}
     >
       <div className="px-3.5 py-3 border-b border-chat-border flex flex-col gap-3 shrink-0">
-        <h2 className="text-xl font-semibold text-chat-text">Mensagens</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold text-chat-text">Mensagens</h2>
+          {onRefreshAll && (
+            <button
+              onClick={onRefreshAll}
+              disabled={isRefreshingAll}
+              className="text-chat-muted hover:text-chat-text transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Atualizar conversas"
+            >
+              <RefreshCw className={cn('h-4 w-4', isRefreshingAll && 'animate-spin')} />
+            </button>
+          )}
+        </div>
         <Select value={selectedDeviceId ?? ''} onValueChange={onSelectDevice}>
           <SelectTrigger className="w-full bg-chat-sidebar border-chat-border h-12">
             <SelectValue placeholder="Selecione um dispositivo..." />
