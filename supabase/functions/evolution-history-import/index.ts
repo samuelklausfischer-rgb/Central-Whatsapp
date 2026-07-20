@@ -89,8 +89,10 @@ function clampInt(value: unknown, fallback: number, min: number, max: number) {
 }
 
 function validateInstance(instanceName: string) {
-  if (!ALLOWED_INSTANCES.includes(instanceName)) {
-    throw new Error(`Importação liberada apenas para: ${ALLOWED_INSTANCES.join(', ')}`)
+  // Liberado para qualquer instância. A proteção natural é o getDevice():
+  // só importa instância que tem um device local com instance_key correspondente.
+  if (!instanceName || !instanceName.trim()) {
+    throw new Error('Instância não informada')
   }
 }
 

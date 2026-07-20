@@ -628,7 +628,7 @@ export default function InstancesSettings() {
                           {isActionLoading ? <RefreshCw className="h-3 w-3 animate-spin" /> : <QrCode className="h-3 w-3" />}
                           <span className="hidden sm:inline">Webhook</span>
                         </Button>
-                        {name && ALLOWED_HISTORY_INSTANCES.includes(name) && (
+                        {name && instance.device && (
                           <Button
                             variant="ghost"
                             size="sm"
