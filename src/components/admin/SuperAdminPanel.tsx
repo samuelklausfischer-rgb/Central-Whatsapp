@@ -21,7 +21,8 @@ import {
   getBroadcastReadStatus,
   type BroadcastReadStatus,
 } from '@/services/broadcasts'
-import { setUserDeviceAccess } from '@/services/superadmin'
+import { setUserDeviceAccess, setUserDevicesRestricted } from '@/services/superadmin'
+import { useAuth } from '@/hooks/use-auth'
 
 const userLabel = (u: { name: string | null; email: string | null }) => u.name || u.email || 'usuário'
 
@@ -69,7 +70,25 @@ export function SuperAdminPanel() {
 
   useEffect(() => { loadAccess() }, [loadAccess])
 
-  const nonAdminUsers = useMemo(() => users.filter((u) => !u.is_admin), [users])
+  const { user: currentUser } = useAuth()
+  // Gerenciáveis: todos menos o próprio super-admin (para não se auto-trancar).
+  const manageableUsers = useMemo(
+    () => users.filter((u) => u.id !== currentUser?.id),
+    [users, currentUser?.id],
+  )
+
+  const toggleRestricted = async (u: ManagedUser, restricted: boolean) => {
+    const cell = `${u.id}:restrict`
+    setSavingCell(cell)
+    try {
+      await setUserDevicesRestricted(u.id, restricted)
+      setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, devices_restricted: restricted } : x)))
+    } catch (e) {
+      toast({ title: 'Falha ao atualizar', description: (e as Error).message, variant: 'destructive' })
+    } finally {
+      setSavingCell(null)
+    }
+  }
 
   const toggleAccess = async (u: ManagedUser, device: Device, allowed: boolean) => {
     const cell = `${u.id}:${device.id}`
@@ -190,41 +209,72 @@ export function SuperAdminPanel() {
             <ShieldAlert className="h-5 w-5 text-destructive" /> Acesso ao WhatsApp por usuário
           </CardTitle>
           <CardDescription>
-            Ligue/desligue o acesso de cada usuário a cada instância. (Admins têm acesso a tudo por padrão.)
+            Ligue/desligue o acesso de cada usuário a cada instância. Admins têm acesso a tudo por padrão —
+            desligue "Acesso total" para restringir um admin a instâncias específicas. (Só você, super-admin, controla isto.)
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {nonAdminUsers.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nenhum usuário comum cadastrado.</p>
+          {manageableUsers.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nenhum usuário para gerenciar.</p>
           ) : (
             <div className="space-y-4">
-              {nonAdminUsers.map((u) => (
-                <div key={u.id} className="rounded-lg border p-3">
-                  <p className="mb-2 text-sm font-medium">{userLabel(u)}</p>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    {devices.map((d) => {
-                      const allowed = u.allowed_devices.includes(d.id)
-                      const cell = `${u.id}:${d.id}`
-                      return (
-                        <label
-                          key={d.id}
-                          className="flex items-center justify-between gap-2 rounded-md bg-muted/40 px-3 py-2 text-sm"
-                        >
-                          <span className="truncate">{d.name}</span>
-                          {savingCell === cell ? (
-                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              {manageableUsers.map((u) => {
+                // Mostra a grade de instâncias quando: não-admin (sempre) OU admin restrito.
+                const showGrid = !u.is_admin || !!u.devices_restricted
+                return (
+                  <div key={u.id} className="rounded-lg border p-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium">
+                        {userLabel(u)}
+                        {u.is_admin && (
+                          <Badge variant="secondary" className="ml-2 text-[10px]">admin</Badge>
+                        )}
+                      </span>
+                      {u.is_admin && (
+                        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                          Acesso total
+                          {savingCell === `${u.id}:restrict` ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
                             <Switch
-                              checked={allowed}
-                              onCheckedChange={(v) => toggleAccess(u, d, v)}
+                              checked={!u.devices_restricted}
+                              onCheckedChange={(v) => toggleRestricted(u, !v)}
                             />
                           )}
                         </label>
-                      )
-                    })}
+                      )}
+                    </div>
+                    {showGrid ? (
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {devices.map((d) => {
+                          const allowed = u.allowed_devices.includes(d.id)
+                          const cell = `${u.id}:${d.id}`
+                          return (
+                            <label
+                              key={d.id}
+                              className="flex items-center justify-between gap-2 rounded-md bg-muted/40 px-3 py-2 text-sm"
+                            >
+                              <span className="truncate">{d.name}</span>
+                              {savingCell === cell ? (
+                                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                              ) : (
+                                <Switch
+                                  checked={allowed}
+                                  onCheckedChange={(v) => toggleAccess(u, d, v)}
+                                />
+                              )}
+                            </label>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Acesso a todas as instâncias. Desligue "Acesso total" para escolher instâncias específicas.
+                      </p>
+                    )}
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </CardContent>

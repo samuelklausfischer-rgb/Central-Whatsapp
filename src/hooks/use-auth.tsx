@@ -58,7 +58,8 @@ async function loadUserData(
   let deviceList: Device[] = []
   let deviceIdList: string[] = []
 
-  if (profile.is_admin) {
+  const hasAllDevices = profile.is_super_admin || (profile.is_admin && !profile.devices_restricted)
+  if (hasAllDevices) {
     const { data: allDevices } = await supabase.from('devices').select('*')
     if (!signal.aborted) {
       deviceList = (allDevices as Device[]) || []

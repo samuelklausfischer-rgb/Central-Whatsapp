@@ -8,6 +8,7 @@ export interface Profile {
   department: string | null
   is_admin: boolean
   is_super_admin?: boolean
+  devices_restricted?: boolean
   created_at: string
   updated_at: string
 }
