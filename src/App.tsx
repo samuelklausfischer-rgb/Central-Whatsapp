@@ -13,6 +13,7 @@ import SettingsLayout from './pages/settings/SettingsLayout'
 import Login from './pages/Login'
 import { AuthProvider, useAuth } from './hooks/use-auth'
 import { UpdateGate } from './components/UpdateGate'
+import { ErrorBoundary } from './components/ErrorBoundary'
 
 const Index = lazy(() => import('./pages/Index'))
 const Devices = lazy(() => import('./pages/Devices'))
@@ -48,11 +49,9 @@ const AdminRoute = () => {
   return user?.is_admin ? <Outlet /> : <Navigate to="/dashboard" replace />
 }
 
-const App = () => (
-  <Router future={{ v7_startTransition: false, v7_relativeSplatPath: false }}>
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-      <UpdateGate>
-      <AuthProvider>
+const App = () => {
+  const appContent = (
+    <AuthProvider>
         <AppProvider>
           <TooltipProvider>
           <Toaster />
@@ -94,9 +93,18 @@ const App = () => (
         </TooltipProvider>
       </AppProvider>
     </AuthProvider>
-      </UpdateGate>
-    </ThemeProvider>
-  </Router>
-)
+  )
+  return (
+    <Router future={{ v7_startTransition: false, v7_relativeSplatPath: false }}>
+      <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+        <ErrorBoundary label="app">
+          <ErrorBoundary label="update-gate" fallback={appContent}>
+            <UpdateGate>{appContent}</UpdateGate>
+          </ErrorBoundary>
+        </ErrorBoundary>
+      </ThemeProvider>
+    </Router>
+  )
+}
 
 export default App
