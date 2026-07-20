@@ -486,7 +486,7 @@ export default function InstancesSettings() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Instâncias Evolution</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Conexão WhatsApp</h1>
           <p className="text-muted-foreground">
             Gerencie criação, conexão e status das instâncias da Evolution API.
           </p>
@@ -603,31 +603,6 @@ export default function InstancesSettings() {
                             <span className="hidden sm:inline">Conectar</span>
                           </Button>
                         )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 text-xs gap-1"
-                          disabled={!name}
-                          onClick={() => {
-                            if (!name) return
-                            setRenameInstance(name)
-                            setRenameDisplay(instance.device?.name || name)
-                            setRenameOpen(true)
-                          }}
-                        >
-                          <Edit className="h-3 w-3" />
-                          <span className="hidden sm:inline">Renomear</span>
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 text-xs gap-1"
-                          disabled={!name || isActionLoading}
-                          onClick={() => name && handleConfigureWebhook(name)}
-                        >
-                          {isActionLoading ? <RefreshCw className="h-3 w-3 animate-spin" /> : <QrCode className="h-3 w-3" />}
-                          <span className="hidden sm:inline">Webhook</span>
-                        </Button>
                         {name && instance.device && (
                           <Button
                             variant="ghost"
@@ -640,16 +615,6 @@ export default function InstancesSettings() {
                             <span className="hidden sm:inline">Histórico</span>
                           </Button>
                         )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 text-xs gap-1 text-red-400 hover:text-red-400"
-                          disabled={!name}
-                          onClick={() => name && setDeleteConfirm(instance)}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                          <span className="hidden sm:inline">Deletar</span>
-                        </Button>
                       </div>
                       <div />
                     </div>

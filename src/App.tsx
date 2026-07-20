@@ -16,7 +16,6 @@ import { UpdateGate } from './components/UpdateGate'
 import { ErrorBoundary } from './components/ErrorBoundary'
 
 const Index = lazy(() => import('./pages/Index'))
-const Devices = lazy(() => import('./pages/Devices'))
 const ChatHub = lazy(() => import('./pages/ChatHub'))
 const EmailHub = lazy(() => import('./pages/EmailHub'))
 const EmailAccountSettings = lazy(() => import('./pages/settings/EmailAccountSettings'))
@@ -75,7 +74,6 @@ const App = () => {
                   <Route path="/ferramentas/rateio-mobilemed" element={<RateioMobilemed />} />
                 </Route>
                 <Route path="/settings" element={<SettingsLayout />}>
-                  <Route path="devices" element={<Devices />} />
                   <Route path="general" element={<GeneralSettings />} />
                   <Route path="labels" element={<LabelsSettings />} />
                   <Route path="ai-assistant" element={<AiAssistantSettings />} />

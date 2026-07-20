@@ -8,8 +8,6 @@ import { useToast } from '@/hooks/use-toast'
 import { useTheme } from 'next-themes'
 import { useAuth } from '@/hooks/use-auth'
 import supabase from '@/lib/supabase/client'
-import { FileSignature } from 'lucide-react'
-import { SignatureManagerDialog } from '@/components/SignatureManagerDialog'
 
 export default function GeneralSettings() {
   const { user, refreshProfile } = useAuth()
@@ -20,7 +18,6 @@ export default function GeneralSettings() {
   const [username, setUsername] = useState(user?.username || '')
   const [signature, setSignature] = useState(user?.signature || '')
   const [isSaving, setIsSaving] = useState(false)
-  const [isSignatureManagerOpen, setIsSignatureManagerOpen] = useState(false)
 
   const handleSaveUserProfile = async () => {
     if (!user) return
@@ -83,54 +80,6 @@ export default function GeneralSettings() {
           </div>
         </CardContent>
       </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Perfil da Empresa</CardTitle>
-          <CardDescription>
-            Informações gerais sobre a corporação e controle interno.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4 max-w-2xl">
-          <div className="space-y-2">
-            <Label htmlFor="companyName">Nome do Departamento Gestor</Label>
-            <Input id="companyName" defaultValue="Operações Centrais" />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="supportEmail">E-mail de Suporte</Label>
-            <Input id="supportEmail" defaultValue="suporte@centralcell.corp" type="email" />
-          </div>
-          <Button>Salvar Alterações</Button>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Assinaturas de Instâncias</CardTitle>
-          <CardDescription>
-            Configure a assinatura de apresentação para cada número do WhatsApp conectado.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4 max-w-2xl">
-          <p className="text-sm text-muted-foreground">
-            Personalize a assinatura que será enviada junto com suas mensagens para cada aparelho
-            celular. Isso ajuda na identificação do atendente e melhora a comunicação corporativa.
-          </p>
-          <Button
-            onClick={() => setIsSignatureManagerOpen(true)}
-            className="w-full sm:w-auto"
-            variant="outline"
-          >
-            <FileSignature className="mr-2 h-4 w-4" />
-            Gerenciar Assinaturas
-          </Button>
-        </CardContent>
-      </Card>
-
-      <SignatureManagerDialog
-        open={isSignatureManagerOpen}
-        onOpenChange={setIsSignatureManagerOpen}
-      />
 
       <Card>
         <CardHeader>

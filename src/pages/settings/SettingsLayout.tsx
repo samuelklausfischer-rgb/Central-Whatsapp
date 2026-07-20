@@ -6,9 +6,7 @@ export default function SettingsLayout() {
   const location = useLocation()
   const { user } = useAuth()
 
-  const currentTab = location.pathname.includes('/settings/devices')
-    ? 'devices'
-    : location.pathname.includes('/settings/labels')
+  const currentTab = location.pathname.includes('/settings/labels')
       ? 'labels'
       : location.pathname.includes('/settings/ai-assistant')
         ? 'ai-assistant'
@@ -32,9 +30,6 @@ export default function SettingsLayout() {
           <TabsTrigger value="general" asChild>
             <Link to="/settings/general">Perfil / Geral</Link>
           </TabsTrigger>
-          <TabsTrigger value="devices" asChild>
-            <Link to="/settings/devices">Aparelhos Corporativos</Link>
-          </TabsTrigger>
           <TabsTrigger value="labels" asChild>
             <Link to="/settings/labels">Etiquetas</Link>
           </TabsTrigger>
@@ -46,7 +41,7 @@ export default function SettingsLayout() {
           </TabsTrigger>
           {user?.is_admin && (
             <TabsTrigger value="instances" asChild>
-              <Link to="/settings/instances">Instâncias Evolution</Link>
+              <Link to="/settings/instances">Conexão WhatsApp</Link>
             </TabsTrigger>
           )}
         </TabsList>
