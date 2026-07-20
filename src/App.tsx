@@ -12,6 +12,7 @@ import { AppProvider } from './stores/useAppStore'
 import SettingsLayout from './pages/settings/SettingsLayout'
 import Login from './pages/Login'
 import { AuthProvider, useAuth } from './hooks/use-auth'
+import { UpdateGate } from './components/UpdateGate'
 
 const Index = lazy(() => import('./pages/Index'))
 const Devices = lazy(() => import('./pages/Devices'))
@@ -50,6 +51,7 @@ const AdminRoute = () => {
 const App = () => (
   <Router future={{ v7_startTransition: false, v7_relativeSplatPath: false }}>
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+      <UpdateGate>
       <AuthProvider>
         <AppProvider>
           <TooltipProvider>
@@ -92,6 +94,7 @@ const App = () => (
         </TooltipProvider>
       </AppProvider>
     </AuthProvider>
+      </UpdateGate>
     </ThemeProvider>
   </Router>
 )

@@ -44,6 +44,7 @@ import { useToast } from '@/hooks/use-toast'
 import { useAuth } from '@/hooks/use-auth'
 import { Badge } from '@/components/ui/badge'
 import { extractFieldErrors } from '@/lib/errors'
+import { SuperAdminPanel } from '@/components/admin/SuperAdminPanel'
 
 const DEFAULT_DEPARTMENTS = ['Financeiro', 'Administrativo', 'RH', 'Comercial']
 const NO_DEPARTMENT = '__none__'
@@ -357,6 +358,8 @@ export default function AdminPage() {
           </Button>
         </div>
       </div>
+
+      {currentUser?.is_super_admin && <SuperAdminPanel />}
 
       <Card className="bg-muted backdrop-blur-sm border-border">
         <CardHeader>
