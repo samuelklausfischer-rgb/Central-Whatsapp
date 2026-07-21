@@ -39,7 +39,12 @@ export default function Login() {
         className="relative z-10 p-8 bg-card rounded-xl shadow-2xl border border-border space-y-6 w-[400px]"
       >
         <div className="text-center space-y-2">
-          <img src={logoUrl} alt="Logo" className="h-[83px] w-auto mx-auto mb-4 object-contain" />
+          <div className="flex items-center justify-center gap-3 mb-4">
+            <img src={logoUrl} alt="Central Whats" className="h-16 w-16 object-contain" />
+            <span className="text-3xl font-display font-bold tracking-tight text-foreground">
+              Central <span className="text-blue-500">Whats</span>
+            </span>
+          </div>
           <p className="text-sm text-muted-foreground">Faça login com suas credenciais corporativas.</p>
         </div>
         <div className="space-y-4">

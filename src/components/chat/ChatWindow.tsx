@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef, useMemo, Fragment } from 'react'
+﻿import React, { useState, useEffect, useRef, useMemo, useCallback, useDeferredValue, Fragment } from 'react'
 import logoUrl from '/logo.png'
 import {
   ArrowLeft,
@@ -35,6 +35,7 @@ import {
   UserCheck,
   Users,
   CheckCircle,
+  Search,
 } from 'lucide-react'
 import {
   Dialog,
@@ -90,6 +91,7 @@ import { isPdfFile, isExcelFile } from '@/lib/file-type'
 import { DocumentBubble } from '@/components/chat/DocumentBubble'
 import { ContactShareBubble } from '@/components/chat/ContactShareBubble'
 import { ListMessageBubble } from '@/components/chat/ListMessageBubble'
+import { MessageSearchBar } from '@/components/chat/MessageSearchBar'
 import { TOP_EMOJIS, getEmojiImageUrl } from '@/lib/emojis'
 import supabase from '@/lib/supabase/client'
 import { useToast } from '@/hooks/use-toast'
@@ -107,13 +109,15 @@ function normalizePhoneNumber(raw: string): string {
 function splitByPhoneNumbers(
   text: string,
   onOpenConversation?: (jid: string) => void,
+  offset: number = 0,
+  ranges: HighlightRange[] = EMPTY_RANGES,
 ): React.ReactNode[] {
   const segments: React.ReactNode[] = []
   let lastIndex = 0
   for (const match of Array.from(text.matchAll(PHONE_REGEX))) {
     const idx = match.index ?? 0
     if (idx > lastIndex) {
-      segments.push(text.slice(lastIndex, idx))
+      segments.push(renderHighlightRuns(text.slice(lastIndex, idx), offset + lastIndex, ranges))
     }
     const jid = normalizePhoneNumber(match[0])
     if (jid) {
@@ -123,27 +127,33 @@ function splitByPhoneNumbers(
           display={match[0]}
           jid={jid}
           onOpenConversation={onOpenConversation}
+          textOffset={offset + idx}
+          highlightRanges={ranges}
         />,
       )
     } else {
-      segments.push(match[0])
+      segments.push(renderHighlightRuns(match[0], offset + idx, ranges))
     }
     lastIndex = idx + match[0].length
   }
   if (lastIndex < text.length) {
-    segments.push(text.slice(lastIndex))
+    segments.push(renderHighlightRuns(text.slice(lastIndex), offset + lastIndex, ranges))
   }
-  return segments.length > 0 ? segments : [text]
+  return segments.length > 0 ? segments : [renderHighlightRuns(text, offset, ranges)]
 }
 
 function PhoneNumberTrigger({
   display,
   jid,
   onOpenConversation,
+  textOffset = 0,
+  highlightRanges = EMPTY_RANGES,
 }: {
   display: string
   jid: string
   onOpenConversation?: (jid: string) => void
+  textOffset?: number
+  highlightRanges?: HighlightRange[]
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const { toast } = useToast()
@@ -175,7 +185,7 @@ function PhoneNumberTrigger({
           onClick={(e) => { e.stopPropagation(); setIsOpen(true) }}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setIsOpen(true) } }}
         >
-          {display}
+          {renderHighlightRuns(display, textOffset, highlightRanges)}
         </span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="bg-chat-panel border-chat-border min-w-[200px]">
@@ -198,11 +208,20 @@ function PhoneNumberTrigger({
   )
 }
 
-const formatInline = (text: string, isMe: boolean, onOpenConversation?: (jid: string) => void): React.ReactNode => {
+const formatInline = (
+  text: string,
+  isMe: boolean,
+  onOpenConversation?: (jid: string) => void,
+  offset: number = 0,
+  ranges: HighlightRange[] = EMPTY_RANGES,
+): React.ReactNode => {
   const regex = /(https?:\/\/[^\s]+|`[^`]+`|\*[^*]+\*|_[^_]+_|~[^~]+~)/g
   const parts = text.split(regex)
 
+  let cursor = offset
   return parts.map((part, i) => {
+    const partOffset = cursor
+    cursor += part.length
     if (!part) return null
 
     if (part.match(/^https?:\/\/[^\s]+$/)) {
@@ -214,7 +233,7 @@ const formatInline = (text: string, isMe: boolean, onOpenConversation?: (jid: st
           rel="noopener noreferrer"
           className="hover:underline break-all font-medium transition-colors text-chat-text/80 hover:text-chat-text"
         >
-          {part}
+          {renderHighlightRuns(part, partOffset, ranges)}
         </a>
       )
     }
@@ -224,33 +243,33 @@ const formatInline = (text: string, isMe: boolean, onOpenConversation?: (jid: st
           key={i}
           className="bg-foreground/10 px-1.5 py-0.5 rounded text-[13px] font-mono text-foreground/90"
         >
-          {formatInline(part.slice(1, -1), isMe, onOpenConversation)}
+          {formatInline(part.slice(1, -1), isMe, onOpenConversation, partOffset + 1, ranges)}
         </code>
       )
     }
     if (part.startsWith('*') && part.endsWith('*')) {
       return (
         <strong key={i} className="font-bold">
-          {formatInline(part.slice(1, -1), isMe, onOpenConversation)}
+          {formatInline(part.slice(1, -1), isMe, onOpenConversation, partOffset + 1, ranges)}
         </strong>
       )
     }
     if (part.startsWith('_') && part.endsWith('_')) {
       return (
         <em key={i} className="italic">
-          {formatInline(part.slice(1, -1), isMe, onOpenConversation)}
+          {formatInline(part.slice(1, -1), isMe, onOpenConversation, partOffset + 1, ranges)}
         </em>
       )
     }
     if (part.startsWith('~') && part.endsWith('~')) {
       return (
         <del key={i} className="line-through">
-          {formatInline(part.slice(1, -1), isMe, onOpenConversation)}
+          {formatInline(part.slice(1, -1), isMe, onOpenConversation, partOffset + 1, ranges)}
         </del>
       )
     }
 
-    const phoneSegments = splitByPhoneNumbers(part, onOpenConversation)
+    const phoneSegments = splitByPhoneNumbers(part, onOpenConversation, partOffset, ranges)
     return <Fragment key={i}>{phoneSegments}</Fragment>
   })
 }
@@ -291,25 +310,104 @@ const isTechnicalPlaceholder = (content?: string) => {
   )
 }
 
-const renderMessage = (content: string, isMe: boolean, onOpenConversation?: (jid: string) => void) => {
+interface HighlightRange {
+  start: number
+  end: number
+  isCurrent: boolean
+}
+
+const EMPTY_RANGES: HighlightRange[] = []
+
+// Busca (Ctrl+F): ocorrências calculadas sobre o content BRUTO de cada
+// mensagem, via indexOf simples (nunca RegExp — evita qualquer risco de
+// injeção a partir do texto digitado pelo usuário). Essa lista é a única
+// fonte de verdade tanto para o contador "X de Y" quanto para o destaque.
+interface MessageOccurrence {
+  messageId: string
+  start: number
+  end: number
+}
+
+const computeOccurrences = (messages: any[], query: string): MessageOccurrence[] => {
+  const trimmed = query.trim()
+  if (!trimmed) return []
+  const lowerQuery = trimmed.toLowerCase()
+  const occurrences: MessageOccurrence[] = []
+  for (const msg of messages) {
+    if (msg.deleted_at) continue
+    if (!msg.content?.trim()) continue
+    if (isTechnicalPlaceholder(msg.content)) continue
+    const lowerContent = msg.content.toLowerCase()
+    let from = 0
+    while (true) {
+      const idx = lowerContent.indexOf(lowerQuery, from)
+      if (idx === -1) break
+      occurrences.push({ messageId: msg.id, start: idx, end: idx + lowerQuery.length })
+      from = idx + lowerQuery.length
+    }
+  }
+  return occurrences
+}
+
+// Recebe um trecho de texto puro (folha) e o offset absoluto desse trecho
+// dentro do content original da mensagem, e envolve em <mark> as partes que
+// caem dentro de algum intervalo de destaque (busca ativa).
+const renderHighlightRuns = (text: string, textOffset: number, ranges: HighlightRange[]): React.ReactNode => {
+  if (!text || ranges.length === 0) return text
+  const relevant = ranges.filter((r) => r.end > textOffset && r.start < textOffset + text.length)
+  if (relevant.length === 0) return text
+  const nodes: React.ReactNode[] = []
+  let cursor = 0
+  relevant.forEach((r, i) => {
+    const localStart = Math.max(0, r.start - textOffset)
+    const localEnd = Math.min(text.length, r.end - textOffset)
+    if (localStart > cursor) nodes.push(text.slice(cursor, localStart))
+    nodes.push(
+      <mark
+        key={`hl-${textOffset}-${i}`}
+        className={
+          r.isCurrent
+            ? 'bg-amber-400 text-black rounded-[2px]'
+            : 'bg-yellow-300/50 text-inherit rounded-[2px]'
+        }
+      >
+        {text.slice(localStart, localEnd)}
+      </mark>,
+    )
+    cursor = Math.max(cursor, localEnd)
+  })
+  if (cursor < text.length) nodes.push(text.slice(cursor))
+  return nodes
+}
+
+const renderMessage = (
+  content: string,
+  isMe: boolean,
+  onOpenConversation?: (jid: string) => void,
+  ranges: HighlightRange[] = EMPTY_RANGES,
+) => {
   if (!content) return null
   const parts = content.split(/(```[\s\S]*?```)/g)
 
+  let partCursor = 0
   return parts.map((part, i) => {
+    const partOffset = partCursor
+    partCursor += part.length
+
     if (part.startsWith('```') && part.endsWith('```')) {
       return (
         <pre
           key={i}
           className="bg-foreground/10 p-3 rounded-md my-2 text-[13px] overflow-x-auto font-mono text-foreground/90 border border-chat-border whitespace-pre-wrap"
         >
-          <code>{part.slice(3, -3)}</code>
+          <code>{renderHighlightRuns(part.slice(3, -3), partOffset + 3, ranges)}</code>
         </pre>
       )
     }
 
     const lines = part.split('\n')
     const result: React.ReactNode[] = []
-    let currentList: { type: 'ul' | 'ol'; items: string[] } | null = null
+    let currentList: { type: 'ul' | 'ol'; items: { text: string; offset: number }[] } | null = null
 
     const flushList = () => {
       if (currentList) {
@@ -320,7 +418,7 @@ const renderMessage = (content: string, isMe: boolean, onOpenConversation?: (jid
               className="list-disc pl-5 my-2 space-y-1 marker:text-foreground/50"
             >
               {currentList.items.map((item, idx) => (
-                <li key={idx}>{formatInline(item, isMe, onOpenConversation)}</li>
+                <li key={idx}>{formatInline(item.text, isMe, onOpenConversation, item.offset, ranges)}</li>
               ))}
             </ul>,
           )
@@ -331,7 +429,7 @@ const renderMessage = (content: string, isMe: boolean, onOpenConversation?: (jid
               className="list-decimal pl-5 my-2 space-y-1 marker:text-foreground/50"
             >
               {currentList.items.map((item, idx) => (
-                <li key={idx}>{formatInline(item, isMe, onOpenConversation)}</li>
+                <li key={idx}>{formatInline(item.text, isMe, onOpenConversation, item.offset, ranges)}</li>
               ))}
             </ol>,
           )
@@ -340,8 +438,11 @@ const renderMessage = (content: string, isMe: boolean, onOpenConversation?: (jid
       }
     }
 
+    let lineOffset = partOffset
     for (let j = 0; j < lines.length; j++) {
       const line = lines[j]
+      const thisLineOffset = lineOffset
+      lineOffset += line.length + 1
       const isUl = line.match(/^[-*]\s+(.*)$/)
       const isOl = line.match(/^\d+\.\s+(.*)$/)
       const isQuote = line.match(/^>\s+(.*)$/)
@@ -349,14 +450,15 @@ const renderMessage = (content: string, isMe: boolean, onOpenConversation?: (jid
       if (isUl) {
         if (currentList && currentList.type !== 'ul') flushList()
         if (!currentList) currentList = { type: 'ul', items: [] }
-        currentList.items.push(isUl[1])
+        currentList.items.push({ text: isUl[1], offset: thisLineOffset + (line.length - isUl[1].length) })
       } else if (isOl) {
         if (currentList && currentList.type !== 'ol') flushList()
         if (!currentList) currentList = { type: 'ol', items: [] }
-        currentList.items.push(isOl[1])
+        currentList.items.push({ text: isOl[1], offset: thisLineOffset + (line.length - isOl[1].length) })
       } else {
         flushList()
         if (isQuote) {
+          const quoteOffset = thisLineOffset + (line.length - isQuote[1].length)
           result.push(
             <blockquote
               key={`quote-${j}`}
@@ -366,7 +468,7 @@ const renderMessage = (content: string, isMe: boolean, onOpenConversation?: (jid
                   : 'border-secondary-foreground/40 bg-secondary-foreground/10 text-secondary-foreground'
               }`}
             >
-              {formatInline(isQuote[1], isMe, onOpenConversation)}
+              {formatInline(isQuote[1], isMe, onOpenConversation, quoteOffset, ranges)}
             </blockquote>,
           )
         } else {
@@ -377,7 +479,7 @@ const renderMessage = (content: string, isMe: boolean, onOpenConversation?: (jid
 
           result.push(
             <Fragment key={`line-${j}`}>
-              {formatInline(line, isMe, onOpenConversation)}
+              {formatInline(line, isMe, onOpenConversation, thisLineOffset, ranges)}
               {j < lines.length - 1 && !isNextBlock && <br />}
             </Fragment>,
           )
@@ -483,7 +585,89 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const dismissedRef = useRef(false)
   const [mediaView, setMediaView] = useState<ViewerMedia | null>(null)
 
+  // Busca dentro da conversa (Ctrl+F)
+  const [isFindOpen, setIsFindOpen] = useState(false)
+  const [findQuery, setFindQuery] = useState('')
+  const deferredFindQuery = useDeferredValue(findQuery)
+  const [matchCursor, setMatchCursor] = useState(0)
+  const findInputRef = useRef<HTMLInputElement>(null)
+  const messageRefs = useRef(new Map<string, HTMLDivElement>())
+  const lastScrolledMatchKeyRef = useRef<string | null>(null)
+
   const messages = conversation?.messages || []
+
+  const occurrences = useMemo(
+    () => computeOccurrences(messages, deferredFindQuery),
+    [messages, deferredFindQuery],
+  )
+  const totalMatches = occurrences.length
+  const safeCursor = totalMatches === 0 ? 0 : Math.min(matchCursor, totalMatches - 1)
+  const currentOccurrence = totalMatches === 0 ? null : occurrences[safeCursor]
+
+  const rangesByMessageId = useMemo(() => {
+    const map = new Map<string, HighlightRange[]>()
+    occurrences.forEach((occ, i) => {
+      const arr = map.get(occ.messageId) ?? []
+      arr.push({ start: occ.start, end: occ.end, isCurrent: i === safeCursor })
+      map.set(occ.messageId, arr)
+    })
+    return map
+  }, [occurrences, safeCursor])
+
+  useEffect(() => {
+    setMatchCursor(0)
+  }, [deferredFindQuery])
+
+  useEffect(() => {
+    setIsFindOpen(false)
+    setFindQuery('')
+    setMatchCursor(0)
+    lastScrolledMatchKeyRef.current = null
+  }, [device?.id, contact])
+
+  const goToMatch = useCallback((direction: 1 | -1) => {
+    if (totalMatches === 0) return
+    setMatchCursor((prev) => (prev + direction + totalMatches) % totalMatches)
+  }, [totalMatches])
+
+  const openFind = useCallback(() => {
+    setIsFindOpen(true)
+    requestAnimationFrame(() => findInputRef.current?.focus())
+  }, [])
+
+  const closeFind = useCallback(() => {
+    setIsFindOpen(false)
+    findInputRef.current?.blur()
+  }, [])
+
+  // Atalhos da busca (Ctrl+F/Cmd+F, Escape, Enter/Shift+Enter). Registrado em
+  // fase de captura: ChatHub.tsx tem seu próprio handler de Escape (fecha a
+  // conversa) que checa `e.defaultPrevented` — capture garante que este
+  // handler roda primeiro e chama preventDefault antes daquele ser avaliado,
+  // independente da ordem em que os efeitos foram montados.
+  useEffect(() => {
+    if (!device || !contact) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isFindShortcut = (e.key === 'f' || e.key === 'F') && (e.ctrlKey || e.metaKey)
+      if (isFindShortcut) {
+        e.preventDefault()
+        openFind()
+        return
+      }
+      if (!isFindOpen) return
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        closeFind()
+        return
+      }
+      if (e.key === 'Enter' && document.activeElement === findInputRef.current) {
+        e.preventDefault()
+        goToMatch(e.shiftKey ? -1 : 1)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown, { capture: true })
+    return () => window.removeEventListener('keydown', handleKeyDown, { capture: true })
+  }, [device, contact, isFindOpen, goToMatch, openFind, closeFind])
 
   useEffect(() => {
     getTriggers()
@@ -590,6 +774,22 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     el.addEventListener('scroll', handleScroll, { passive: true })
     return () => el.removeEventListener('scroll', handleScroll)
   }, [device?.id, contact])
+
+  // Busca (Ctrl+F): rola até a mensagem da ocorrência atual. Roda só quando a
+  // ocorrência realmente muda (não a cada refresh de `messages`), e desliga
+  // isNearBottomRef antes de rolar pra o auto-scroll-pro-fundo não "puxar" a
+  // tela de volta se chegar mensagem nova logo em seguida.
+  useEffect(() => {
+    if (!isFindOpen || !currentOccurrence) return
+    const key = `${currentOccurrence.messageId}:${currentOccurrence.start}`
+    if (lastScrolledMatchKeyRef.current === key) return
+    lastScrolledMatchKeyRef.current = key
+    const el = messageRefs.current.get(currentOccurrence.messageId)
+    if (el) {
+      isNearBottomRef.current = false
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }, [currentOccurrence?.messageId, currentOccurrence?.start, isFindOpen])
 
   useEffect(() => {
     if (conversation && conversation.unread_count > 0 && device && contact) {
@@ -1400,6 +1600,19 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
               </button>
             </>
           )}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => (isFindOpen ? closeFind() : openFind())}
+            title="Buscar na conversa (Ctrl+F)"
+            className={`rounded-full flex-shrink-0 transition-all duration-300 hover:scale-105 ${
+              isFindOpen
+                ? 'text-chat-text bg-chat-hover'
+                : 'text-chat-text/80 hover:text-chat-text hover:bg-chat-hover'
+            }`}
+          >
+            <Search className="h-5 w-5" />
+          </Button>
           <Popover open={isLabelsOpen} onOpenChange={setIsLabelsOpen}>
             <PopoverTrigger asChild>
               <Button
@@ -1615,6 +1828,23 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         </div>
       </div>
 
+      <div
+        className={`overflow-hidden flex-shrink-0 border-b border-chat-border bg-chat-header transition-all duration-300 ${
+          isFindOpen ? 'max-h-16 opacity-100' : 'max-h-0 opacity-0'
+        }`}
+      >
+        <MessageSearchBar
+          query={findQuery}
+          onQueryChange={setFindQuery}
+          currentIndex={safeCursor}
+          totalMatches={totalMatches}
+          onNext={() => goToMatch(1)}
+          onPrev={() => goToMatch(-1)}
+          onClose={closeFind}
+          inputRef={findInputRef}
+        />
+      </div>
+
       {/* Convite de designação pendente — só aparece pra quem foi convidado */}
       {assignment && assignment.status === 'invited' && assignment.invited_to === user?.id && (
         <div className="flex items-center justify-between px-4 py-2 bg-blue-950/20 border-b border-blue-800/20 flex-shrink-0">
@@ -1708,6 +1938,10 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                 </div>
               )}
             <div
+              ref={(el) => {
+                if (el) messageRefs.current.set(msg.id, el)
+                else messageRefs.current.delete(msg.id)
+              }}
               className={`flex flex-col animate-in fade-in slide-in-from-bottom-2 duration-300 ${isMe ? 'items-end' : 'items-start'}`}
             >
               {shouldShowSenderLabel && (
@@ -1953,7 +2187,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                      </div>
                    ) : msg.content?.trim() && !isTechnicalPlaceholder(msg.content) ? (
                      <div className="text-[15px] leading-relaxed break-words">
-                        {renderMessage(msg.content, isMe, onOpenConversationByJid)}
+                        {renderMessage(msg.content, isMe, onOpenConversationByJid, rangesByMessageId.get(msg.id) ?? EMPTY_RANGES)}
                        <span
   className={`inline-flex translate-y-[30%] items-center gap-1 whitespace-nowrap ${
     isMe ? 'float-right ml-3' : 'ml-1'

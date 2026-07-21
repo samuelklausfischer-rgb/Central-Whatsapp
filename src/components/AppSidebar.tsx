@@ -49,7 +49,7 @@ export function AppSidebar() {
         <div className="flex items-center gap-3">
           <img src={logoUrl} alt="Logo" className="h-9 w-9 object-contain" />
           <span className="text-xl font-display font-bold tracking-tight text-sidebar-foreground">
-            Central Cell
+            Central Whats
           </span>
         </div>
       </SidebarHeader>
