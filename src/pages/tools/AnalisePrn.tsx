@@ -278,10 +278,24 @@ function PrnAnalysisInner() {
         })),
       ]
 
-      const historicalRows = await extractHistoricalRows(
+      const { sheets: historicalRows, detectedMonths } = await extractHistoricalRows(
         [...downloadedHistoricalFiles, ...temporaryHistoricalFiles],
         historyMeta,
       )
+
+      if (detectedMonths.length === 3) {
+        toast({
+          title: 'Meses detectados',
+          description: `Histórico processado com base em: ${detectedMonths.map((m) => m.abbr).join(', ')}.`,
+        })
+      } else {
+        toast({
+          title: 'Meses não detectados automaticamente',
+          description:
+            'Não foi possível identificar os meses na planilha histórica. Verifique se a aba está nomeada "financas". Usando Mar/Abr/Mai como padrão.',
+          variant: 'destructive',
+        })
+      }
 
       const refDateStr = values.reference_date ? format(values.reference_date, 'yyyy-MM-dd') : undefined
 
@@ -306,6 +320,7 @@ function PrnAnalysisInner() {
       formData.append('historical_file_count', String(historicalSources.length))
       formData.append('historical_sheet_count', String(historicalRows.length))
       formData.append('historical_format', isConsolidatedFormat ? 'consolidated_v2' : 'legacy_v1')
+      if (detectedMonths.length > 0) formData.append('historical_months', JSON.stringify(detectedMonths))
       if (refDateStr) formData.append('reference_date', refDateStr)
 
       const duplicityPromise = createAnalise(dailyFile).catch((err) => {
@@ -332,16 +347,25 @@ function PrnAnalysisInner() {
         })
       }
 
-      setReportData({ ...normalized.payload, meta: response.meta || normalized.payload.meta })
+      setReportData({
+        ...normalized.payload,
+        meta: {
+          ...(response.meta || normalized.payload.meta || {}),
+          ...(detectedMonths.length > 0 ? { historical_months: detectedMonths } : {}),
+        },
+      })
 
       const duplicityRecord = await duplicityPromise
+
+      if (serverRunId) {
+        patchPrnRunMeta(serverRunId, {
+          ...(duplicityRecord ? { duplicity_analysis_id: duplicityRecord.id } : {}),
+          ...(detectedMonths.length > 0 ? { historical_months: detectedMonths } : {}),
+        }).catch((err) => console.error('Failed to patch run meta:', err))
+      }
+
       if (duplicityRecord) {
         setDuplicityAnalysis(duplicityRecord)
-        if (serverRunId) {
-          patchPrnRunMeta(serverRunId, { duplicity_analysis_id: duplicityRecord.id }).catch(
-            (err) => console.error('Failed to save duplicity_analysis_id:', err),
-          )
-        }
       }
 
       setUiState('report')

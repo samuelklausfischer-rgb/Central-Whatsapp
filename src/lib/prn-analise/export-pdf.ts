@@ -1,7 +1,8 @@
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { formatCurrency, formatPercentage } from '@/lib/prn-analise/formatters'
-import { buildCockpitRows, groupDuplicateRows, groupRowsByUnitConsolidated } from '@/lib/prn-analise/audit-utils'
+import { buildCockpitRows, groupDuplicateRows, groupRowsByUnitConsolidated, DEFAULT_MONTHS } from '@/lib/prn-analise/audit-utils'
+import type { MonthInfo } from '@/lib/prn-analise/audit-utils'
 import type { AnalysisRecord } from '@/services/prn-analise/analise-duplicidade'
 
 const UNIT_COLORS: Record<string, number[]> = {
@@ -172,7 +173,7 @@ function addDuplicitySection(doc: jsPDF, duplicityData: AnalysisRecord) {
   }
 }
 
-export async function generateAuditPDF(data: any, duplicityData?: AnalysisRecord) {
+export async function generateAuditPDF(data: any, duplicityData?: AnalysisRecord, months: MonthInfo[] = DEFAULT_MONTHS) {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
 
   const dateStr =
@@ -246,7 +247,7 @@ export async function generateAuditPDF(data: any, duplicityData?: AnalysisRecord
     doc.text(`${blockRows.length} registros encontrados`, 14, currentY)
     currentY += 6
 
-    const tableHead = ['Favorecido', 'Categoria', 'Data Reg.', 'Mar', 'Abr', 'Maio', 'Atual', 'Var %']
+    const tableHead = ['Favorecido', 'Categoria', 'Data Reg.', months[0]?.abbr ?? 'M1', months[1]?.abbr ?? 'M2', months[2]?.abbr ?? 'M3', 'Atual', 'Var %']
     const tableRows: any[] = []
     let groupIndex = 0
     for (const row of blockRows) {
@@ -258,9 +259,9 @@ export async function generateAuditPDF(data: any, duplicityData?: AnalysisRecord
           row.favorecido || 'Desconhecido',
           row.categoria || 'Indefinido',
           row.dataRegistro || '—',
-          formatCurrency(row.mar || 0),
-          formatCurrency(row.abr || 0),
-          formatCurrency(row.mai || 0),
+          formatCurrency(row.m1 || 0),
+          formatCurrency(row.m2 || 0),
+          formatCurrency(row.m3 || 0),
           formatCurrency(row.atual || 0),
           formatPercentage(row.varPct || 0),
         ],
@@ -344,7 +345,7 @@ export async function generateAuditPDF(data: any, duplicityData?: AnalysisRecord
   doc.save(`Auditoria_PRN_${requestId}.pdf`)
 }
 
-export async function generateGroupedAuditPDF(data: any, duplicityData?: AnalysisRecord) {
+export async function generateGroupedAuditPDF(data: any, duplicityData?: AnalysisRecord, months: MonthInfo[] = DEFAULT_MONTHS) {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
 
   const dateStr =
@@ -398,15 +399,15 @@ export async function generateGroupedAuditPDF(data: any, duplicityData?: Analysi
     doc.text(`${groupedRows.length} registros consolidados`, 14, currentY)
     currentY += 6
 
-    const tableHead = ['Favorecido', 'Categoria', 'Data Reg.', 'Mar', 'Abr', 'Maio', 'Atual', 'Var %']
+    const tableHead = ['Favorecido', 'Categoria', 'Data Reg.', months[0]?.abbr ?? 'M1', months[1]?.abbr ?? 'M2', months[2]?.abbr ?? 'M3', 'Atual', 'Var %']
     const tableRows = groupedRows.map((row) => ({
       values: [
         row.favorecido || 'Desconhecido',
         row.categoria || 'Indefinido',
         row.dataRegistro || '—',
-        formatCurrency(row.mar || 0),
-        formatCurrency(row.abr || 0),
-        formatCurrency(row.mai || 0),
+        formatCurrency(row.m1 || 0),
+        formatCurrency(row.m2 || 0),
+        formatCurrency(row.m3 || 0),
         formatCurrency(row.atual || 0),
         formatPercentage(row.varPct || 0),
       ],

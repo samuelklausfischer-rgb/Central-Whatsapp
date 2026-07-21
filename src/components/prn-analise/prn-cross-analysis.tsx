@@ -17,7 +17,7 @@ import {
 } from 'lucide-react'
 import { generateAuditPDF, generateGroupedAuditPDF } from '@/lib/prn-analise/export-pdf'
 import { generateAuditExcel, generateGroupedAuditExcel } from '@/lib/prn-analise/export-excel'
-import { buildCockpitRows, groupDuplicateRows, CockpitRow } from '@/lib/prn-analise/audit-utils'
+import { buildCockpitRows, groupDuplicateRows, CockpitRow, MonthInfo, DEFAULT_MONTHS } from '@/lib/prn-analise/audit-utils'
 import { downloadDailyFile } from '@/services/prn-analise/prn-service'
 import type { AnalysisRecord } from '@/services/prn-analise/analise-duplicidade'
 import {
@@ -170,6 +170,11 @@ export function PrnCrossAnalysis({ data, fullPayload, duplicityAnalysis, runId }
   const referenceDate: string | undefined =
     fullPayload?.referenceDateUsed || fullPayload?.meta?.data_referencia
 
+  const months = useMemo<MonthInfo[]>(
+    () => fullPayload?.meta?.historical_months ?? DEFAULT_MONTHS,
+    [fullPayload],
+  )
+
   useEffect(() => {
     if (!runId) return
     getObservationsByRunId(runId)
@@ -221,7 +226,7 @@ export function PrnCrossAnalysis({ data, fullPayload, duplicityAnalysis, runId }
     if (byBlock && typeof byBlock === 'object') {
       for (const key of ['prn_matriz', 'camboriu', 'palhoca']) {
         const blockRows = Array.isArray(byBlock[key]?.rows) ? byBlock[key].rows : []
-        result.push(...buildCockpitRows(key, blockRows))
+        result.push(...buildCockpitRows(key, blockRows, months))
       }
     } else {
       const rows = Array.isArray(data?.rows) ? data.rows : Array.isArray(data) ? data : []
@@ -231,12 +236,12 @@ export function PrnCrossAnalysis({ data, fullPayload, duplicityAnalysis, runId }
         ;(byBlockFallback[b] = byBlockFallback[b] || []).push(row)
       }
       for (const [key, blockRows] of Object.entries(byBlockFallback)) {
-        result.push(...buildCockpitRows(key, blockRows))
+        result.push(...buildCockpitRows(key, blockRows, months))
       }
     }
 
     return groupDuplicateRows(result)
-  }, [data])
+  }, [data, months])
 
   const rowsByUnidade = useMemo(() => {
     const grouped: Record<string, CockpitRow[]> = {
@@ -276,22 +281,22 @@ export function PrnCrossAnalysis({ data, fullPayload, duplicityAnalysis, runId }
 
   const handleExport = async () => {
     setIsExporting(true)
-    try { await generateAuditPDF(fullPayload, duplicityAnalysis ?? undefined) } finally { setIsExporting(false) }
+    try { await generateAuditPDF(fullPayload, duplicityAnalysis ?? undefined, months) } finally { setIsExporting(false) }
   }
 
   const handleExportGrouped = async () => {
     setIsExportingGrouped(true)
-    try { await generateGroupedAuditPDF(fullPayload, duplicityAnalysis ?? undefined) } finally { setIsExportingGrouped(false) }
+    try { await generateGroupedAuditPDF(fullPayload, duplicityAnalysis ?? undefined, months) } finally { setIsExportingGrouped(false) }
   }
 
   const handleExportExcel = async () => {
     setIsExportingExcel(true)
-    try { await generateAuditExcel(fullPayload, duplicityAnalysis ?? undefined, observations) } finally { setIsExportingExcel(false) }
+    try { await generateAuditExcel(fullPayload, duplicityAnalysis ?? undefined, observations, months) } finally { setIsExportingExcel(false) }
   }
 
   const handleExportExcelGrouped = async () => {
     setIsExportingExcelGrouped(true)
-    try { await generateGroupedAuditExcel(fullPayload, duplicityAnalysis ?? undefined, observations) } finally { setIsExportingExcelGrouped(false) }
+    try { await generateGroupedAuditExcel(fullPayload, duplicityAnalysis ?? undefined, observations, months) } finally { setIsExportingExcelGrouped(false) }
   }
 
   const handleDownloadBruto = async () => {
@@ -383,7 +388,7 @@ export function PrnCrossAnalysis({ data, fullPayload, duplicityAnalysis, runId }
               <div className="p-2 bg-blue-100 rounded-xl">
                 <History className="h-6 w-6 text-blue-600" />
               </div>
-              Cockpit Financeiro — Cruzamento vs Maio
+              Cockpit Financeiro — Cruzamento vs {months[2]?.abbr ?? 'Atual'}
             </h3>
             <p className="text-gray-400 text-[10px] font-bold uppercase tracking-[0.2em] pl-14">
               {allRows.length} favorecidos · {counts.Aumento} aumentos · {counts.Queda} quedas ·{' '}
@@ -522,9 +527,9 @@ export function PrnCrossAnalysis({ data, fullPayload, duplicityAnalysis, runId }
                         <SortTh label="Favorecido" field="favorecido" />
                         <SortTh label="Categoria" field="categoria" />
                         <SortTh label="Data Reg." field="dataRegistro" align="center" />
-                        <SortTh label="Mar" field="mar" align="right" />
-                        <SortTh label="Abr" field="abr" align="right" />
-                        <SortTh label="Maio" field="mai" align="right" />
+                        <SortTh label={months[0]?.abbr ?? 'M1'} field="m1" align="right" />
+                        <SortTh label={months[1]?.abbr ?? 'M2'} field="m2" align="right" />
+                        <SortTh label={months[2]?.abbr ?? 'M3'} field="m3" align="right" />
                         <SortTh label="Média" field="media" align="right" />
                         <SortTh label="Atual" field="atual" align="right" />
                         <SortTh label="Var %" field="varPct" align="right" />
@@ -582,15 +587,15 @@ export function PrnCrossAnalysis({ data, fullPayload, duplicityAnalysis, runId }
                             </td>
 
                             <td className="px-3 py-3 text-right whitespace-nowrap">
-                              <MoneyCell value={row.mar} />
+                              <MoneyCell value={row.m1} />
                             </td>
 
                             <td className="px-3 py-3 text-right whitespace-nowrap">
-                              <MoneyCell value={row.abr} />
+                              <MoneyCell value={row.m2} />
                             </td>
 
                             <td className="px-3 py-3 text-right whitespace-nowrap">
-                              <MoneyCell value={row.mai} />
+                              <MoneyCell value={row.m3} />
                             </td>
 
                             <td className="px-3 py-3 text-right whitespace-nowrap">

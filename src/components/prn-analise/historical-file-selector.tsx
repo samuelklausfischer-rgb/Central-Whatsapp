@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type MouseEvent } from 'react'
 import { format } from 'date-fns'
-import { FileSpreadsheet, Loader2, Trash2, UploadCloud, CheckCircle2 } from 'lucide-react'
+import { FileSpreadsheet, Loader2, Trash2, UploadCloud, CheckCircle2, Download } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -18,6 +18,7 @@ import {
   listHistoryFiles,
   uploadHistoryFile,
   deleteHistoryFile,
+  downloadHistoryFile,
 } from '@/services/prn-analise/prn-service'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
@@ -65,6 +66,7 @@ export function HistoricalFileSelector({
   const [isUploading, setIsUploading] = useState(false)
   const [fileToDelete, setFileToDelete] = useState<HistoryFileReference | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [downloadingFile, setDownloadingFile] = useState<string | null>(null)
   const selection = useMemo(() => normalizeSelection(value), [value])
 
   const fetchFiles = async () => {
@@ -147,6 +149,28 @@ export function HistoricalFileSelector({
     } finally {
       setIsUploading(false)
       if (e.target) e.target.value = ''
+    }
+  }
+
+  const handleDownload = async (file: HistoryFileReference, e: MouseEvent) => {
+    e.stopPropagation()
+    setDownloadingFile(file.name)
+    try {
+      const blob = await downloadHistoryFile(file.name, file.originalFilename || undefined)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = file.originalFilename || file.name
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (error: any) {
+      toast({
+        title: 'Erro ao baixar',
+        description: error.message || 'Não foi possível baixar o arquivo.',
+        variant: 'destructive',
+      })
+    } finally {
+      setDownloadingFile(null)
     }
   }
 
@@ -276,15 +300,31 @@ export function HistoricalFileSelector({
                   </div>
                 </div>
               </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={(e) => handleDeleteClick(file, e)}
-                className="h-8 w-8 shrink-0 p-0 text-gray-300 hover:bg-red-50 hover:text-red-500 transition-all"
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
+              <div className="flex items-center gap-1 shrink-0">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={(e) => handleDownload(file, e)}
+                  disabled={downloadingFile === file.name}
+                  className="h-8 w-8 p-0 text-gray-300 hover:bg-blue-50 hover:text-blue-500 transition-all"
+                  title="Baixar arquivo"
+                >
+                  {downloadingFile === file.name
+                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                    : <Download className="h-4 w-4" />}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={(e) => handleDeleteClick(file, e)}
+                  className="h-8 w-8 p-0 text-gray-300 hover:bg-red-50 hover:text-red-500 transition-all"
+                  title="Excluir arquivo"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           )
         })}

@@ -1,18 +1,21 @@
 import ExcelJS from 'exceljs'
-import { buildCockpitRows, groupDuplicateRows, groupRowsByUnitConsolidated } from '@/lib/prn-analise/audit-utils'
+import { buildCockpitRows, groupDuplicateRows, groupRowsByUnitConsolidated, DEFAULT_MONTHS } from '@/lib/prn-analise/audit-utils'
+import type { MonthInfo } from '@/lib/prn-analise/audit-utils'
 import type { AnalysisRecord } from '@/services/prn-analise/analise-duplicidade'
 
-const TABLE_HEADERS = [
-  'Favorecido',
-  'Categoria',
-  'Data Reg.',
-  'Mar',
-  'Abr',
-  'Maio',
-  'Atual',
-  'Var %',
-  'OBS do Financeiro',
-]
+function buildTableHeaders(months: MonthInfo[]): string[] {
+  return [
+    'Favorecido',
+    'Categoria',
+    'Data Reg.',
+    months[0]?.abbr ?? 'M1',
+    months[1]?.abbr ?? 'M2',
+    months[2]?.abbr ?? 'M3',
+    'Atual',
+    'Var %',
+    'OBS do Financeiro',
+  ]
+}
 
 const UNIT_HEADER_COLORS: Record<string, string> = {
   'PRN MATRIZ': 'FF1E40AF',
@@ -276,6 +279,7 @@ export async function generateAuditExcel(
   data: any,
   duplicityData?: AnalysisRecord,
   observations?: Record<string, { observation: string }>,
+  months: MonthInfo[] = DEFAULT_MONTHS,
 ) {
   const workbook = new ExcelJS.Workbook()
   const worksheet = workbook.addWorksheet('Auditoria Detalhada')
@@ -305,7 +309,7 @@ export async function generateAuditExcel(
     styleUnitHeader(unitRow, unitLabel)
     worksheet.mergeCells(`A${unitRow.number}:I${unitRow.number}`)
 
-    const headerRow = worksheet.addRow(TABLE_HEADERS)
+    const headerRow = worksheet.addRow(buildTableHeaders(months))
     styleTableHeader(headerRow)
 
     const unitBg = UNIT_ROW_COLORS[unitLabel] || 'FFFFFFFF'
@@ -321,9 +325,9 @@ export async function generateAuditExcel(
         row.favorecido,
         row.categoria,
         row.dataRegistro || '—',
-        formatBRL(row.mar),
-        formatBRL(row.abr),
-        formatBRL(row.mai),
+        formatBRL(row.m1),
+        formatBRL(row.m2),
+        formatBRL(row.m3),
         formatBRL(row.atual),
         `${row.varPct?.toFixed(2)}%`,
         obsText,
@@ -393,6 +397,7 @@ export async function generateGroupedAuditExcel(
   data: any,
   duplicityData?: AnalysisRecord,
   observations?: Record<string, { observation: string }>,
+  months: MonthInfo[] = DEFAULT_MONTHS,
 ) {
   const workbook = new ExcelJS.Workbook()
   const worksheet = workbook.addWorksheet('Consolidado por Unidade')
@@ -421,7 +426,7 @@ export async function generateGroupedAuditExcel(
     styleUnitHeader(unitRow, unitLabel)
     worksheet.mergeCells(`A${unitRow.number}:I${unitRow.number}`)
 
-    const headerRow = worksheet.addRow(TABLE_HEADERS)
+    const headerRow = worksheet.addRow(buildTableHeaders(months))
     styleTableHeader(headerRow)
 
     const unitBg = UNIT_ROW_COLORS[unitLabel] || 'FFFFFFFF'
@@ -437,9 +442,9 @@ export async function generateGroupedAuditExcel(
         row.favorecido,
         row.categoria,
         row.dataRegistro || '—',
-        formatBRL(row.mar),
-        formatBRL(row.abr),
-        formatBRL(row.mai),
+        formatBRL(row.m1),
+        formatBRL(row.m2),
+        formatBRL(row.m3),
         formatBRL(row.atual),
         `${row.varPct?.toFixed(2)}%`,
         obsText,
