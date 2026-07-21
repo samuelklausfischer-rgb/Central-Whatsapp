@@ -3,6 +3,13 @@ const { autoUpdater } = require('electron-updater')
 const log = require('electron-log')
 const path = require('path')
 
+// Desabilita QUIC (HTTP/3): o Chromium interno tenta negociar QUIC por padrão
+// e, quando o servidor/proxy de destino não responde bem, a conexão trava por
+// vários segundos até falhar com "Failed to fetch" — mesmo com o servidor e a
+// rede saudáveis. Um navegador comum cai para HTTP/1.1/2 de forma tolerante;
+// o Electron precisa dessa flag explícita para o mesmo comportamento.
+app.commandLine.appendSwitch('disable-quic')
+
 const isDev = process.env.NODE_ENV === 'development'
 
 autoUpdater.logger = log

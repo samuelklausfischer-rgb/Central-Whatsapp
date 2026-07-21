@@ -253,6 +253,29 @@ export async function downloadDailyFile(storageName: string, originalFilename?: 
   URL.revokeObjectURL(url)
 }
 
+const FETCH_TIMEOUT_MS = 15000
+
+async function fetchWithTimeoutAndRetry(url: string, init: RequestInit, attempts = 2): Promise<Response> {
+  let lastError: unknown = null
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+
+    try {
+      return await fetch(url, { ...init, signal: controller.signal })
+    } catch (err) {
+      lastError = err
+      // Só tenta de novo em falha de rede (ex.: "Failed to fetch"), não em erros de aplicação
+      if (attempt === attempts) throw err
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  }
+
+  throw lastError
+}
+
 export async function submitPrnAnalysisJson(formData: FormData) {
   const dailyFile = formData.get('daily_file')
   let dailyFileStorageName: string | null = null
@@ -267,7 +290,7 @@ export async function submitPrnAnalysisJson(formData: FormData) {
   const startedAt = Date.now()
 
   try {
-    const response = await fetch(PRN_API_URL, {
+    const response = await fetchWithTimeoutAndRetry(PRN_API_URL, {
       method: 'POST',
       body: formData,
     })
