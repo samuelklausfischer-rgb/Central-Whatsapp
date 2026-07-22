@@ -84,7 +84,7 @@ const summarizeHistoricalSources = (files: Array<{ original_filename: string }>)
 }
 
 function FinanceiroLoginGate({ children }: { children: React.ReactNode }) {
-  const { user, loading, signIn, signOut } = useFinanceiroAuth()
+  const { user, loading, error, signIn, signOut, retry } = useFinanceiroAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [signingIn, setSigningIn] = useState(false)
@@ -97,6 +97,10 @@ function FinanceiroLoginGate({ children }: { children: React.ReactNode }) {
         <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
       </div>
     )
+  }
+
+  if (error) {
+    return <ErrorState error={{ message: error }} onReset={retry} />
   }
 
   if (!user) {

@@ -28,7 +28,7 @@ const TAXA_LABELS: Record<string, string> = {
 }
 
 function FinanceiroLoginGate({ children }: { children: ReactNode }) {
-  const { user, loading, signIn, signOut } = useFinanceiroAuth()
+  const { user, loading, error, signIn, signOut, retry } = useFinanceiroAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [signingIn, setSigningIn] = useState(false)
@@ -39,6 +39,15 @@ function FinanceiroLoginGate({ children }: { children: ReactNode }) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] p-8 gap-4">
+        <p className="text-destructive text-sm font-medium text-center max-w-sm">{error}</p>
+        <Button onClick={retry}>Tentar novamente</Button>
       </div>
     )
   }
