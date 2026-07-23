@@ -7,6 +7,15 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.190',
+    date: '2026-07-23 16:06',
+    title: 'Análise PRN e Rateio Mobilemed liberados para o setor Financeiro',
+    details: [
+      '🔓 Quem tem o Setor marcado como "Financeiro" (em Gestão de Equipe) agora acessa as duas ferramentas — antes era só admin',
+      '🔑 Login único: não existe mais uma segunda tela pedindo email/senha separados para entrar nessas ferramentas',
+    ],
+  },
+  {
     version: '0.0.177',
     date: '2026-07-09 16:30',
     title: 'Aviso quando o contato apaga uma mensagem',

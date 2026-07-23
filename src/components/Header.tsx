@@ -34,6 +34,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useAuth } from '@/hooks/use-auth'
+import { canAccessFinanceiroTools } from '@/lib/permissions'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { ReleaseNotesDialog } from '@/components/ReleaseNotesDialog'
 import { NotificationsDialog } from '@/components/NotificationsDialog'
@@ -73,7 +74,7 @@ function FerramentasMenu() {
   const navigate = useNavigate()
   const { user } = useAuth()
 
-  const items = user?.is_admin ? [...ferramentas, prnItem, rateioItem] : ferramentas
+  const items = canAccessFinanceiroTools(user) ? [...ferramentas, prnItem, rateioItem] : ferramentas
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {

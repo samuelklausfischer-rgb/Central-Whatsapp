@@ -14,6 +14,7 @@ import Login from './pages/Login'
 import { AuthProvider, useAuth } from './hooks/use-auth'
 import { UpdateGate } from './components/UpdateGate'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { canAccessFinanceiroTools } from './lib/permissions'
 
 const Index = lazy(() => import('./pages/Index'))
 const ChatHub = lazy(() => import('./pages/ChatHub'))
@@ -48,6 +49,11 @@ const AdminRoute = () => {
   return user?.is_admin ? <Outlet /> : <Navigate to="/dashboard" replace />
 }
 
+const FinanceiroToolRoute = () => {
+  const { user } = useAuth()
+  return canAccessFinanceiroTools(user) ? <Outlet /> : <Navigate to="/dashboard" replace />
+}
+
 const App = () => {
   const appContent = (
     <AuthProvider>
@@ -70,6 +76,8 @@ const App = () => {
                 <Route path="/scheduled-messages" element={<ScheduledMessages />} />
                 <Route element={<AdminRoute />}>
                   <Route path="/admin" element={<AdminPage />} />
+                </Route>
+                <Route element={<FinanceiroToolRoute />}>
                   <Route path="/ferramentas/analise-prn" element={<AnalisePrn />} />
                   <Route path="/ferramentas/rateio-mobilemed" element={<RateioMobilemed />} />
                 </Route>

@@ -1,13 +1,11 @@
 import { useState, useEffect } from 'react'
 import { z } from 'zod'
 import { format } from 'date-fns'
-import { RefreshCw, ArrowLeft, BrainCircuit, ScanSearch, LogIn, Loader2, LogOut } from 'lucide-react'
+import { RefreshCw, ArrowLeft, BrainCircuit, ScanSearch, Loader2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import {
   submitPrnAnalysisJson,
   getPrnHistoryRuns,
@@ -84,12 +82,7 @@ const summarizeHistoricalSources = (files: Array<{ original_filename: string }>)
 }
 
 function FinanceiroLoginGate({ children }: { children: React.ReactNode }) {
-  const { user, loading, error, signIn, signOut, retry } = useFinanceiroAuth()
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [signingIn, setSigningIn] = useState(false)
-  const [loginError, setLoginError] = useState<string | null>(null)
-  const { toast } = useToast()
+  const { user, loading, error, retry } = useFinanceiroAuth()
 
   if (loading) {
     return (
@@ -99,96 +92,16 @@ function FinanceiroLoginGate({ children }: { children: React.ReactNode }) {
     )
   }
 
-  if (error) {
-    return <ErrorState error={{ message: error }} onReset={retry} />
-  }
-
-  if (!user) {
-    const handleLogin = async (e: React.FormEvent) => {
-      e.preventDefault()
-      setSigningIn(true)
-      setLoginError(null)
-      const { error } = await signIn(email, password)
-      setSigningIn(false)
-      if (error) {
-        setLoginError('Credenciais inválidas. Verifique seu e-mail e senha.')
-      } else {
-        toast({ title: 'Conectado', description: 'Conta financeira vinculada com sucesso.' })
-      }
-    }
-
+  if (error || !user) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] p-8">
-        <Card className="w-full max-w-sm border-gray-200 shadow-lg">
-          <CardHeader className="text-center pb-4">
-            <div className="p-3 bg-blue-100 rounded-2xl border border-blue-200 w-fit mx-auto mb-3">
-              <LogIn className="h-7 w-7 text-blue-600" />
-            </div>
-            <CardTitle className="text-xl font-black tracking-tight text-gray-900">Conta Financeira</CardTitle>
-            <CardDescription className="text-gray-500 text-sm">
-              Conecte sua conta para acessar a Análise PRN e os dados históricos.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleLogin} className="space-y-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="fin-email" className="text-xs font-bold uppercase tracking-widest text-gray-600">E-mail</Label>
-                <Input
-                  id="fin-email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="seu@email.com"
-                  required
-                  className="rounded-xl border-gray-200 h-11"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="fin-password" className="text-xs font-bold uppercase tracking-widest text-gray-600">Senha</Label>
-                <Input
-                  id="fin-password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  required
-                  className="rounded-xl border-gray-200 h-11"
-                />
-              </div>
-              {loginError && (
-                <p className="text-red-500 text-xs font-bold bg-red-50 border border-red-200 rounded-xl px-3 py-2">
-                  {loginError}
-                </p>
-              )}
-              <Button
-                type="submit"
-                disabled={signingIn}
-                className="w-full h-11 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold"
-              >
-                {signingIn ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <LogIn className="h-4 w-4 mr-2" />}
-                {signingIn ? 'Conectando...' : 'Conectar'}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-      </div>
+      <ErrorState
+        error={{ message: error || 'Não foi possível liberar seu acesso ao módulo financeiro.' }}
+        onReset={retry}
+      />
     )
   }
 
-  return (
-    <>
-      <div className="flex justify-end px-4 md:px-10 pt-4">
-        <button
-          onClick={() => signOut()}
-          className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-gray-400 hover:text-gray-600 transition-colors"
-        >
-          <LogOut className="h-3.5 w-3.5" />
-          Desconectar conta financeira
-        </button>
-      </div>
-      {children}
-    </>
-  )
+  return <>{children}</>
 }
 
 function PrnAnalysisInner() {

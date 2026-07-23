@@ -1,9 +1,7 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { LogIn, LogOut, Loader2, UploadCloud, Download, FileSpreadsheet } from 'lucide-react'
+import { Loader2, UploadCloud, Download, FileSpreadsheet } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { Card, CardContent } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
 import { FinanceiroAuthProvider, useFinanceiroAuth } from '@/contexts/financeiro-auth-context'
 import { useRateioUpload, useRateioHistorico } from '@/hooks/use-rateio'
@@ -28,12 +26,7 @@ const TAXA_LABELS: Record<string, string> = {
 }
 
 function FinanceiroLoginGate({ children }: { children: ReactNode }) {
-  const { user, loading, error, signIn, signOut, retry } = useFinanceiroAuth()
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [signingIn, setSigningIn] = useState(false)
-  const [loginError, setLoginError] = useState<string | null>(null)
-  const { toast } = useToast()
+  const { user, loading, error, retry } = useFinanceiroAuth()
 
   if (loading) {
     return (
@@ -43,101 +36,18 @@ function FinanceiroLoginGate({ children }: { children: ReactNode }) {
     )
   }
 
-  if (error) {
+  if (error || !user) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] p-8 gap-4">
-        <p className="text-destructive text-sm font-medium text-center max-w-sm">{error}</p>
+        <p className="text-destructive text-sm font-medium text-center max-w-sm">
+          {error || 'Não foi possível liberar seu acesso ao módulo financeiro.'}
+        </p>
         <Button onClick={retry}>Tentar novamente</Button>
       </div>
     )
   }
 
-  if (!user) {
-    const handleLogin = async (e: React.FormEvent) => {
-      e.preventDefault()
-      setSigningIn(true)
-      setLoginError(null)
-      const { error } = await signIn(email, password)
-      setSigningIn(false)
-      if (error) {
-        setLoginError('Credenciais inválidas. Verifique seu e-mail e senha.')
-      } else {
-        toast({ title: 'Conectado', description: 'Conta financeira vinculada com sucesso.' })
-      }
-    }
-
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] p-8">
-        <Card className="w-full max-w-sm border-border shadow-lg">
-          <CardHeader className="text-center pb-4">
-            <div className="p-3 bg-primary/10 rounded-2xl border border-primary/20 w-fit mx-auto mb-3">
-              <LogIn className="h-7 w-7 text-primary" />
-            </div>
-            <CardTitle className="text-xl font-black tracking-tight text-foreground">Conta Financeira</CardTitle>
-            <CardDescription className="text-muted-foreground text-sm">
-              Conecte sua conta para acessar o Rateio Mobilemed e o histórico de execuções.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleLogin} className="space-y-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="rateio-fin-email" className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-                  E-mail
-                </Label>
-                <Input
-                  id="rateio-fin-email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="seu@email.com"
-                  required
-                  className="rounded-xl h-11"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="rateio-fin-password" className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-                  Senha
-                </Label>
-                <Input
-                  id="rateio-fin-password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  required
-                  className="rounded-xl h-11"
-                />
-              </div>
-              {loginError && (
-                <p className="text-destructive text-xs font-bold bg-destructive/10 border border-destructive/30 rounded-xl px-3 py-2">
-                  {loginError}
-                </p>
-              )}
-              <Button type="submit" disabled={signingIn} className="w-full h-11 rounded-xl font-bold">
-                {signingIn ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <LogIn className="h-4 w-4 mr-2" />}
-                {signingIn ? 'Conectando...' : 'Conectar'}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-
-  return (
-    <>
-      <div className="flex justify-end px-4 md:px-6 pt-4">
-        <button
-          onClick={() => signOut()}
-          className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <LogOut className="h-3.5 w-3.5" />
-          Desconectar conta financeira
-        </button>
-      </div>
-      {children}
-    </>
-  )
+  return <>{children}</>
 }
 
 function RateioInner() {

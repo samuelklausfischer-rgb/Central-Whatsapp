@@ -45,8 +45,9 @@ import { useAuth } from '@/hooks/use-auth'
 import { Badge } from '@/components/ui/badge'
 import { extractFieldErrors } from '@/lib/errors'
 import { SuperAdminPanel } from '@/components/admin/SuperAdminPanel'
+import { FINANCEIRO_DEPARTMENT } from '@/lib/permissions'
 
-const DEFAULT_DEPARTMENTS = ['Financeiro', 'Administrativo', 'RH', 'Comercial']
+const DEFAULT_DEPARTMENTS = [FINANCEIRO_DEPARTMENT, 'Administrativo', 'RH', 'Comercial']
 const NO_DEPARTMENT = '__none__'
 
 const getDepartmentLabel = (department?: string | null) => department || 'Sem setor'
