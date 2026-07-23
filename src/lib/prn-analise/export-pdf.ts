@@ -210,7 +210,7 @@ export async function generateAuditPDF(data: any, duplicityData?: AnalysisRecord
   const allRows: any[] = []
   for (const [key, label] of Object.entries(blockKeys)) {
     const blockRows = Array.isArray(byBlock[key]?.rows) ? byBlock[key].rows : []
-    const cockpitRows = buildCockpitRows(key, blockRows)
+    const cockpitRows = buildCockpitRows(key, blockRows, months)
     const grouped = groupDuplicateRows(cockpitRows)
     for (const r of grouped) {
       ;(r as any)._unidadeLabel = label
@@ -383,7 +383,7 @@ export async function generateGroupedAuditPDF(data: any, duplicityData?: Analysi
 
   for (const unit of unitConfigs) {
     const blockRows = Array.isArray(byBlock[unit.key]?.rows) ? byBlock[unit.key].rows : []
-    const cockpitRows = buildCockpitRows(unit.key, blockRows)
+    const cockpitRows = buildCockpitRows(unit.key, blockRows, months)
     const groupedRows = groupRowsByUnitConsolidated(cockpitRows)
     if (groupedRows.length === 0) continue
     if (currentY > 180) {

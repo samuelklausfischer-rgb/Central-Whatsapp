@@ -301,7 +301,7 @@ export async function generateAuditExcel(
   for (const unitLabel of ['PRN MATRIZ', 'CAMBORIU', 'PALHOCA']) {
     const key = UNIT_KEYS[unitLabel]
     const blockRows = Array.isArray(crossAnalysis[key]?.rows) ? crossAnalysis[key].rows : []
-    const cockpitRows = buildCockpitRows(key, blockRows)
+    const cockpitRows = buildCockpitRows(key, blockRows, months)
     const grouped = groupDuplicateRows(cockpitRows)
     if (grouped.length === 0) continue
 
@@ -418,7 +418,7 @@ export async function generateGroupedAuditExcel(
 
   for (const [unitLabel, key] of Object.entries(UNIT_KEYS)) {
     const blockRows = Array.isArray(crossAnalysis[key]?.rows) ? crossAnalysis[key].rows : []
-    const cockpitRows = buildCockpitRows(key, blockRows)
+    const cockpitRows = buildCockpitRows(key, blockRows, months)
     const grouped = groupRowsByUnitConsolidated(cockpitRows)
     if (grouped.length === 0) continue
 
