@@ -1,4 +1,12 @@
-﻿import React, { useState, useEffect, useRef, useMemo, useCallback, useDeferredValue, Fragment } from 'react'
+﻿import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, useDeferredValue, Fragment } from 'react'
+import {
+  conversationDraftKey,
+  saveDraft,
+  getDraft,
+  clearDraft,
+  EMPTY_DRAFT,
+  type ConversationDraft,
+} from '@/stores/conversationDrafts'
 import logoUrl from '/logo.png'
 import {
   ArrowLeft,
@@ -492,6 +500,29 @@ const renderMessage = (
   })
 }
 
+// Formatter de módulo, criado uma vez. Antes, cada balão chamava
+// `toLocaleTimeString` — que constrói um Intl.DateTimeFormat novo por chamada.
+// Com 500 balões e a lista re-renderizando a cada tecla digitada, era
+// tipicamente a operação mais cara do laço.
+const timeFormatter = new Intl.DateTimeFormat([], { hour: '2-digit', minute: '2-digit' })
+
+// Só re-executa o parser de markdown/telefone/emoji quando o conteúdo (ou o
+// destaque da busca) muda de verdade. React continua reconciliando os 500 nós,
+// mas deixa de re-parsear todos eles a cada tecla no compositor.
+const MessageBody = React.memo(function MessageBody({
+  content,
+  isMe,
+  onOpenConversation,
+  ranges,
+}: {
+  content: string
+  isMe: boolean
+  onOpenConversation?: (jid: string) => void
+  ranges: HighlightRange[]
+}) {
+  return <>{renderMessage(content, isMe, onOpenConversation, ranges)}</>
+})
+
 const getDateKey = (value: string) => {
   const date = new Date(value)
   return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
@@ -624,6 +655,139 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     setMatchCursor(0)
     lastScrolledMatchKeyRef.current = null
   }, [device?.id, contact])
+
+  // ───────────────────────── Rascunho por conversa ─────────────────────────
+  // Este componente NÃO remonta ao trocar de contato (ChatHub renderiza sem
+  // `key`), então tudo que o atendente digitou continua no compositor da próxima
+  // conversa. Aqui o estado de composição passa a ficar preso à conversa em que
+  // foi digitado.
+
+  const convKey = conversationDraftKey(device?.id, contact)
+  const convKeyRef = useRef<string | null>(convKey)
+  const draftKeyRef = useRef<string | null>(convKey)
+  const liveDraftRef = useRef<ConversationDraft>(EMPTY_DRAFT)
+
+  // Espelha o compositor vivo. Efeito SEM array de deps (roda após todo commit)
+  // em vez de escrever no ref durante o render — o render pode ser descartado e
+  // a mutação sobreviveria. Como useLayoutEffect roda ANTES deste, o efeito de
+  // troca abaixo enxerga os valores do commit anterior, que são exatamente os da
+  // conversa que está saindo.
+  useEffect(() => {
+    convKeyRef.current = convKey
+    liveDraftRef.current = {
+      text: msgText,
+      replyingTo,
+      editingMessageId,
+      attachments,
+      audioBlob,
+      scheduleDate,
+      noteTitle,
+      noteContent,
+      noteCategory,
+      taskTitle,
+      taskDescription,
+      nicknameInput,
+    }
+  })
+
+  // Salva o rascunho da conversa que sai e restaura o da que entra.
+  // useLayoutEffect, não useEffect: o efeito de auto-scroll mede a altura do
+  // compositor. Restaurar um rascunho materializa banner de resposta, chip de
+  // anexo e texto multilinha — o compositor cresce 40-90px DEPOIS da medição e a
+  // conversa abriria com as últimas mensagens escondidas atrás dele.
+  useLayoutEffect(() => {
+    const anterior = draftKeyRef.current
+    if (anterior === convKey) return
+    draftKeyRef.current = convKey
+
+    if (anterior) saveDraft(anterior, liveDraftRef.current)
+
+    const restaurado = convKey ? getDraft(convKey) : null
+    const d = restaurado ?? EMPTY_DRAFT
+
+    setMsgText(d.text)
+    setReplyingTo(d.replyingTo)
+    setAttachments(d.attachments)
+    setScheduleDate(d.scheduleDate)
+    setNoteTitle(d.noteTitle)
+    setNoteContent(d.noteContent)
+    setNoteCategory(d.noteCategory)
+    setTaskTitle(d.taskTitle)
+    setTaskDescription(d.taskDescription)
+    setNicknameInput(d.nicknameInput)
+
+    // `edit_whatsapp_message` é SECURITY DEFINER e não checa `deleted_at` nem o
+    // destinatário: um id órfão restaurado editaria com sucesso uma mensagem já
+    // apagada, reescrevendo o texto no WhatsApp do contato de forma invisível
+    // aqui. Só restaura o modo edição se a mensagem ainda estiver na conversa.
+    // Só restaura o modo edição com confirmação positiva. Não confirmou (mensagem
+    // apagada, ou lista ainda carregando)? Cai para mensagem normal e PRESERVA o
+    // texto — perder o modo edição é inofensivo, perder o que foi digitado não.
+    const alvoAindaExiste =
+      d.editingMessageId != null &&
+      (conversation?.messages || []).some((m: any) => m.id === d.editingMessageId)
+    setEditingMessageId(alvoAindaExiste ? d.editingMessageId : null)
+
+    // A objectURL é sempre do componente; o rascunho guarda só o Blob.
+    if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current)
+    if (d.audioBlob) {
+      const url = URL.createObjectURL(d.audioBlob)
+      audioUrlRef.current = url
+      setAudioBlob(d.audioBlob)
+      setAudioUrl(url)
+    } else {
+      audioUrlRef.current = null
+      setAudioBlob(null)
+      setAudioUrl(null)
+    }
+
+    // Nada da conversa anterior pode ficar aberto sobre a nova. Os diálogos de
+    // anotação, tarefa e apelido são os mais graves: eles gravam no banco usando
+    // o contato ATUAL, então salvar um deles depois de trocar de conversa
+    // escrevia a anotação/tarefa no prontuário do contato errado, ou renomeava
+    // quem não devia. Com os campos já zerados acima, fechar fecha o ciclo.
+    setMediaView(null)
+    setIsNoteOpen(false)
+    setIsTaskModalOpen(false)
+    setIsNicknameOpen(false)
+    setIsScheduleOpen(false)
+    setIsLabelsOpen(false)
+    setTeamAssignOpen(false)
+    setAiModalOpen(false)
+    setIsPlusOpen(false)
+    setIsEmojiOpen(false)
+
+    // Depois de restaurar, o compositor tem altura nova: reancorar no fundo.
+    if (restaurado) {
+      requestAnimationFrame(() => {
+        const el = scrollRef.current
+        if (el && isNearBottomRef.current) el.scrollTop = el.scrollHeight
+      })
+    }
+  }, [convKey, conversation?.messages])
+
+  // Ao desmontar (sair do chat, fechar a conversa no mobile), preserva o que
+  // estava escrito. Sem isto, fechar e reabrir a conversa perderia o rascunho.
+  useEffect(() => {
+    return () => {
+      saveDraft(draftKeyRef.current, liveDraftRef.current)
+    }
+  }, [])
+
+  // Se a conversa mudou no meio de um envio longo (upload de até 200MB), a
+  // limpeza do compositor tem que cair na conversa ORIGINAL, nunca na nova.
+  const limparCompositorAposEnvio = useCallback(
+    (chaveEnvio: string | null, limpar: () => void) => {
+      if (convKeyRef.current === chaveEnvio) {
+        limpar()
+      } else {
+        // O conteúdo já foi enviado: some com o rascunho da conversa de origem,
+        // sem tocar no compositor da conversa que o atendente está vendo agora.
+        clearDraft(chaveEnvio)
+      }
+    },
+    [],
+  )
 
   const goToMatch = useCallback((direction: 1 | -1) => {
     if (totalMatches === 0) return
@@ -1057,6 +1221,8 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         reply_to_snapshot: replySnapshot,
         attachments: [],
       }
+      // Caminho otimista limpa de forma síncrona, antes de qualquer await — aqui
+      // não há janela para trocar de conversa no meio.
       setMsgText('')
       setReplyingTo(null)
       onOptimisticSend?.(tempMsg)
@@ -1083,14 +1249,20 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     }
 
     const content = msgText.trim() ? msgText.trim() : (audioBlob ? '[Áudio]' : attachments.length > 0 ? '[Anexo]' : '')
+    // Conversa em que o envio começou. Os caminhos abaixo só limpam o compositor
+    // DEPOIS de awaits longos (upload de até 200MB) e nada impede a troca de
+    // conversa nesse meio-tempo.
+    const chaveEnvio = convKey
 
     setIsSending(true)
     try {
       if (editingMessageId) {
         await editMessage(editingMessageId, device.id, content)
-        setEditingMessageId(null)
-        setMsgText('')
-        setReplyingTo(null)
+        limparCompositorAposEnvio(chaveEnvio, () => {
+          setEditingMessageId(null)
+          setMsgText('')
+          setReplyingTo(null)
+        })
         toast({ title: 'Mensagem editada' })
         return
       }
@@ -1109,7 +1281,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           mediaType: 'audio',
           reply_to_id: replyingTo?.id,
         })
-        discardAudio()
+        limparCompositorAposEnvio(chaveEnvio, discardAudio)
       } else if (attachments.length > 0) {
         const uploaded: { url: string; type: string; name: string }[] = []
         for (let fi = 0; fi < attachments.length; fi++) {
@@ -1144,9 +1316,11 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           reply_to_id: replyingTo?.id,
         })
       }
-      setMsgText('')
-      setAttachments([])
-      setReplyingTo(null)
+      limparCompositorAposEnvio(chaveEnvio, () => {
+        setMsgText('')
+        setAttachments([])
+        setReplyingTo(null)
+      })
     } catch (err) {
       toast({
         title: err instanceof Error ? err.message : 'Erro ao enviar mensagem',
@@ -1251,6 +1425,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       return
 
     const content = msgText.trim() ? msgText.trim() : (audioBlob ? '[Áudio]' : '[Anexo]')
+    const chaveEnvio = convKey
 
     setIsScheduling(true)
     try {
@@ -1277,11 +1452,13 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         attachments: scheduledAttachments.length > 0 ? scheduledAttachments : null,
       })
       toast({ title: 'Mensagem agendada com sucesso' })
-      setMsgText('')
-      setAttachments([])
-      discardAudio()
+      limparCompositorAposEnvio(chaveEnvio, () => {
+        setMsgText('')
+        setAttachments([])
+        discardAudio()
+        setScheduleDate('')
+      })
       setIsScheduleOpen(false)
-      setScheduleDate('')
     } catch (err) {
       toast({
         title: err instanceof Error ? err.message : 'Erro ao agendar mensagem',
@@ -1891,10 +2068,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           messages.map((msg: any, index: number) => {
           const isMe = msg.direction === 'outbound' || msg.sender_id === user?.id
           const messageAttachments = Array.isArray(msg.attachments) ? msg.attachments : []
-          const timestamp = new Date(msg.created_at).toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
-          })
+          const timestamp = timeFormatter.format(new Date(msg.created_at))
           const previousMsg = messages[index - 1]
           const shouldShowDateSeparator =
             !previousMsg || getDateKey(previousMsg.created_at) !== getDateKey(msg.created_at)
@@ -2187,7 +2361,12 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                      </div>
                    ) : msg.content?.trim() && !isTechnicalPlaceholder(msg.content) ? (
                      <div className="text-[15px] leading-relaxed break-words">
-                        {renderMessage(msg.content, isMe, onOpenConversationByJid, rangesByMessageId.get(msg.id) ?? EMPTY_RANGES)}
+                        <MessageBody
+                          content={msg.content}
+                          isMe={isMe}
+                          onOpenConversation={onOpenConversationByJid}
+                          ranges={rangesByMessageId.get(msg.id) ?? EMPTY_RANGES}
+                        />
                        <span
   className={`inline-flex translate-y-[30%] items-center gap-1 whitespace-nowrap ${
     isMe ? 'float-right ml-3' : 'ml-1'
@@ -2307,6 +2486,18 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                       <div className="mt-1.5 flex items-center justify-end gap-1">
                         {msg.edited_at && (
                           <span className="text-[10px] text-chat-muted/60">(editado)</span>
+                        )}
+                        {/* Mídia sem legenda cai neste ramo (o conteúdo vira um
+                            rótulo técnico tipo "[Imagem]"), então o badge do ramo
+                            de texto nunca aparecia para imagem/áudio/vídeo — era
+                            metade da queixa. O `!msg.deleted_at` evita o sinal
+                            duplicado: mensagem apagada pelo próprio operador já
+                            mostra "[Mensagem apagada]" e não deve ganhar o badge
+                            de revoke por cima. */}
+                        {!msg.deleted_at && msg.revoked_at && (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-red-400">
+                            <Trash2 className="h-3 w-3" /> apagada
+                          </span>
                         )}
                         <span className="text-[10px] font-medium text-chat-muted/70 translate-y-[1px]">
                           {timestamp}

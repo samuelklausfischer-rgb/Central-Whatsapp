@@ -1,4 +1,10 @@
-import { useState, useMemo, useCallback, useDeferredValue, memo } from 'react'
+import { useState, useMemo, useCallback, useDeferredValue, useSyncExternalStore, memo } from 'react'
+import {
+  conversationDraftKey,
+  getDraft,
+  subscribeDraftKeys,
+  getDraftKeysSnapshot,
+} from '@/stores/conversationDrafts'
 import {
   Select,
   SelectContent,
@@ -123,6 +129,8 @@ const ChatRow = memo(function ChatRow({
   hasNote,
   assignment,
   currentUserId,
+  hasDraft,
+  draftPreview,
 }: {
   conv: any
   contact: any
@@ -140,6 +148,8 @@ const ChatRow = memo(function ChatRow({
   hasNote?: boolean
   assignment?: ConversationAssignment
   currentUserId?: string
+  hasDraft?: boolean
+  draftPreview?: string
 }) {
   const name = resolveContactDisplayName(conv.remote_sender, contactIndex, {
     sender_name: conv.sender_name
@@ -213,19 +223,27 @@ const ChatRow = memo(function ChatRow({
           </span>
         )}
         <div className="flex items-center gap-1 mt-0.5">
-          {conv.lastMessage.direction === 'outbound' &&
+          {/* Com rascunho, o check de entrega da última mensagem enviada dá lugar
+              ao aviso — é a mesma escolha do WhatsApp. */}
+          {!hasDraft && conv.lastMessage.direction === 'outbound' &&
             (conv.lastMessage.is_read ? (
               <CheckCheck className="h-3 w-3 text-blue-400 shrink-0" />
             ) : (
               <Check className="h-3 w-3 text-chat-muted shrink-0" />
             ))}
+          {hasDraft && (
+            <span className="text-sm text-emerald-500 shrink-0">Rascunho:</span>
+          )}
           <p
             className={cn(
               'text-sm truncate',
+              // O destaque de não-lida é preservado mesmo com rascunho: são sinais
+              // independentes, e apagar um por causa do outro esconderia mensagem
+              // que ainda não foi vista.
               isUnread ? 'text-chat-text font-medium' : 'text-chat-muted',
             )}
           >
-            {previewLabel(conv.lastMessage.content)}
+            {hasDraft ? draftPreview : previewLabel(conv.lastMessage.content)}
           </p>
           {isPendingReply && (
             <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse shrink-0 inline-block" />
@@ -353,6 +371,11 @@ export function ChatList({
   const [activeStatusFilter, setActiveStatusFilter] = useState<'all' | 'unread' | 'pinned'>('all')
   const [showUnrespondedOnly, setShowUnrespondedOnly] = useState(false)
   const [resolvedLocally, setResolvedLocally] = useState<Set<string>>(new Set())
+
+  // Conjunto de conversas com rascunho. A store só troca a referência do snapshot
+  // quando o CONJUNTO muda — digitar dentro de uma conversa que já tem rascunho
+  // não re-renderiza a lista inteira a cada tecla.
+  const draftKeys = useSyncExternalStore(subscribeDraftKeys, getDraftKeysSnapshot)
 
   const activeFilterCount = useMemo(() => {
     let count = 0
@@ -561,6 +584,8 @@ export function ChatList({
             const convState = selectedDeviceId
               ? statesByKey.get(`${selectedDeviceId}:${conv.remote_sender}`)
               : undefined
+            const draftKey = conversationDraftKey(selectedDeviceId, conv.remote_sender)
+            const hasDraft = draftKey ? draftKeys.has(draftKey) : false
 
             return (
               <ChatRow
@@ -581,6 +606,8 @@ export function ChatList({
                 hasNote={noteJids ? noteJids.has(conv.remote_sender) : false}
                 assignment={assignments?.get(conv.remote_sender)}
                 currentUserId={currentUserId}
+                hasDraft={hasDraft}
+                draftPreview={hasDraft ? getDraft(draftKey)?.text ?? '' : undefined}
               />
             )
           })}

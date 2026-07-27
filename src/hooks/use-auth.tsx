@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo, ReactNode } from 'react'
 import supabase from '@/lib/supabase/client'
+import { clearAllDrafts } from '@/stores/conversationDrafts'
 import type { Profile, Device } from '@/lib/supabase/types'
 
 interface AuthContextType {
@@ -195,6 +196,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [])
 
   const signOut = useCallback(() => {
+    // Só no logout EXPLÍCITO. De propósito não fica no ramo "sem sessão" do
+    // onAuthStateChange: aquele também dispara em falha de refresh de token, e
+    // apagaria o que o atendente escreveu sem que ele tenha pedido para sair.
+    clearAllDrafts()
     supabase.auth.signOut()
   }, [])
 
