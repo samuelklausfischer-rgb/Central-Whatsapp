@@ -28,12 +28,23 @@ async function bridgeSignIn() {
     throw new Error('Sessão principal não encontrada.')
   }
 
-  const { data, error } = await supabaseFinanceiro.functions.invoke('financeiro-bridge', {
+  const { data, error, response } = await supabaseFinanceiro.functions.invoke('financeiro-bridge', {
     headers: { Authorization: `Bearer ${mainSession.access_token}` },
   })
 
   if (error) {
-    throw new Error('Não foi possível liberar seu acesso ao módulo financeiro.')
+    let detail: string | undefined
+    try {
+      const body = await response?.json()
+      detail = body?.reason || body?.error
+    } catch {
+      // resposta ausente ou não-JSON (ex.: falha de rede) — segue sem detalhe extra
+    }
+    throw new Error(
+      detail
+        ? `Não foi possível liberar seu acesso ao módulo financeiro (${detail}).`
+        : 'Não foi possível liberar seu acesso ao módulo financeiro.',
+    )
   }
 
   const tokenHash = data?.hashed_token

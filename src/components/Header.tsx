@@ -37,6 +37,7 @@ import { useAuth } from '@/hooks/use-auth'
 import { canAccessFinanceiroTools } from '@/lib/permissions'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { ReleaseNotesDialog } from '@/components/ReleaseNotesDialog'
+import { ReportarProblemaDialog } from '@/components/ReportarProblemaDialog'
 import { NotificationsDialog } from '@/components/NotificationsDialog'
 import { useUpdater } from '@/hooks/use-updater'
 import logoUrl from '/logo.png'
@@ -183,6 +184,7 @@ export function Header() {
       {/* Right side */}
       <div className="ml-auto flex items-center gap-2">
         <ReleaseNotesDialog />
+        <ReportarProblemaDialog />
 
         {isElectron &&
           (status.type === 'available' || status.type === 'downloading' || status.type === 'ready') && (

@@ -14,9 +14,11 @@ import {
   AlertCircle,
   Wrench,
   BarChart3,
+  Percent,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/use-auth'
 import { useUpdater } from '@/hooks/use-updater'
+import { canAccessFinanceiroTools } from '@/lib/permissions'
 import {
   Sidebar,
   SidebarContent,
@@ -100,7 +102,7 @@ export function AppSidebar() {
             </SidebarMenuItem>
           )}
 
-          {user?.is_admin && (
+          {canAccessFinanceiroTools(user) && (
             <>
               <div className="my-4 mx-2 h-px bg-sidebar-accent" />
               <Collapsible defaultOpen={isToolsActive} className="group/collapsible">
@@ -126,6 +128,17 @@ export function AppSidebar() {
                           <Link to="/ferramentas/analise-prn" className="py-4">
                             <BarChart3 className="h-4 w-4" />
                             <span>Análise PRN</span>
+                          </Link>
+                        </SidebarMenuSubButton>
+                      </SidebarMenuSubItem>
+                      <SidebarMenuSubItem>
+                        <SidebarMenuSubButton
+                          asChild
+                          isActive={location.pathname === '/ferramentas/rateio-mobilemed'}
+                        >
+                          <Link to="/ferramentas/rateio-mobilemed" className="py-4">
+                            <Percent className="h-4 w-4" />
+                            <span>Rateio Mobilemed</span>
                           </Link>
                         </SidebarMenuSubButton>
                       </SidebarMenuSubItem>

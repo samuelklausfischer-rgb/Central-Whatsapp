@@ -7,6 +7,16 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.191',
+    date: '2026-07-27 10:00',
+    title: 'Botão para reportar problema ou sugerir ideia',
+    details: [
+      '💬 Novo ícone no topo da tela (ao lado do sino de novidades) abre um formulário rápido para relatar um problema ou sugerir uma melhoria',
+      '🙋 Não precisa se identificar: o report já vai com o seu nome e a tela em que você estava',
+      '📋 Tudo cai direto na fila do Central Whats no PRN Hub, onde a equipe prioriza e acompanha',
+    ],
+  },
+  {
     version: '0.0.190',
     date: '2026-07-23 16:06',
     title: 'Análise PRN e Rateio Mobilemed liberados para o setor Financeiro',
