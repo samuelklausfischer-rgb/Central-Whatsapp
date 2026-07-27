@@ -47,6 +47,10 @@ function messageFingerprint(deviceId: string, remoteSender: string, content: str
   return `${deviceId}|${remoteSender}|${(content || '').trim()}`
 }
 
+const CONVERSATION_CACHE_MAX = 20
+
+const conversationCacheKey = (deviceId: string, contact: string) => `${deviceId}|${contact}`
+
 const SIDEBAR_MIN = 300
 const SIDEBAR_MAX = 520
 const SIDEBAR_DEFAULT = 384
@@ -110,6 +114,14 @@ export default function ChatHub() {
   const userIdRef = useRef<string | undefined>(user?.id)
   // Mensagens otimistas pendentes (temp) aguardando o eco do realtime.
   const pendingTempsRef = useRef<{ tempId: string; fp: string; ts: number }[]>([])
+  // Cache das últimas conversas abertas (LRU simples, em memória). Serve só para
+  // pintar na hora ao voltar para uma conversa já vista — o fetch continua sendo
+  // a fonte da verdade e sobrescreve logo em seguida.
+  const conversationCacheRef = useRef<Map<string, any[]>>(new Map())
+  // Última vez que a rede de segurança rodou. Precisa viver no nível do
+  // componente: dentro do efeito ele seria recriado a cada troca de conversa e
+  // não deduplicaria a rajada de focus/online/visibility do Alt-Tab.
+  const lastRefetchRef = useRef(0)
   const noteJids = useMemo(() => new Set(noteCountByJid.keys()), [noteCountByJid])
   const [isSheetOpen, setIsSheetOpen] = useState(false)
   const [isRefreshingAll, setIsRefreshingAll] = useState(false)
@@ -229,7 +241,28 @@ export default function ChatHub() {
   useRealtime('contacts', (e) => {
     if (e.action === 'create') setContacts((prev) => [e.record, ...prev])
     else if (e.action === 'update')
-      setContacts((prev) => prev.map((c) => (c.id === e.record.id ? e.record : c)))
+      setContacts((prev) => {
+        const idx = prev.findIndex((c) => c.id === e.record.id)
+        if (idx < 0) return prev
+        // Guarda de no-op: a edge function `contact-avatar` faz PATCH mesmo
+        // quando não acha foto, mexendo só em `avatar_updated_at`. Sem esta
+        // checagem, cada PATCH desses cria um array novo e derruba tudo que
+        // depende de `contacts` — buildContactIndex (~6.000 Map.set), as 520
+        // linhas da lista e os 500 balões da conversa aberta.
+        // Só os campos realmente renderizados entram na comparação.
+        const atual = prev[idx]
+        if (
+          atual.avatar_url === e.record.avatar_url &&
+          atual.name === e.record.name &&
+          atual.nickname === e.record.nickname &&
+          atual.remote_jid === e.record.remote_jid
+        ) {
+          return prev
+        }
+        const next = [...prev]
+        next[idx] = e.record
+        return next
+      })
     else if (e.action === 'delete') setContacts((prev) => prev.filter((c) => c.id !== e.record.id))
   })
 
@@ -266,11 +299,22 @@ export default function ChatHub() {
       sessionStorage.setItem('activeDeviceId', selectedDeviceId)
       const deviceChanged = prevDeviceIdRef.current !== null && prevDeviceIdRef.current !== selectedDeviceId
       prevDeviceIdRef.current = selectedDeviceId
-      loadDeviceData(selectedDeviceId)
       if (deviceChanged) {
+        // Limpar ANTES de disparar o fetch. Sem isto a sidebar segue mostrando as
+        // conversas do aparelho ANTERIOR já cruzadas com o selectedDeviceId NOVO
+        // (o useMemo de `conversations` usa o id novo para achar os estados), e
+        // clicar nesse intervalo abre uma conversa que pode nem existir no
+        // aparelho novo. `setMessages([])` é obrigatório junto: sem ele, limpar
+        // as summaries cai no branch de fallback que remonta a lista a partir de
+        // `messages` — ou seja, o aparelho antigo de volta.
         setSelectedContact(null)
         setConversationMessages([])
+        setConversationSummaries([])
+        setMessages([])
+        setAssignments(new Map())
+        conversationCacheRef.current.clear()
       }
+      loadDeviceData(selectedDeviceId)
     } else {
       setMessages([])
       setConversationSummaries([])
@@ -482,16 +526,36 @@ export default function ChatHub() {
     if (selectedDeviceId) debouncedRefreshSummaries(selectedDeviceId)
   })
 
+  const writeConversationCache = useCallback((key: string, msgs: any[]) => {
+    const cache = conversationCacheRef.current
+    cache.delete(key)
+    cache.set(key, msgs)
+    // Map preserva ordem de inserção: a primeira chave é sempre a mais antiga.
+    while (cache.size > CONVERSATION_CACHE_MAX) {
+      const oldest = cache.keys().next().value
+      if (oldest === undefined) break
+      cache.delete(oldest)
+    }
+  }, [])
+
   // Busca as mensagens de uma conversa específica; só aplica o resultado se
   // dispositivo+contato ainda forem os selecionados quando a resposta chegar.
   const loadConversationMessages = useCallback((deviceId: string, contact: string) => {
+    const key = conversationCacheKey(deviceId, contact)
+    const cached = conversationCacheRef.current.get(key)
+    if (cached && selectedDeviceIdRef.current === deviceId && selectedContactRef.current === contact) {
+      // Pinta o snapshot imediatamente e revalida logo abaixo. Sem isto, voltar
+      // para uma conversa já vista pisca em branco durante o round-trip.
+      setConversationMessages(cached)
+    }
     return getConversationMessages(deviceId, contact)
       .then((msgs) => {
+        writeConversationCache(key, msgs)
         if (selectedDeviceIdRef.current !== deviceId || selectedContactRef.current !== contact) return
         setConversationMessages(msgs)
       })
       .catch(() => {})
-  }, [])
+  }, [writeConversationCache])
 
   // Botão manual de "atualizar tudo": recarrega resumos, mensagens e
   // atribuições do WhatsApp selecionado (e a conversa aberta, se houver).
@@ -519,12 +583,33 @@ export default function ChatHub() {
     }
   }, [selectedDeviceId, selectedContact, loadConversationMessages])
 
+  // Mantém o cache em dia com a conversa aberta. Guardar só o snapshot do fetch
+  // não basta: mensagens que chegam pelo realtime enquanto a conversa está
+  // aberta ficariam de fora, e reabrir mostraria a lista encolhida por um
+  // instante antes de o fetch corrigir — a lista cresceria na frente do usuário,
+  // o oposto do que o cache existe para fazer.
+  useEffect(() => {
+    if (!selectedDeviceId || !selectedContact) return
+    if (conversationMessages.length === 0) return
+    writeConversationCache(
+      conversationCacheKey(selectedDeviceId, selectedContact),
+      conversationMessages,
+    )
+  }, [selectedDeviceId, selectedContact, conversationMessages, writeConversationCache])
+
   // Rede de segurança: se o realtime falhar (queda de WebSocket, sleep, troca de
   // rede), re-busca a conversa aberta e os resumos ao voltar o foco/visibilidade/
   // rede e a cada ~25s enquanto visível. Automatiza o "sair e entrar" manual.
   useEffect(() => {
     const refetchOpen = () => {
       if (document.visibilityState !== 'visible') return
+      // Um Alt-Tab dispara focus + visibilitychange (e às vezes online) quase no
+      // mesmo instante, cada um refazendo a query de 500 mensagens e a RPC de
+      // resumos. 10 s de janela colapsa a rajada em uma rodada só.
+      const agora = Date.now()
+      if (agora - lastRefetchRef.current < 10000) return
+      lastRefetchRef.current = agora
+
       const deviceId = selectedDeviceIdRef.current
       const contact = selectedContactRef.current
       if (deviceId && contact) {
@@ -538,14 +623,18 @@ export default function ChatHub() {
     window.addEventListener('focus', refetchOpen)
     window.addEventListener('online', refetchOpen)
     document.addEventListener('visibilitychange', onVisibility)
-    const interval = setInterval(refetchOpen, 25000)
+    const interval = setInterval(refetchOpen, 60000)
     return () => {
       window.removeEventListener('focus', refetchOpen)
       window.removeEventListener('online', refetchOpen)
       document.removeEventListener('visibilitychange', onVisibility)
       clearInterval(interval)
     }
-  }, [selectedDeviceId, selectedContact, loadConversationMessages, debouncedRefreshSummaries])
+    // `selectedDeviceId`/`selectedContact` de propósito FORA das deps: o corpo lê
+    // as refs, que já refletem o valor mais recente. Mantê-los aqui destruía e
+    // recriava o setInterval a cada clique em outra conversa, e o poll de 60 s
+    // praticamente nunca chegava a disparar para um atendente ativo.
+  }, [loadConversationMessages, debouncedRefreshSummaries])
 
   const handleCloseConversation = useCallback(() => {
     setSelectedContact(null)

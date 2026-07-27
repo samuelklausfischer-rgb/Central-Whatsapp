@@ -47,6 +47,10 @@ export const getMessages = async (deviceId: string) => {
     .from('messages')
     .select('*')
     .eq('device_id', deviceId)
+    // `deleted_at` é filtro de exclusão em toda listagem do projeto. Este era o
+    // único caminho que não filtrava — é o fallback usado quando a RPC de
+    // resumos volta vazia, e trazia mensagens já apagadas de volta para a lista.
+    .is('deleted_at', null)
     .order('created_at', { ascending: false })
     .limit(2000)
   return ((data as Message[]) || []).reverse()
