@@ -7,6 +7,19 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.193',
+    date: '2026-07-28 09:00',
+    title: 'Rascunho preso ao contato, chat mais rápido e aviso de mensagem apagada de volta',
+    details: [
+      '✍️ O que você escreve fica guardado no contato em que foi escrito: trocar de conversa não leva mais o texto junto, e a conversa mostra "Rascunho:" na lista para você voltar e terminar depois',
+      '⚠️ Isso valia também para anotação, tarefa e apelido — se você digitasse em um contato, trocasse e salvasse, ia parar no contato errado. Corrigido',
+      '⚡ Abrir e trocar de conversa ficou bem mais rápido, principalmente para quem não é admin: a lista de conversas era a parte mais lenta do app',
+      '🖼️ A foto e o nome do contato anterior não aparecem mais por um instante ao trocar de conversa, e a lista não mostra mais as conversas do aparelho anterior durante a troca',
+      '🗑️ O aviso "apagada" voltou a funcionar quando o contato apaga uma mensagem no WhatsApp dele — e agora aparece também em foto, áudio e vídeo, não só em texto',
+      'ℹ️ Mensagens apagadas antes desta atualização não recebem o aviso retroativamente',
+    ],
+  },
+  {
     version: '0.0.192',
     date: '2026-07-27 16:00',
     title: 'Correção do canal de atualização automática',
