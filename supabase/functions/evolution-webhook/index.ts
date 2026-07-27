@@ -6,6 +6,12 @@ const EVOLUTION_API_URL = (Deno.env.get('EVOLUTION_API_URL') || 'https://apps-ev
 const EVOLUTION_API_KEY = Deno.env.get('EVOLUTION_API_KEY') || ''
 const STORAGE_BUCKET = 'chat-attachments'
 
+// Sonda de deploy. As edge functions do self-hosted são servidas por volume:
+// conferir o arquivo em disco não prova que o isolate do Deno recarregou. Este
+// marcador volta no corpo de qualquer resposta e é a única checagem que prova
+// qual código está REALMENTE rodando. Incrementar a cada deploy desta função.
+const BUILD_MARKER = 'revoke-fix-2026-07-28'
+
 type MediaType = 'image' | 'video' | 'audio' | 'document' | 'sticker'
 
 type MediaInfo = {
@@ -103,6 +109,14 @@ function mediaWarn(stage: string, data: Record<string, unknown>) {
   console.warn(JSON.stringify({ scope: 'media_pipeline', stage, ...data }))
 }
 
+function revokeLog(stage: string, data: Record<string, unknown>) {
+  console.log(JSON.stringify({ scope: 'revoke', stage, build: BUILD_MARKER, ...data }))
+}
+
+function revokeWarn(stage: string, data: Record<string, unknown>) {
+  console.warn(JSON.stringify({ scope: 'revoke', stage, build: BUILD_MARKER, ...data }))
+}
+
 function summarizeObject(value: unknown, depth = 0): unknown {
   if (depth > 2 || value == null) return value == null ? value : '[depth_limit]'
   if (typeof value === 'string') {
@@ -172,6 +186,64 @@ function unwrapMessage(msgObj: Record<string, unknown>): Record<string, any> {
     current = next
   }
   return current
+}
+
+// Ids possíveis da mensagem original, em ordem de confiança. `messageId` e `id`
+// ficam por ÚLTIMO de propósito: na Evolution v2 esses dois costumam ser o id da
+// LINHA no banco dela, não o id da mensagem no WhatsApp — só servem de recurso
+// final. `keyId` é o campo que carrega o id do WhatsApp no payload plano.
+function collectExternalIdCandidates(entry: Record<string, any> | null | undefined): string[] {
+  if (!entry || typeof entry !== 'object') return []
+  const out: string[] = []
+  const push = (value: unknown) => {
+    if (typeof value === 'string' && value && !out.includes(value)) out.push(value)
+  }
+  push(entry.key?.id)
+  push(entry.keyId)
+  push(entry.message?.key?.id)
+  push(entry.update?.key?.id)
+  push(entry.messageId)
+  push(entry.id)
+  return out
+}
+
+// Decide se uma entrada do payload representa um revoke ("apagar para todos") e
+// devolve os ids candidatos da mensagem ORIGINAL. Três formatos observados:
+//   (1) messages.upsert com envelope protocolMessage tipo REVOKE — o único que
+//       chegou a funcionar em produção (09/07), traz key.remoteJid completo;
+//   (2) messages.update com `update.message` explicitamente nulado;
+//   (3) messages.delete / status DELETED — formato PLANO da Evolution v2.3.7
+//       ({ keyId, remoteJid, fromMe, participant }), sem `key` e sem `update`.
+// O formato (3) é o que a Evolution realmente emite hoje, e é justamente o que
+// morria no guard de `remoteSender` antes desta correção.
+function getRevokeCandidates(
+  entry: Record<string, any>,
+  isUpdate: boolean,
+  isDelete: boolean,
+): string[] | null {
+  if (!entry || typeof entry !== 'object') return null
+
+  const protocolMsg = unwrapMessage(entry.message || {})?.protocolMessage
+  if (protocolMsg && (protocolMsg.type === 'REVOKE' || protocolMsg.type === 0)) {
+    const ids = collectExternalIdCandidates(protocolMsg)
+    return ids.length > 0 ? ids : null
+  }
+
+  if (isDelete) {
+    const ids = collectExternalIdCandidates(entry)
+    return ids.length > 0 ? ids : null
+  }
+
+  if (isUpdate) {
+    const status = entry.status ?? entry.update?.status
+    const nulledMessage = entry.update != null && entry.update.message === null
+    if (nulledMessage || status === 'DELETED' || status === 'REVOKED') {
+      const ids = collectExternalIdCandidates(entry)
+      return ids.length > 0 ? ids : null
+    }
+  }
+
+  return null
 }
 
 function getMediaInfo(msgObj: Record<string, unknown>): MediaInfo | null {
@@ -507,20 +579,32 @@ Deno.serve(async (req: Request) => {
   const event = body.event || ''
   const isUpsert = event === 'messages.upsert' || event === 'MESSAGES_UPSERT'
   const isUpdate = event === 'messages.update' || event === 'MESSAGES_UPDATE'
+  // A Evolution v2 emite "apagar para todos" como messages.delete — evento
+  // próprio, com payload plano. Sem este ramo o revoke não chega nunca.
+  const isDelete = event === 'messages.delete' || event === 'MESSAGES_DELETE'
 
-  if (!isUpsert && !isUpdate) {
-    return new Response(JSON.stringify({ status: 'ignored', reason: 'unhandled event: ' + event }), { status: 200 })
+  if (!isUpsert && !isUpdate && !isDelete) {
+    return new Response(
+      JSON.stringify({ status: 'ignored', reason: 'unhandled event: ' + event, build: BUILD_MARKER }),
+      { status: 200 },
+    )
   }
 
-  // messages.update can arrive as an array of { key, update } objects.
-  // Normalize it to the same shape used by messages.upsert.
-  let messageData = body.data
-  if (Array.isArray(messageData)) {
-    messageData = messageData[0]
-  }
-  if (!messageData) {
+  // body.data pode vir como objeto único ou como array. O caminho principal
+  // (inserir mensagem) segue usando a primeira entrada, como sempre, mas a
+  // detecção de revoke varre TODAS: um lote de deletes chegaria truncado se
+  // continuássemos lendo só data[0].
+  const rawEntries: Record<string, any>[] = Array.isArray(body.data)
+    ? body.data.filter(Boolean)
+    : body.data
+      ? [body.data]
+      : []
+
+  if (rawEntries.length === 0) {
     return new Response(JSON.stringify({ status: 'ignored', reason: 'empty data' }), { status: 200 })
   }
+
+  let messageData = rawEntries[0]
 
   // messages.update brings { key, update }; adapt it to the upsert shape.
   if (isUpdate && messageData.update && !messageData.message) {
@@ -542,13 +626,79 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ status: 'error', message: 'device not found for instance: ' + body.instance }), { status: 200 })
   }
 
+  // ---- Revoke ("apagada"): PRECISA rodar antes do guard de `remoteSender` ----
+  // O payload de MESSAGES_UPDATE/MESSAGES_DELETE da Evolution v2.3.7 é plano e
+  // não traz `key.remoteJid`. Enquanto este bloco ficou DEPOIS do guard abaixo,
+  // todo revoke saía com "no remote sender" e era perdido em silêncio — 18 dias
+  // sem uma única linha gravada. Revoke precisa só de device_id + external_id.
+  const revokeCandidates = [
+    ...new Set(rawEntries.flatMap((entry) => getRevokeCandidates(entry, isUpdate, isDelete) || [])),
+  ]
+
+  if (revokeCandidates.length > 0) {
+    const patched: string[] = []
+    for (const candidate of revokeCandidates) {
+      const origResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/messages?device_id=eq.${device.id}&external_id=eq.${encodeURIComponent(candidate)}&select=id`,
+        { headers },
+      )
+      if (!origResp.ok) {
+        revokeWarn('lookup_failed', { candidate, status: origResp.status })
+        continue
+      }
+      const origArr = await origResp.json().catch(() => null)
+      const origMsg = Array.isArray(origArr) && origArr.length > 0 ? origArr[0] : null
+      if (!origMsg) continue
+
+      const patchResp = await fetch(`${SUPABASE_URL}/rest/v1/messages?id=eq.${origMsg.id}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ revoked_at: new Date().toISOString() }),
+      })
+      if (patchResp.ok) patched.push(origMsg.id)
+      else revokeWarn('patch_failed', { messageId: origMsg.id, status: patchResp.status })
+    }
+
+    if (patched.length === 0) {
+      // Nunca mais responder "success" sem ter gravado nada: era exatamente esse
+      // 200 otimista que escondia a falha e impedia qualquer diagnóstico.
+      revokeWarn('original_not_found', { event, instance: body.instance, candidates: revokeCandidates })
+      return new Response(
+        JSON.stringify({
+          status: 'ignored',
+          reason: 'revoke: original message not found',
+          candidates: revokeCandidates,
+          build: BUILD_MARKER,
+        }),
+        { status: 200 },
+      )
+    }
+
+    revokeLog('revoked', { event, instance: body.instance, patched })
+    return new Response(
+      JSON.stringify({ status: 'success', action: 'message_revoked', patched, build: BUILD_MARKER }),
+      { status: 200 },
+    )
+  }
+
+  // messages.delete que não casou com nenhuma mensagem nossa não tem mais nada a
+  // fazer aqui — o payload não carrega conteúdo para inserir.
+  if (isDelete) {
+    return new Response(
+      JSON.stringify({ status: 'ignored', reason: 'delete without matching message', build: BUILD_MARKER }),
+      { status: 200 },
+    )
+  }
+  // ---- Fim do revoke ----
+
   const key = messageData.key || {}
   const isFromMe = key.fromMe === true
   const pushName = messageData.pushName || ''
   const externalId = key.id || ''
   const participant = key.participant || ''
 
-  const rawJid = key.remoteJidAlt || key.remoteJid || ''
+  // `messageData.remoteJid` cobre o formato plano do update da Evolution v2.
+  const rawJid = key.remoteJidAlt || key.remoteJid || messageData.remoteJid || ''
   const isGroup = rawJid.includes('@g.us')
   const remoteSender = isGroup ? rawJid : rawJid.replace(/@s\.whatsapp\.net/g, '').replace(/@lid/g, '').replace(/\D/g, '')
   const groupParticipant = isGroup && participant ? participant : null
@@ -559,34 +709,6 @@ Deno.serve(async (req: Request) => {
 
   const msgObj = unwrapMessage(messageData.message || {})
   const messageTypeKeys = getMessageTypeKeys(msgObj)
-
-  // ---- Revoke handling: contato (ou o próprio usuário, fora do app) apagou a mensagem no WhatsApp ----
-  // Duas formas observadas: (1) messages.upsert com envelope protocolMessage tipo REVOKE;
-  // (2) messages.update com o campo `message` explicitamente nulado (conteúdo apagado pela WhatsApp
-  // sem vir como protocolMessage) — este segundo formato não passa pelo unwrapMessage/msgObj.
-  const protocolMsg = msgObj.protocolMessage
-  const isProtocolRevoke = Boolean(protocolMsg && (protocolMsg.type === 'REVOKE' || protocolMsg.type === 0))
-  const isNulledUpdateRevoke = isUpdate && messageData.update != null && messageData.update.message === null
-  if (isProtocolRevoke || isNulledUpdateRevoke) {
-    const origExternalId = isProtocolRevoke ? (protocolMsg.key?.id || '') : externalId
-    if (origExternalId) {
-      const origResp = await fetch(
-        `${SUPABASE_URL}/rest/v1/messages?device_id=eq.${device.id}&external_id=eq.${encodeURIComponent(origExternalId)}&select=id`,
-        { headers }
-      )
-      const origArr = await origResp.json()
-      const origMsg = Array.isArray(origArr) && origArr.length > 0 ? origArr[0] : null
-      if (origMsg) {
-        await fetch(`${SUPABASE_URL}/rest/v1/messages?id=eq.${origMsg.id}`, {
-          method: 'PATCH',
-          headers,
-          body: JSON.stringify({ revoked_at: new Date().toISOString() }),
-        })
-      }
-    }
-    return new Response(JSON.stringify({ status: 'success', action: 'message_revoked' }), { status: 200 })
-  }
-  // ---- End revoke handling ----
 
   // ---- Reaction handling: update original message instead of creating a new one ----
   const reactionMsg = msgObj.reactionMessage
