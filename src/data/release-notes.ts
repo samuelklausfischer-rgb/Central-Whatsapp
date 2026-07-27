@@ -7,6 +7,15 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.192',
+    date: '2026-07-27 16:00',
+    title: 'Correção do canal de atualização automática',
+    details: [
+      '🔄 O app voltou a encontrar as novas versões sozinho — a busca por atualização passou a apontar para o endereço correto',
+      '⚠️ Esta é a última atualização que chega pelo canal antigo: a partir dela, todas as próximas vêm automaticamente pelo novo',
+    ],
+  },
+  {
     version: '0.0.191',
     date: '2026-07-27 10:00',
     title: 'Botão para reportar problema ou sugerir ideia',

@@ -18,7 +18,7 @@
   "publish": {
     "provider": "github",
     "owner": "samuelklausfischer-rgb",
-    "repo": "Central-Whatsapp",
+    "repo": "Central-Whatsapp-releases",
     "releaseType": "release"
   },
   "win": {
