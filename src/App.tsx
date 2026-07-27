@@ -32,6 +32,7 @@ const InstancesSettings = lazy(() => import('./pages/settings/InstancesSettings'
 const AdminPage = lazy(() => import('./pages/admin/AdminPage'))
 const AnalisePrn = lazy(() => import('./pages/tools/AnalisePrn'))
 const RateioMobilemed = lazy(() => import('./pages/tools/RateioMobilemed'))
+const RelatorioApp = lazy(() => import('./pages/tools/RelatorioApp'))
 
 const ProtectedRoute = () => {
   const { isAuthenticated, loading } = useAuth()
@@ -47,6 +48,14 @@ const ProtectedRoute = () => {
 const AdminRoute = () => {
   const { user } = useAuth()
   return user?.is_admin ? <Outlet /> : <Navigate to="/dashboard" replace />
+}
+
+// Mais restrito que AdminRoute de propósito: `is_admin` não considera
+// `devices_restricted`, então admins com acesso deliberadamente limitado ainda
+// leriam a atividade da equipe inteira pelo Relatório App.
+const SuperAdminRoute = () => {
+  const { user } = useAuth()
+  return user?.is_super_admin ? <Outlet /> : <Navigate to="/dashboard" replace />
 }
 
 const FinanceiroToolRoute = () => {
@@ -80,6 +89,9 @@ const App = () => {
                 <Route element={<FinanceiroToolRoute />}>
                   <Route path="/ferramentas/analise-prn" element={<AnalisePrn />} />
                   <Route path="/ferramentas/rateio-mobilemed" element={<RateioMobilemed />} />
+                </Route>
+                <Route element={<SuperAdminRoute />}>
+                  <Route path="/ferramentas/relatorio-app" element={<RelatorioApp />} />
                 </Route>
                 <Route path="/settings" element={<SettingsLayout />}>
                   <Route path="general" element={<GeneralSettings />} />

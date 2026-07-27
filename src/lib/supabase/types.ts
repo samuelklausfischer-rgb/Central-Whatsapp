@@ -204,3 +204,25 @@ export interface ConversationRecentViewer {
   user_name: string
   read_at: string
 }
+
+// Relatório App (super-admin). Leitura protegida por RLS via _is_super_admin();
+// a escrita passa só pela RPC app_heartbeat.
+export interface UserAppSessionRow {
+  user_id: string
+  platform: 'app' | 'web'
+  app_version: string | null
+  started_at: string
+  last_seen_at: string
+  last_active_at: string | null
+}
+
+export interface UserAppDailyActivityRow {
+  user_id: string
+  dia: string
+  platform: 'app' | 'web'
+  active_seconds: number
+  open_seconds: number
+  app_version: string | null
+  first_seen_at: string
+  last_seen_at: string
+}

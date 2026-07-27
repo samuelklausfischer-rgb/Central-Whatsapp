@@ -20,6 +20,7 @@ import {
   Bell,
   BarChart3,
   Percent,
+  Activity,
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { useState, useRef, useEffect } from 'react'
@@ -68,6 +69,14 @@ const rateioItem: FerramentaItem = {
   url: '/ferramentas/rateio-mobilemed',
 }
 
+// Só super-admin. Ver a explicação em SuperAdminRoute (App.tsx).
+const relatorioAppItem: FerramentaItem = {
+  title: 'Relatório App',
+  description: 'Uso por usuário',
+  icon: Activity,
+  url: '/ferramentas/relatorio-app',
+}
+
 function FerramentasMenu() {
   const [open, setOpen] = useState(false)
   const [notifOpen, setNotifOpen] = useState(false)
@@ -75,7 +84,11 @@ function FerramentasMenu() {
   const navigate = useNavigate()
   const { user } = useAuth()
 
-  const items = canAccessFinanceiroTools(user) ? [...ferramentas, prnItem, rateioItem] : ferramentas
+  const items = [
+    ...ferramentas,
+    ...(canAccessFinanceiroTools(user) ? [prnItem, rateioItem] : []),
+    ...(user?.is_super_admin ? [relatorioAppItem] : []),
+  ]
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {

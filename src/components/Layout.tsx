@@ -2,10 +2,14 @@ import { Outlet, useLocation } from 'react-router-dom'
 import { Header } from '@/components/Header'
 import { GridBackground } from '@/components/ui/grid-background'
 import { BroadcastListener } from '@/components/BroadcastListener'
+import { useAppHeartbeat } from '@/hooks/use-app-heartbeat'
 
 export default function Layout() {
   const location = useLocation()
   const isChat = location.pathname.startsWith('/chat')
+
+  // Layout só é montado dentro de ProtectedRoute, então aqui já há sessão.
+  useAppHeartbeat(true)
 
   return (
     <div className="relative flex flex-col h-screen w-full overflow-hidden text-foreground">
