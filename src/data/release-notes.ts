@@ -7,6 +7,19 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.194',
+    date: '2026-07-28 22:30',
+    title: 'Nome do contato para de voltar para o telefone e foto de grupo corrigida',
+    details: [
+      '✏️ O nome que você corrige no contato não é mais sobrescrito na mensagem seguinte: o app passa a proteger o nome definido por você',
+      '📵 Quando o WhatsApp mandava só o número no lugar do nome, ele substituía o nome salvo — agora esse valor "fraco" é descartado e o nome anterior fica de pé',
+      '👥 A foto do grupo não é mais trocada pela foto de quem mandou a última mensagem; se a foto do grupo não vier, o app mantém a que já estava em vez de gravar a errada',
+      '🤳 Enviar uma mensagem não grava mais a sua própria foto no contato',
+      '📇 A lista de contatos da lateral carrega mais rápido e para de "carregar errado" de vez em quando — mudanças feitas durante a abertura da tela não se perdem mais',
+      '🔐 A entrada no app ficou mais leve, com uma consulta a menos na verificação de aparelho liberado',
+    ],
+  },
+  {
     version: '0.0.193',
     date: '2026-07-28 09:00',
     title: 'Rascunho preso ao contato, chat mais rápido e aviso de mensagem apagada de volta',
