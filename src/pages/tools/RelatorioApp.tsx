@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { format, subDays } from 'date-fns'
-import { Monitor, Smartphone, RefreshCw, AlertCircle } from 'lucide-react'
+import { Monitor, Smartphone, RefreshCw, AlertCircle, Wifi, WifiOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -37,6 +37,9 @@ const formatarUltimoSinal = (iso: string | null) => {
   return format(new Date(iso), "dd/MM/yyyy 'às' HH:mm")
 }
 
+/** 3min tolera 1 heartbeat perdido (batida a cada 120s). Decisão do usuário. */
+const ONLINE_THRESHOLD_MS = 3 * 60 * 1000
+
 interface LinhaRelatorio {
   usuario: Profile
   activeSeconds: number
@@ -45,6 +48,10 @@ interface LinhaRelatorio {
   versoes: Set<string>
   ultimoSinal: string | null
   semColeta: boolean
+  onlineAgora: boolean
+  diasComAtividade: number
+  activeSecondsAvg: number
+  openSecondsAvg: number
 }
 
 export default function RelatorioApp() {
@@ -56,6 +63,10 @@ export default function RelatorioApp() {
   const [usuarios, setUsuarios] = useState<Profile[]>([])
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
+  // Congelado a cada carga de dados, nunca lido inline no useMemo: garante que
+  // "online agora" só recalcula no clique de Atualizar (ou troca de período),
+  // nunca por um re-render qualquer do componente.
+  const [momentoCalculo, setMomentoCalculo] = useState(() => Date.now())
 
   const aplicarPreset = (novo: PeriodoPreset) => {
     setPreset(novo)
@@ -84,6 +95,7 @@ export default function RelatorioApp() {
       setAtividade(ativ)
       setSessoes(sess)
       setUsuarios(users)
+      setMomentoCalculo(Date.now())
     } catch (e) {
       setErro(e instanceof Error ? e.message : 'Erro ao carregar o relatório')
     } finally {
@@ -98,6 +110,10 @@ export default function RelatorioApp() {
 
   const linhas = useMemo<LinhaRelatorio[]>(() => {
     const porUsuario = new Map<string, LinhaRelatorio>()
+    // Dedup por dia: a tabela tem PK (user_id, dia, platform) — um usuário que
+    // usa app e web no mesmo dia gera 2 linhas nesse dia. Contar linhas
+    // contaria o dia em dobro na média; um Set garante dia distinto.
+    const diasPorUsuario = new Map<string, Set<string>>()
 
     usuarios.forEach((u) => {
       porUsuario.set(u.id, {
@@ -108,7 +124,12 @@ export default function RelatorioApp() {
         versoes: new Set(),
         ultimoSinal: null,
         semColeta: true,
+        onlineAgora: false,
+        diasComAtividade: 0,
+        activeSecondsAvg: 0,
+        openSecondsAvg: 0,
       })
+      diasPorUsuario.set(u.id, new Set())
     })
 
     atividade.forEach((a) => {
@@ -118,6 +139,7 @@ export default function RelatorioApp() {
       linha.openSeconds += a.open_seconds
       linha.plataformas.add(a.platform)
       if (a.app_version) linha.versoes.add(a.app_version)
+      diasPorUsuario.get(a.user_id)?.add(a.dia)
     })
 
     // `semColeta` olha as SESSÕES, não o período filtrado: um usuário pode ter
@@ -135,11 +157,24 @@ export default function RelatorioApp() {
       }
     })
 
+    // Passo final: médias (só dias com atividade, nunca todos os dias do
+    // período) e "online agora" (ignora o filtro de período de propósito —
+    // é status "agora", mesmo raciocínio de "visto por último").
+    porUsuario.forEach((linha, userId) => {
+      const dias = diasPorUsuario.get(userId)?.size ?? 0
+      linha.diasComAtividade = dias
+      linha.activeSecondsAvg = dias > 0 ? linha.activeSeconds / dias : 0
+      linha.openSecondsAvg = dias > 0 ? linha.openSeconds / dias : 0
+      linha.onlineAgora = linha.ultimoSinal != null
+        && momentoCalculo - new Date(linha.ultimoSinal).getTime() <= ONLINE_THRESHOLD_MS
+    })
+
     return [...porUsuario.values()].sort((a, b) => b.activeSeconds - a.activeSeconds)
-  }, [usuarios, atividade, sessoes])
+  }, [usuarios, atividade, sessoes, momentoCalculo])
 
   const totalAtivo = linhas.reduce((soma, l) => soma + l.activeSeconds, 0)
   const semColeta = linhas.filter((l) => l.semColeta).length
+  const onlineAgoraCount = linhas.filter((l) => l.onlineAgora).length
 
   return (
     <div className="flex h-full min-h-0">
@@ -226,7 +261,7 @@ export default function RelatorioApp() {
           </div>
         )}
 
-        <div className="mb-4 grid gap-3 sm:grid-cols-3">
+        <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Usuários</p>
             <p className="mt-1 text-2xl font-semibold text-foreground">{linhas.length}</p>
@@ -234,6 +269,10 @@ export default function RelatorioApp() {
           <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Tempo ativo total</p>
             <p className="mt-1 text-2xl font-semibold text-foreground">{formatarDuracao(totalAtivo)}</p>
+          </div>
+          <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Online agora</p>
+            <p className="mt-1 text-2xl font-semibold text-emerald-600 dark:text-emerald-500">{onlineAgoraCount}</p>
           </div>
           <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Sem coleta</p>
@@ -246,6 +285,7 @@ export default function RelatorioApp() {
             <TableHeader>
               <TableRow>
                 <TableHead>Usuário</TableHead>
+                <TableHead>Online agora</TableHead>
                 <TableHead>Plataforma</TableHead>
                 <TableHead>Versão</TableHead>
                 <TableHead className="text-right">Tempo ativo</TableHead>
@@ -256,14 +296,14 @@ export default function RelatorioApp() {
             <TableBody>
               {carregando && (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                  <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
                     Carregando...
                   </TableCell>
                 </TableRow>
               )}
               {!carregando && linhas.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                  <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
                     Nenhum dado no período.
                   </TableCell>
                 </TableRow>
@@ -273,6 +313,25 @@ export default function RelatorioApp() {
                   <TableRow key={l.usuario.id}>
                     <TableCell className="font-medium text-foreground">
                       {l.usuario.name || l.usuario.username || l.usuario.email}
+                    </TableCell>
+                    <TableCell>
+                      {l.semColeta ? (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 text-xs">
+                          <span
+                            className={`h-2 w-2 rounded-full ${l.onlineAgora ? 'bg-emerald-500' : 'bg-slate-400'}`}
+                          />
+                          {l.onlineAgora ? (
+                            <Wifi className="h-3.5 w-3.5 text-emerald-500" />
+                          ) : (
+                            <WifiOff className="h-3.5 w-3.5 text-slate-400" />
+                          )}
+                          <span className={l.onlineAgora ? 'text-emerald-600 dark:text-emerald-500' : 'text-muted-foreground'}>
+                            {l.onlineAgora ? 'Online' : 'Offline'}
+                          </span>
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell>
                       {l.semColeta ? (
@@ -296,10 +355,32 @@ export default function RelatorioApp() {
                       {l.versoes.size > 0 ? [...l.versoes].join(', ') : '—'}
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-foreground">
-                      {l.semColeta ? '—' : formatarDuracao(l.activeSeconds)}
+                      {l.semColeta ? (
+                        '—'
+                      ) : (
+                        <div className="flex flex-col items-end">
+                          <span>{formatarDuracao(l.activeSeconds)}</span>
+                          {l.diasComAtividade > 0 && (
+                            <span className="text-[11px] font-normal text-muted-foreground">
+                              média {formatarDuracao(l.activeSecondsAvg)}/dia ({l.diasComAtividade}d)
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground">
-                      {l.semColeta ? '—' : formatarDuracao(l.openSeconds)}
+                      {l.semColeta ? (
+                        '—'
+                      ) : (
+                        <div className="flex flex-col items-end">
+                          <span>{formatarDuracao(l.openSeconds)}</span>
+                          {l.diasComAtividade > 0 && (
+                            <span className="text-[11px] font-normal text-muted-foreground">
+                              média {formatarDuracao(l.openSecondsAvg)}/dia
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {l.semColeta ? (
