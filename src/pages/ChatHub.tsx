@@ -6,7 +6,13 @@ import { ChatList } from '@/components/chat/ChatList'
 import { ChatWindow } from '@/components/chat/ChatWindow'
 import { syncDeviceAvatar } from '@/services/devices'
 import { getMessages, getConversationSummaries, getConversationMessages, type ConversationSummary } from '@/services/messages'
-import { getContacts, updateContactByJid } from '@/services/contacts'
+import {
+  getContacts,
+  updateContactByJid,
+  getCachedContacts,
+  upsertCachedContact,
+  removeCachedContact,
+} from '@/services/contacts'
 import { getMyStates, getDeviceAssignments, type ConversationUserState } from '@/services/conversation_states'
 import type { ConversationAssignment } from '@/lib/supabase/types'
 import { getNotes } from '@/services/notes'
@@ -94,7 +100,10 @@ export default function ChatHub() {
   const [messages, setMessages] = useState<any[]>([])
   const [conversationSummaries, setConversationSummaries] = useState<ConversationSummary[]>([])
   const [conversationMessages, setConversationMessages] = useState<any[]>([])
-  const [contacts, setContacts] = useState<any[]>([])
+  // Semeado de forma síncrona a partir do cache write-through de contacts.ts —
+  // pinta a sidebar imediatamente no mount, sem esperar a rede. O efeito
+  // abaixo sempre refaz o fetch em paralelo e substitui pelo resultado fresco.
+  const [contacts, setContacts] = useState<any[]>(() => getCachedContacts() || [])
   const [selectedContact, setSelectedContact] = useState<string | null>(() =>
     sessionStorage.getItem('activeContactJid')
   )
@@ -238,33 +247,57 @@ export default function ChatHub() {
     }
   })
 
-  useRealtime('contacts', (e) => {
-    if (e.action === 'create') setContacts((prev) => [e.record, ...prev])
-    else if (e.action === 'update')
-      setContacts((prev) => {
-        const idx = prev.findIndex((c) => c.id === e.record.id)
-        if (idx < 0) return prev
-        // Guarda de no-op: a edge function `contact-avatar` faz PATCH mesmo
-        // quando não acha foto, mexendo só em `avatar_updated_at`. Sem esta
-        // checagem, cada PATCH desses cria um array novo e derruba tudo que
-        // depende de `contacts` — buildContactIndex (~6.000 Map.set), as 520
-        // linhas da lista e os 500 balões da conversa aberta.
-        // Só os campos realmente renderizados entram na comparação.
-        const atual = prev[idx]
-        if (
-          atual.avatar_url === e.record.avatar_url &&
-          atual.name === e.record.name &&
-          atual.nickname === e.record.nickname &&
-          atual.remote_jid === e.record.remote_jid
-        ) {
-          return prev
-        }
-        const next = [...prev]
-        next[idx] = e.record
-        return next
-      })
-    else if (e.action === 'delete') setContacts((prev) => prev.filter((c) => c.id !== e.record.id))
-  })
+  useRealtime(
+    'contacts',
+    (e) => {
+      if (e.action === 'create') {
+        upsertCachedContact(e.record)
+        setContacts((prev) => [e.record, ...prev])
+      } else if (e.action === 'update') {
+        // Escreve no cache do módulo SEMPRE, mesmo quando o guard de no-op
+        // abaixo pula o re-render — senão o cache fica preso na versão antiga
+        // e a PRÓXIMA montagem pintaria por um instante o nome/avatar velho.
+        upsertCachedContact(e.record)
+        setContacts((prev) => {
+          const idx = prev.findIndex((c) => c.id === e.record.id)
+          if (idx < 0) return prev
+          // Guarda de no-op: a edge function `contact-avatar` faz PATCH mesmo
+          // quando não acha foto, mexendo só em `avatar_updated_at`. Sem esta
+          // checagem, cada PATCH desses cria um array novo e derruba tudo que
+          // depende de `contacts` — buildContactIndex (~6.000 Map.set), as 520
+          // linhas da lista e os 500 balões da conversa aberta.
+          // Só os campos realmente renderizados entram na comparação.
+          const atual = prev[idx]
+          if (
+            atual.avatar_url === e.record.avatar_url &&
+            atual.name === e.record.name &&
+            atual.nickname === e.record.nickname &&
+            atual.remote_jid === e.record.remote_jid
+          ) {
+            return prev
+          }
+          const next = [...prev]
+          next[idx] = e.record
+          return next
+        })
+      } else if (e.action === 'delete') {
+        removeCachedContact(e.record.id)
+        setContacts((prev) => prev.filter((c) => c.id !== e.record.id))
+      }
+    },
+    true,
+    undefined,
+    // Fecha a janela entre o fetch inicial e o handshake do websocket: uma
+    // alteração de contato que chegasse nesse intervalo seria perdida em
+    // silêncio (SUBSCRIBED só vira true depois do fetch já ter disparado).
+    // Reconciliar a cada SUBSCRIBED (mount e reconexões) também cobre quedas
+    // de rede — dispara raro, o `useRealtime` já tem backoff pra isso.
+    () => {
+      getContacts()
+        .then(setContacts)
+        .catch(() => {})
+    },
+  )
 
   // Busca resumos/mensagens/atribuições de um dispositivo específico. Cada
   // setState só é aplicado se o dispositivo ainda for o selecionado no

@@ -40,6 +40,7 @@ export interface Contact {
   remote_jid: string
   name: string | null
   nickname: string | null
+  name_locked?: boolean
   avatar_url: string | null
   avatar_updated_at: string | null
   created_at: string

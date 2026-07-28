@@ -12,9 +12,18 @@ export function useRealtime<T extends Record<string, unknown>>(
   callback: (data: RecordSubscription<T>) => void,
   enabled: boolean = true,
   filter?: string,
+  // Opcional e por isso retrocompatível com todo call site existente que só
+  // passa (tableName, callback[, enabled[, filter]]). Disparado toda vez que
+  // o canal fica SUBSCRIBED (mount inicial e reconexões) — serve pra quem
+  // precisa reconciliar um fetch inicial com o handshake assíncrono do
+  // websocket, fechando a janela em que uma mudança chegaria entre os dois e
+  // seria perdida em silêncio.
+  onSubscribed?: () => void,
 ) {
   const callbackRef = useRef(callback)
   callbackRef.current = callback
+  const onSubscribedRef = useRef(onSubscribed)
+  onSubscribedRef.current = onSubscribed
 
   useEffect(() => {
     if (!enabled) return
@@ -56,6 +65,7 @@ export function useRealtime<T extends Record<string, unknown>>(
           if (status === 'SUBSCRIBED') {
             joined = true
             retry = 0
+            onSubscribedRef.current?.()
           } else if (
             status === 'CHANNEL_ERROR' ||
             status === 'TIMED_OUT' ||

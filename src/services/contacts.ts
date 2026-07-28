@@ -1,9 +1,53 @@
 import supabase from '@/lib/supabase/client'
 import type { Contact } from '@/lib/supabase/types'
 
+// Cache write-through da lista de contatos, em escopo de módulo (mesmo padrão
+// dos caches de avatar logo abaixo). Existe pra pintar a sidebar na hora — o
+// mount seguinte lê este array de forma síncrona em vez de esperar ~1.300
+// linhas virem da rede de novo — enquanto `getContacts()` sempre refaz a
+// busca em paralelo e substitui o cache pelo resultado fresco.
+//
+// Só as colunas realmente lidas pela UI (SmartAvatar, buildContactIndex,
+// resolveContactDisplayName, o handleSaveTask do ChatWindow) entram no
+// select: id, remote_jid, name, nickname, avatar_url, avatar_updated_at.
+// `name_locked` fica de fora — nenhum componente cliente o lê hoje, só a
+// escrita em `updateContactByJid` usa esse campo.
+let contactsCache: Contact[] | null = null
+
+// Lido pelo mount do ChatHub para pintar a sidebar antes do fetch de rede
+// terminar. Retorna `null` (não `[]`) quando ainda não há nada em cache, pra
+// o chamador distinguir "sem contatos" de "ainda não carregou".
+export const getCachedContacts = (): Contact[] | null => contactsCache
+
 export const getContacts = async () => {
-  const { data } = await supabase.from('contacts').select('*')
-  return (data as Contact[]) || []
+  const { data } = await supabase
+    .from('contacts')
+    .select('id, remote_jid, name, nickname, avatar_url, avatar_updated_at')
+    .order('id', { ascending: true })
+  const contacts = (data as Contact[]) || []
+  contactsCache = contacts
+  return contacts
+}
+
+// Chamadas pelo handler de Realtime de `contacts` (ChatHub.tsx) — mantêm o
+// cache do módulo em sincronia com o que o usuário já vê na tela. Sem isso, o
+// cache e o estado do React divergem e a PRÓXIMA montagem pintaria, por um
+// instante, um contato apagado ou com o nome antigo antes do refetch chegar.
+export const upsertCachedContact = (contact: Contact) => {
+  if (!contactsCache) return
+  const idx = contactsCache.findIndex((c) => c.id === contact.id)
+  if (idx < 0) {
+    contactsCache = [contact, ...contactsCache]
+  } else {
+    const next = [...contactsCache]
+    next[idx] = contact
+    contactsCache = next
+  }
+}
+
+export const removeCachedContact = (id: string) => {
+  if (!contactsCache) return
+  contactsCache = contactsCache.filter((c) => c.id !== id)
 }
 
 export const getContact = async (id: string) => {
@@ -15,12 +59,21 @@ export const updateContactByJid = async (
   jid: string,
   data: Partial<{ nickname: string; name: string; resolved_at: string }>,
 ) => {
+  // Toda escrita de `name` feita pela app (usuário definindo/editando o nome
+  // manualmente) trava o contato contra sobrescrita pelo pushName do webhook.
+  // É automático aqui — e não responsabilidade de cada chamador — pra não
+  // depender de todo call site lembrar de setar a flag. Checa o valor (não
+  // `'name' in data`) porque um call site pode mandar `name: undefined`
+  // quando o usuário deixou o campo em branco — nesse caso não houve nome
+  // definido pelo usuário, então não deve travar.
+  const payload = typeof data.name === 'string' ? { ...data, name_locked: true } : data
+
   const existing = await supabase.from('contacts').select('*').eq('remote_jid', jid).maybeSingle()
 
   if (existing.data) {
     const { data: updated } = await supabase
       .from('contacts')
-      .update(data)
+      .update(payload)
       .eq('id', existing.data.id)
       .select()
       .single()
@@ -29,7 +82,7 @@ export const updateContactByJid = async (
 
   const { data: created } = await supabase
     .from('contacts')
-    .insert({ remote_jid: jid, ...data })
+    .insert({ remote_jid: jid, ...payload })
     .select()
     .single()
   return created as Contact

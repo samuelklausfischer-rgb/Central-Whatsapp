@@ -10,7 +10,7 @@ const STORAGE_BUCKET = 'chat-attachments'
 // conferir o arquivo em disco não prova que o isolate do Deno recarregou. Este
 // marcador volta no corpo de qualquer resposta e é a única checagem que prova
 // qual código está REALMENTE rodando. Incrementar a cada deploy desta função.
-const BUILD_MARKER = 'revoke-fix-2026-07-28'
+const BUILD_MARKER = 'contact-avatar-fix-2026-07-28'
 
 type MediaType = 'image' | 'video' | 'audio' | 'document' | 'sticker'
 
@@ -51,11 +51,48 @@ async function fetchGroupInfo(instanceName: string, groupJid: string): Promise<R
       `${EVOLUTION_API_URL}/group/findGroupInfos/${instanceName}?groupJid=${encodeURIComponent(groupJid)}`,
       { headers: { 'Content-Type': 'application/json', apikey: EVOLUTION_API_KEY } },
     )
-    if (!resp.ok) return null
-    return await resp.json().catch(() => null)
-  } catch {
+    if (!resp.ok) {
+      mediaWarn('group_info_fetch_failed', { instanceName, groupJid, reason: 'non_ok_status', status: resp.status })
+      return null
+    }
+    const parsed = await resp.json().catch((err) => {
+      mediaWarn('group_info_fetch_failed', { instanceName, groupJid, reason: 'json_parse_error', error: String(err) })
+      return null
+    })
+    return parsed
+  } catch (err) {
+    mediaWarn('group_info_fetch_failed', { instanceName, groupJid, reason: 'fetch_exception', error: String(err) })
     return null
   }
+}
+
+function isWeakSenderName(name: unknown): boolean {
+  if (!name || name === '') return true
+  const s = String(name)
+  if (s.includes('@')) return true
+  // Telefone "cru" nem sempre vem só de dígitos: pode chegar formatado
+  // (+55 11 98765-4321, (11) 98765-4321). Como um nome fraco agora bloqueia
+  // sobrescritas futuras, a detecção precisa cobrir esses formatos.
+  const digits = s.replace(/\D/g, '')
+  return digits.length >= 10 && digits.length >= s.length * 0.6
+}
+
+// `name_locked` é aplicado à mão no self-hosted (o ledger de migrations tem drift),
+// então a coluna pode ainda não existir quando esta função subir. Nesse caso o select
+// falha inteiro — repetir sem a coluna é melhor que parar de salvar contatos.
+async function findContactRow(headers: Record<string, string>, remoteJid: string) {
+  const base = `${SUPABASE_URL}/rest/v1/contacts?remote_jid=eq.${encodeURIComponent(remoteJid)}`
+
+  const withLock = await fetch(`${base}&select=id,name,avatar_url,name_locked`, { headers })
+  if (withLock.ok) {
+    const rows = await withLock.json().catch(() => [])
+    return Array.isArray(rows) ? rows[0] || null : null
+  }
+
+  mediaWarn('contact_select_fallback', { remoteJid, status: withLock.status })
+  const legacy = await fetch(`${base}&select=id,name,avatar_url`, { headers })
+  const rows = await legacy.json().catch(() => [])
+  return Array.isArray(rows) ? rows[0] || null : null
 }
 
 async function saveContact(
@@ -63,18 +100,28 @@ async function saveContact(
   remoteJid: string,
   data: { name?: string; avatarUrl?: string },
 ) {
-  const findResp = await fetch(
-    `${SUPABASE_URL}/rest/v1/contacts?remote_jid=eq.${encodeURIComponent(remoteJid)}&select=id`,
-    { headers },
-  )
-  const contacts = await findResp.json().catch(() => [])
-  const contact = Array.isArray(contacts) ? contacts[0] : null
+  const contact = await findContactRow(headers, remoteJid)
   const now = new Date().toISOString()
 
   if (contact) {
     const updateData: Record<string, unknown> = {}
-    if (data.name) updateData.name = data.name
+    // `name_locked` marca nomes definidos pelo usuário dentro do app — o webhook nunca
+    // sobrescreve. Nomes vindos do WhatsApp (pushName de contato, subject de grupo)
+    // continuam podendo ser atualizados; nomes fracos (telefone) já são descartados antes.
+    if (data.name && !contact.name_locked) {
+      updateData.name = data.name
+    } else if (data.name && contact.name_locked && data.name !== contact.name) {
+      mediaWarn('contact_name_overwrite_skipped', {
+        remoteJid,
+        reason: 'name_locked',
+        existingName: contact.name,
+        incomingName: data.name,
+      })
+    }
     if (data.avatarUrl) {
+      if (contact.avatar_url && contact.avatar_url !== data.avatarUrl) {
+        mediaLog('contact_avatar_overwrite', { remoteJid, previousAvatarUrl: contact.avatar_url, newAvatarUrl: data.avatarUrl })
+      }
       updateData.avatar_url = data.avatarUrl
       updateData.avatar_updated_at = now
     }
@@ -762,14 +809,17 @@ Deno.serve(async (req: Request) => {
   const sharedContactInfo = getContactInfo(msgObj)
   const listInfo = getListInfo(msgObj)
   const content = extractContent(msgObj)
-  const nameToUse = pushName || ''
+  const nameToUse = !isWeakSenderName(pushName) ? pushName : ''
   let contactName = (!isFromMe && !isGroup) ? nameToUse : ''
-  let contactAvatarUrl = messageData.profilePicUrl || ''
+  // `messageData.profilePicUrl` é a foto do REMETENTE da mensagem — só serve como avatar
+  // quando a mensagem é RECEBIDA de um contato individual. Em grupo seria a foto de um
+  // participante; em mensagem enviada (fromMe) seria a foto do próprio dono do aparelho.
+  let contactAvatarUrl = (!isGroup && !isFromMe) ? (messageData.profilePicUrl || '') : ''
 
   if (isGroup) {
     const groupInfo = await fetchGroupInfo(body.instance, remoteSender)
     contactName = groupInfo?.subject || ''
-    contactAvatarUrl = groupInfo?.pictureUrl || contactAvatarUrl
+    contactAvatarUrl = groupInfo?.pictureUrl || ''
   }
 
   if (mediaInfo) {

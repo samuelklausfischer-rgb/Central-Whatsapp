@@ -34,17 +34,36 @@ async function fetchProfile(userId: string): Promise<(Profile & { email: string 
 }
 
 async function fetchAllowedDevices(userId: string): Promise<Device[]> {
-  const { data: links } = await supabase
+  // Antes eram 2 round trips sequenciais (user_allowed_devices, depois devices).
+  // Colapsado em 1 única request via embed do PostgREST, usando a FK
+  // user_allowed_devices.device_id -> devices.id (mesmo padrão já usado em
+  // src/services/emails.ts com `label_id, labels(...)`).
+  const { data, error } = await supabase
+    .from('user_allowed_devices')
+    .select('device_id, devices(*)')
+    .eq('user_id', userId)
+
+  if (!error && data) {
+    return (data as unknown as { devices: Device | null }[])
+      .map((row) => row.devices)
+      .filter((d): d is Device => d != null)
+  }
+
+  // O embed depende da FK estar no schema cache do PostgREST. Se não estiver, o
+  // usuário restrito ficaria sem nenhum dispositivo — ou seja, trancado fora do app.
+  // Por isso caímos no caminho antigo (2 round trips) em vez de devolver lista vazia.
+  return await fetchAllowedDevicesLegacy(userId)
+}
+
+async function fetchAllowedDevicesLegacy(userId: string): Promise<Device[]> {
+  const { data: allowed, error } = await supabase
     .from('user_allowed_devices')
     .select('device_id')
     .eq('user_id', userId)
-  if (!links || links.length === 0) return []
+  if (error || !allowed?.length) return []
 
-  const ids = links.map((l: { device_id: string }) => l.device_id)
-  const { data: devices } = await supabase
-    .from('devices')
-    .select('*')
-    .in('id', ids)
+  const deviceIds = allowed.map((row) => row.device_id)
+  const { data: devices } = await supabase.from('devices').select('*').in('id', deviceIds)
   return (devices as Device[]) || []
 }
 

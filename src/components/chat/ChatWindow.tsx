@@ -105,6 +105,15 @@ import supabase from '@/lib/supabase/client'
 import { useToast } from '@/hooks/use-toast'
 import { format } from 'date-fns'
 
+// Barra de atendimento (Pegar / Designar / Não posso / Finalizar) escondida a
+// pedido do usuário em 28/07/2026 — ninguém estava usando e ela poluía o topo
+// da conversa. Escondida por flag, e não removida, porque o estado que ela
+// grava continua sendo LIDO em vários lugares (selos da lista, fixação
+// automática, supressão de notificação, filtro de pendente de resposta), e
+// porque a feature recebeu manutenção até 27/07 — se alguém sentir falta,
+// basta voltar para `true`.
+const BARRA_ATENDIMENTO_VISIVEL = false
+
 const PHONE_REGEX = /(?:\+55\s?)?(?:\(?\d{2}\)?[\s-]?\d{4,5}[\s-]?\d{4}|\d{10,13})/g
 
 function normalizePhoneNumber(raw: string): string {
@@ -1713,7 +1722,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         </div>
 
         <div className="flex items-center gap-1">
-          {assignment && (assignment.status === 'open' || assignment.status === 'waiting') && (
+          {BARRA_ATENDIMENTO_VISIVEL && assignment && (assignment.status === 'open' || assignment.status === 'waiting') && (
             <>
               <button
                 onClick={handleActionTake}
@@ -1749,7 +1758,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
               </button>
             </>
           )}
-          {assignment && (assignment.status === 'taken' || assignment.status === 'assigned') && assignment.assigned_to === user?.id && (
+          {BARRA_ATENDIMENTO_VISIVEL && assignment && (assignment.status === 'taken' || assignment.status === 'assigned') && assignment.assigned_to === user?.id && (
             <>
               <button
                 onClick={() => setTeamAssignOpen(true)}
