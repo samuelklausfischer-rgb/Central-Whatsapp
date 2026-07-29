@@ -78,6 +78,7 @@ import { SmartAvatar } from '@/components/chat/SmartAvatar'
 import { AudioMessage } from '@/components/chat/AudioMessage'
 import { MediaViewer, type ViewerMedia } from '@/components/chat/MediaViewer'
 import { downloadFile } from '@/lib/download'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -551,7 +552,7 @@ const getDateLabel = (value: string) => {
   return format(date, 'dd/MM/yyyy')
 }
 
-export function ChatWindow({ device, contact, conversation, assignment: assignmentProp, contacts, onBack, isMobile, sheetOpen, onSheetOpenChange, onStartConversation, onOpenConversationByJid, onOptimisticSend, onOptimisticConfirm, onOptimisticFail }: any) {
+export function ChatWindow({ device, contact, conversation, assignment: assignmentProp, contacts, onBack, isMobile, sheetOpen, onSheetOpenChange, onStartConversation, onOpenConversationByJid, onOptimisticSend, onOptimisticConfirm, onOptimisticFail, estadoConversa = 'pronto', onRetryMessages }: any) {
   const { user } = useAuth()
   const { toast } = useToast()
 
@@ -2063,7 +2064,38 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           className="relative z-10 h-full overflow-y-auto px-5 sm:px-10 lg:px-12 py-4 space-y-3 custom-scrollbar"
           ref={scrollRef}
         >
-        {messages.length === 0 ? (
+        {messages.length === 0 && estadoConversa === 'carregando' ? (
+          // Carregando: bolhas fantasma alternadas. Antes só existiam dois
+          // caminhos — "tem mensagem" ou "não tem" —, então enquanto a busca
+          // estava em voo o painel AFIRMAVA que a conversa não tinha mensagens.
+          <div className="flex flex-col gap-3 py-4" aria-busy="true" aria-label="Carregando mensagens">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className={cn('flex', i % 2 === 0 ? 'justify-start' : 'justify-end')}>
+                <div
+                  className="h-14 rounded-2xl bg-chat-muted/10 animate-pulse"
+                  style={{ width: `${38 + ((i * 13) % 34)}%` }}
+                />
+              </div>
+            ))}
+          </div>
+        ) : messages.length === 0 && estadoConversa === 'erro' ? (
+          // Falha de rede deixava o painel afirmando PARA SEMPRE que a conversa
+          // estava vazia, sem retry e sem aviso.
+          <div className="flex flex-col items-center justify-center py-20 text-center px-6">
+            <MessageSquare className="h-10 w-10 text-destructive/40 mb-3" />
+            <p className="text-chat-muted text-sm leading-relaxed">
+              Não foi possível carregar as mensagens.
+            </p>
+            <p className="text-chat-muted/60 text-xs mt-1">
+              Verifique a conexão e tente novamente.
+            </p>
+            {onRetryMessages && (
+              <Button variant="outline" size="sm" className="mt-4" onClick={onRetryMessages}>
+                Tentar novamente
+              </Button>
+            )}
+          </div>
+        ) : messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center px-6">
             <MessageSquare className="h-10 w-10 text-chat-muted/30 mb-3" />
             <p className="text-chat-muted text-sm leading-relaxed">
@@ -2114,7 +2146,13 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           return (
             <React.Fragment key={msg.id}>
               {shouldShowDateSeparator && (
-                <div className="sticky top-2 z-20 flex justify-center py-2">
+                // Separador DENTRO do fluxo, não `sticky`. Como `position: sticky`
+                // não reserva espaço ao grudar, a pílula flutuava permanentemente
+                // sobre as bolhas — cortava texto no meio ("Samu( Hoje )el - Eng.
+                // IA") e, sem `pointer-events-none`, ainda engolia o clique de
+                // quem tentava selecionar o que estava embaixo. Em conversa de um
+                // dia só ela aparece uma vez, no topo, e some ao rolar.
+                <div className="flex justify-center py-2">
                   <span className="rounded-full border border-chat-border bg-chat-panel/90 px-3 py-1 text-[12px] font-medium text-chat-muted shadow-chat backdrop-blur">
                     {getDateLabel(msg.created_at)}
                   </span>

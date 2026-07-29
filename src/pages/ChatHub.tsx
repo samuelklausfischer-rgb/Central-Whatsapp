@@ -19,6 +19,16 @@ import {
   setDeviceSnapshot,
   setDeviceSummaries,
 } from '@/stores/conversationSummaries'
+import {
+  chaveDaConversa,
+  obterConversa,
+  marcarCarregando,
+  definirMensagens,
+  definirMensagensSePresente,
+  marcarErro,
+  aplicarEventoDeMensagem,
+  type EstadoDaConversa,
+} from '@/stores/conversationMessages'
 import { getMyStates, getDeviceAssignments, type ConversationUserState } from '@/services/conversation_states'
 import type { ConversationAssignment } from '@/lib/supabase/types'
 import { getNotes } from '@/services/notes'
@@ -59,25 +69,36 @@ function messageFingerprint(deviceId: string, remoteSender: string, content: str
   return `${deviceId}|${remoteSender}|${(content || '').trim()}`
 }
 
-const CONVERSATION_CACHE_MAX = 20
-
-const conversationCacheKey = (deviceId: string, contact: string) => `${deviceId}|${contact}`
 
 /**
- * Duas URLs de avatar apontam para a MESMA foto?
+ * Duas URLs de avatar apontam para a mesma foto E têm a MESMA validade?
  *
- * As fotos vêm do CDN do WhatsApp (`pps.whatsapp.net/...?ccb=..&oh=..&oe=..`) e o
- * parâmetro `oh` é um HMAC regerado a CADA busca — medido em produção: 644
- * contatos com foto, 644 valores de `oh` distintos. Comparar a URL inteira,
- * portanto, dava diferente mesmo quando a imagem era idêntica: o guard de no-op
- * não segurava, o array de `contacts` era recriado e o `contactIndex` novo furava
- * o `memo` de todas as linhas da lista. Eram 33.329 PATCHes assim em produção.
- * Comparar só o caminho, sem query string, fecha esse ramo.
+ * As fotos vêm do CDN do WhatsApp (`pps.whatsapp.net/...?ccb=..&oh=..&oe=..`).
+ * O `oh` é um HMAC regerado a cada busca (644 valores distintos para 645
+ * contatos), então comparar a URL inteira dava diferente mesmo com imagem
+ * idêntica: o array de `contacts` era recriado, o `contactIndex` novo furava o
+ * `memo` e a lista inteira re-renderizava. Eram 33.329 PATCHes assim.
+ *
+ * Mas ignorar a query string INTEIRA foi longe demais: é nela que mora também o
+ * `oe`, a EXPIRAÇÃO. Validade média medida: 9,22 dias. Quando a URL vencia, o
+ * `<img>` falhava, o retry buscava a URL renovada, o PATCH voltava pelo Realtime
+ * — e este guard concluía "mesma foto" e descartava. A URL morta ficava no
+ * estado, `SmartAvatar` dá precedência a ela sobre a local, e a foto ficava
+ * quebrada até o fim da sessão. Antes disso se curava sozinho.
+ *
+ * Comparar caminho + `oe` mantém o ganho (renovação de `oh` puro não re-renderiza)
+ * sem prender uma URL vencida.
  */
+function identidadeDaFoto(url: string): string {
+  const [caminho, query = ''] = url.split('?')
+  const oe = new URLSearchParams(query).get('oe') ?? ''
+  return `${caminho}?oe=${oe}`
+}
+
 function mesmaFoto(a: string | null | undefined, b: string | null | undefined): boolean {
   if (a === b) return true
   if (!a || !b) return false
-  return a.split('?')[0] === b.split('?')[0]
+  return identidadeDaFoto(a) === identidadeDaFoto(b)
 }
 
 const SIDEBAR_MIN = 300
@@ -122,7 +143,11 @@ export default function ChatHub() {
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null)
   const [messages, setMessages] = useState<any[]>([])
   const [conversationSummaries, setConversationSummaries] = useState<ConversationSummary[]>([])
+  // Espelho de render do store `conversationMessages`. O store é o dono do dado;
+  // este estado existe só para disparar re-render. Nunca escrever aqui sem passar
+  // pelo store — foi essa dupla fonte de verdade que produzia a conversa errada.
   const [conversationMessages, setConversationMessages] = useState<any[]>([])
+  const [estadoConversa, setEstadoConversa] = useState<EstadoDaConversa>('ausente')
   // Semeado de forma síncrona a partir do cache write-through de contacts.ts —
   // pinta a sidebar imediatamente no mount, sem esperar a rede. O efeito
   // abaixo sempre refaz o fetch em paralelo e substitui pelo resultado fresco.
@@ -149,10 +174,6 @@ export default function ChatHub() {
   const userIdRef = useRef<string | undefined>(user?.id)
   // Mensagens otimistas pendentes (temp) aguardando o eco do realtime.
   const pendingTempsRef = useRef<{ tempId: string; fp: string; ts: number }[]>([])
-  // Cache das últimas conversas abertas (LRU simples, em memória). Serve só para
-  // pintar na hora ao voltar para uma conversa já vista — o fetch continua sendo
-  // a fonte da verdade e sobrescreve logo em seguida.
-  const conversationCacheRef = useRef<Map<string, any[]>>(new Map())
   // Última vez que a rede de segurança rodou. Precisa viver no nível do
   // componente: dentro do efeito ele seria recriado a cada troca de conversa e
   // não deduplicaria a rajada de focus/online/visibility do Alt-Tab.
@@ -382,7 +403,11 @@ export default function ChatHub() {
         // continua sendo fechada sempre.
         setSelectedContact(null)
         setConversationMessages([])
-        conversationCacheRef.current.clear()
+        setEstadoConversa('ausente')
+        // O store de mensagens NÃO é limpo aqui: as entradas são indexadas por
+        // `deviceId|remetente`, então não há como uma conversa de outro aparelho
+        // ser lida por engano — e preservá-las faz voltar ao aparelho anterior
+        // reabrir as conversas já vistas instantaneamente.
 
         // A fila de avatares do aparelho anterior chega a 379 itens e, a 2 por
         // vez, seguiria drenando por minutos disputando a main thread com a
@@ -495,36 +520,34 @@ export default function ChatHub() {
       else if (e.action === 'delete')
         setMessages((prev) => prev.filter((m) => m.id !== e.record.id))
 
-      // Atualizar mensagens da conversa aberta
-      if (e.record.remote_sender === selectedContact) {
-        if (e.action === 'create') {
-          // Reconciliação: se este eco corresponde a uma mensagem otimista
-          // (temp) ainda pendente, substitui o temp pelo registro real em vez
-          // de adicionar — evita balão duplicado. O lookup do pending acontece
-          // fora do updater (que pode rodar 2x em StrictMode).
-          let matchedTempId: string | null = null
-          if (e.record.direction === 'outbound') {
-            const fp = messageFingerprint(e.record.device_id, e.record.remote_sender, e.record.content)
-            const idx = pendingTempsRef.current.findIndex((p) => p.fp === fp)
-            if (idx >= 0) {
-              matchedTempId = pendingTempsRef.current[idx].tempId
-              pendingTempsRef.current.splice(idx, 1)
-            }
-          }
-          setConversationMessages((prev) => {
-            if (prev.some((m) => m.id === e.record.id)) {
-              return prev.map((m) => (m.id === e.record.id ? e.record : m))
-            }
-            if (matchedTempId) {
-              return prev.map((m) => (m.id === matchedTempId ? e.record : m))
-            }
-            return [...prev, e.record]
-          })
-        } else if (e.action === 'update') {
-          setConversationMessages((prev) => prev.map((m) => (m.id === e.record.id ? e.record : m)))
-        } else if (e.action === 'delete') {
-          setConversationMessages((prev) => prev.filter((m) => m.id !== e.record.id))
+      // Aplica na conversa DA MENSAGEM, esteja ela aberta ou não. Antes havia um
+      // gate `if (e.record.remote_sender === selectedContact)` aqui: a mensagem
+      // que chegava com a conversa fechada era usada para tocar o som e atualizar
+      // a lista lateral, e depois descartada. Ao reabrir, o atendente via a
+      // conversa como estava minutos antes — e chegou a reenviar mensagem por
+      // achar que a dele não tinha saído.
+      let matchedTempId: string | null = null
+      if (e.action === 'create' && e.record.direction === 'outbound') {
+        // Reconciliação: se este eco corresponde a uma mensagem otimista (temp)
+        // ainda pendente, substitui o temp pelo registro real em vez de adicionar
+        // — evita balão duplicado. O lookup acontece fora do updater (que pode
+        // rodar 2x em StrictMode).
+        const fp = messageFingerprint(e.record.device_id, e.record.remote_sender, e.record.content)
+        const idx = pendingTempsRef.current.findIndex((p) => p.fp === fp)
+        if (idx >= 0) {
+          matchedTempId = pendingTempsRef.current[idx].tempId
+          pendingTempsRef.current.splice(idx, 1)
         }
+      }
+
+      // `e.record` chega como Record<string, unknown> do handler de Realtime; o
+      // arquivo inteiro já resolve isso com cast no ponto de uso.
+      const deviceIdDaMensagem = e.record.device_id as string
+      const remetenteDaMensagem = e.record.remote_sender as string
+      const chaveDaMensagem = chaveDaConversa(deviceIdDaMensagem, remetenteDaMensagem)
+      const mudou = aplicarEventoDeMensagem(chaveDaMensagem, e.action, e.record, matchedTempId)
+      if (mudou && remetenteDaMensagem === selectedContact) {
+        sincronizarDaLoja(deviceIdDaMensagem, remetenteDaMensagem)
       }
 
       // Atualizar resumos de conversas quando chega mensagem nova
@@ -572,33 +595,50 @@ export default function ChatHub() {
       fp: messageFingerprint(tempMsg.device_id, tempMsg.remote_sender, tempMsg.content),
       ts: Date.now(),
     })
-    setConversationMessages((prev) => [...prev, tempMsg])
+    // Escreve no store e espelha, para o balão otimista sobreviver a sair e
+    // voltar da conversa antes de o eco do realtime chegar.
+    setConversationMessages((prev) => {
+      const proximas = [...prev, tempMsg]
+      definirMensagensSePresente(chaveDaConversa(tempMsg.device_id, tempMsg.remote_sender), proximas)
+      return proximas
+    })
   }, [])
 
   const confirmOptimisticMessage = useCallback((tempId: string, realMsg?: any) => {
     // Remove o pending para o eco do realtime não tentar reconciliar de novo.
     pendingTempsRef.current = pendingTempsRef.current.filter((p) => p.tempId !== tempId)
     setConversationMessages((prev) => {
+      let proximas: any[]
       if (realMsg && realMsg.id) {
         // Substitui a mensagem otimista pela linha real retornada pela RPC.
         // Determinístico (por tempId) — funciona mesmo se o realtime estiver fora.
         if (prev.some((m) => m.id === realMsg.id)) {
           // O eco do realtime já inseriu a mensagem real → só remove a temp.
-          return prev.filter((m) => m.id !== tempId)
+          proximas = prev.filter((m) => m.id !== tempId)
+        } else {
+          proximas = prev.map((m) => (m.id === tempId ? realMsg : m))
         }
-        return prev.map((m) => (m.id === tempId ? realMsg : m))
+      } else {
+        // Sem a linha real: ao menos marca como enviada.
+        proximas = prev.map((m) => (m.id === tempId ? { ...m, status: 'sent' } : m))
       }
-      // Sem a linha real: ao menos marca como enviada.
-      return prev.map((m) => (m.id === tempId ? { ...m, status: 'sent' } : m))
+      if (selectedDeviceId && selectedContactRef.current) {
+        definirMensagensSePresente(chaveDaConversa(selectedDeviceId, selectedContactRef.current), proximas)
+      }
+      return proximas
     })
     if (selectedDeviceId) debouncedRefreshSummaries(selectedDeviceId)
   }, [selectedDeviceId, debouncedRefreshSummaries])
 
   const markOptimisticFailed = useCallback((tempId: string) => {
     pendingTempsRef.current = pendingTempsRef.current.filter((p) => p.tempId !== tempId)
-    setConversationMessages((prev) =>
-      prev.map((m) => (m.id === tempId ? { ...m, status: 'failed' } : m)),
-    )
+    setConversationMessages((prev) => {
+      const proximas = prev.map((m) => (m.id === tempId ? { ...m, status: 'failed' } : m))
+      if (selectedDeviceId && selectedContactRef.current) {
+        definirMensagensSePresente(chaveDaConversa(selectedDeviceId, selectedContactRef.current), proximas)
+      }
+      return proximas
+    })
   }, [])
 
   useRealtime('conversation_user_states', (e) => {
@@ -639,36 +679,39 @@ export default function ChatHub() {
     if (selectedDeviceId) debouncedRefreshSummaries(selectedDeviceId)
   })
 
-  const writeConversationCache = useCallback((key: string, msgs: any[]) => {
-    const cache = conversationCacheRef.current
-    cache.delete(key)
-    cache.set(key, msgs)
-    // Map preserva ordem de inserção: a primeira chave é sempre a mais antiga.
-    while (cache.size > CONVERSATION_CACHE_MAX) {
-      const oldest = cache.keys().next().value
-      if (oldest === undefined) break
-      cache.delete(oldest)
-    }
+  // Copia para o estado o que o store tem NESTA chave. É o único caminho de
+  // escrita do que aparece na tela: como a leitura é indexada pela mesma chave que
+  // identifica a conversa, exibir mensagem de outra pessoa deixa de ser algo que
+  // uma guarda evita e passa a ser impossível por construção.
+  const sincronizarDaLoja = useCallback((deviceId: string, contact: string) => {
+    if (selectedDeviceIdRef.current !== deviceId || selectedContactRef.current !== contact) return
+    const entrada = obterConversa(chaveDaConversa(deviceId, contact))
+    setConversationMessages(entrada.mensagens)
+    setEstadoConversa(entrada.estado)
   }, [])
 
-  // Busca as mensagens de uma conversa específica; só aplica o resultado se
-  // dispositivo+contato ainda forem os selecionados quando a resposta chegar.
+  // Busca as mensagens de uma conversa específica. O resultado vai SEMPRE para o
+  // store (continua sendo um retrato válido daquela conversa mesmo se o usuário já
+  // trocou de tela); só o espelho de render respeita a seleção atual.
   const loadConversationMessages = useCallback((deviceId: string, contact: string) => {
-    const key = conversationCacheKey(deviceId, contact)
-    const cached = conversationCacheRef.current.get(key)
-    if (cached && selectedDeviceIdRef.current === deviceId && selectedContactRef.current === contact) {
-      // Pinta o snapshot imediatamente e revalida logo abaixo. Sem isto, voltar
-      // para uma conversa já vista pisca em branco durante o round-trip.
-      setConversationMessages(cached)
-    }
+    const chave = chaveDaConversa(deviceId, contact)
+    marcarCarregando(chave)
+    sincronizarDaLoja(deviceId, contact)
+
     return getConversationMessages(deviceId, contact)
       .then((msgs) => {
-        writeConversationCache(key, msgs)
-        if (selectedDeviceIdRef.current !== deviceId || selectedContactRef.current !== contact) return
-        setConversationMessages(msgs)
+        definirMensagens(chave, msgs)
+        sincronizarDaLoja(deviceId, contact)
       })
-      .catch(() => {})
-  }, [writeConversationCache])
+      .catch(() => {
+        // Antes era `.catch(() => {})`: uma falha de rede deixava o painel
+        // afirmando PARA SEMPRE que a conversa não tinha mensagens. Agora vira
+        // estado de erro visível — e se já havia conteúdo carregado, o store
+        // preserva o que o atendente está lendo.
+        marcarErro(chave)
+        sincronizarDaLoja(deviceId, contact)
+      })
+  }, [sincronizarDaLoja])
 
   // Botão manual de "atualizar tudo": recarrega resumos, mensagens e
   // atribuições do WhatsApp selecionado (e a conversa aberta, se houver).
@@ -687,28 +730,31 @@ export default function ChatHub() {
     }
   }, [selectedDeviceId, selectedContact, loadDeviceData, loadConversationMessages])
 
-  // Carregar mensagens da conversa selecionada
-  useEffect(() => {
+  // Botão "tentar novamente" do painel de erro.
+  const handleRetryMessages = useCallback(() => {
     if (selectedDeviceId && selectedContact) {
       loadConversationMessages(selectedDeviceId, selectedContact)
-    } else {
-      setConversationMessages([])
     }
   }, [selectedDeviceId, selectedContact, loadConversationMessages])
 
-  // Mantém o cache em dia com a conversa aberta. Guardar só o snapshot do fetch
-  // não basta: mensagens que chegam pelo realtime enquanto a conversa está
-  // aberta ficariam de fora, e reabrir mostraria a lista encolhida por um
-  // instante antes de o fetch corrigir — a lista cresceria na frente do usuário,
-  // o oposto do que o cache existe para fazer.
+  // Troca de conversa. Pinta o que o store já tem DESTA conversa (instantâneo se
+  // já foi vista) e revalida em paralelo. A leitura síncrona antes do fetch é o
+  // que impede o quadro com a conversa anterior sob o nome novo.
+  //
+  // Não existe mais o efeito que "mantinha o cache em dia": ele rodava com o
+  // contato NOVO e o estado ainda com as mensagens ANTIGAS, e gravava as mensagens
+  // de uma pessoa na chave da outra — a cada troca, não em corrida rara. Agora
+  // quem escreve no store é o fetch e o handler de Realtime, sempre pela chave da
+  // própria conversa.
   useEffect(() => {
-    if (!selectedDeviceId || !selectedContact) return
-    if (conversationMessages.length === 0) return
-    writeConversationCache(
-      conversationCacheKey(selectedDeviceId, selectedContact),
-      conversationMessages,
-    )
-  }, [selectedDeviceId, selectedContact, conversationMessages, writeConversationCache])
+    if (selectedDeviceId && selectedContact) {
+      sincronizarDaLoja(selectedDeviceId, selectedContact)
+      loadConversationMessages(selectedDeviceId, selectedContact)
+    } else {
+      setConversationMessages([])
+      setEstadoConversa('ausente')
+    }
+  }, [selectedDeviceId, selectedContact, loadConversationMessages, sincronizarDaLoja])
 
   // Rede de segurança: se o realtime falhar (queda de WebSocket, sleep, troca de
   // rede), re-busca a conversa aberta e os resumos ao voltar o foco/visibilidade/
@@ -1085,6 +1131,8 @@ export default function ChatHub() {
           onOptimisticSend={addOptimisticMessage}
           onOptimisticConfirm={confirmOptimisticMessage}
           onOptimisticFail={markOptimisticFailed}
+          estadoConversa={estadoConversa}
+          onRetryMessages={handleRetryMessages}
         />
       )}
       <Dialog open={isNewContactOpen} onOpenChange={setIsNewContactOpen}>
