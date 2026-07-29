@@ -24,6 +24,7 @@ import {
   X,
   File as FileIcon,
   Download,
+  ChevronDown,
   Image as ImageIcon,
   Pencil,
   Wand2,
@@ -76,6 +77,7 @@ import { Label } from '@/components/ui/label'
 import { createScheduledMessage, type CreateScheduledMessageInput } from '@/services/scheduled_messages'
 import { SmartAvatar } from '@/components/chat/SmartAvatar'
 import { MessageActionsMenu } from '@/components/chat/MessageActionsMenu'
+import { ConversationGallery } from '@/components/chat/ConversationGallery'
 import { AudioMessage } from '@/components/chat/AudioMessage'
 import { MediaViewer, type ViewerMedia } from '@/components/chat/MediaViewer'
 import { downloadFile } from '@/lib/download'
@@ -644,6 +646,19 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const [loadingAction, setLoadingAction] = useState<'take' | 'waiting' | 'finish' | 'invite_accept' | 'invite_decline' | null>(null)
   const dismissedRef = useRef(false)
   const [mediaView, setMediaView] = useState<ViewerMedia | null>(null)
+  const [galeriaAberta, setGaleriaAberta] = useState(false)
+
+  // Abre um item da galeria no visualizador que já existe. Vídeo e imagem são os
+  // dois tipos que a aba Fotos produz.
+  const abrirMidiaDaGaleria = useCallback((itens: any[], index: number) => {
+    const item = itens[index]
+    if (!item) return
+    setMediaView({
+      url: item.url,
+      type: item.tipo === 'video' ? 'video' : 'image',
+      name: item.nome,
+    })
+  }, [])
 
   // Busca dentro da conversa (Ctrl+F)
   const [isFindOpen, setIsFindOpen] = useState(false)
@@ -1920,6 +1935,30 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
 
               <ScrollArea className="flex-1 min-h-0">
                 <div className="px-6 py-5 space-y-3">
+                  {/* Galeria: mesma posição do WhatsApp — primeiro item dos dados
+                      do contato. Só monta quando aberta, para não disparar as
+                      três consultas toda vez que alguém abre o painel. */}
+                  <Button
+                    className="w-full justify-start h-12 bg-chat-hover hover:bg-chat-hover border-chat-border text-chat-text transition-all"
+                    variant="outline"
+                    onClick={() => setGaleriaAberta((v) => !v)}
+                  >
+                    <ImageIcon className="h-4 w-4 mr-3 text-chat-muted" />
+                    Mídia, links e docs
+                    <ChevronDown
+                      className={cn(
+                        'h-4 w-4 ml-auto text-chat-muted transition-transform',
+                        galeriaAberta && 'rotate-180',
+                      )}
+                    />
+                  </Button>
+                  {galeriaAberta && device?.id && contact && (
+                    <ConversationGallery
+                      deviceId={device.id}
+                      remoteSender={contact}
+                      onAbrirMidia={abrirMidiaDaGaleria}
+                    />
+                  )}
                   <Button
                     className="w-full justify-start h-12 bg-chat-hover hover:bg-chat-hover border-chat-border text-chat-text transition-all"
                     variant="outline"
