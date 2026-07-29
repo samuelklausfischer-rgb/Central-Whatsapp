@@ -52,7 +52,12 @@ export const getMessages = async (deviceId: string) => {
     // resumos volta vazia, e trazia mensagens já apagadas de volta para a lista.
     .is('deleted_at', null)
     .order('created_at', { ascending: false })
-    .limit(2000)
+    // 1.000, não 2.000: o PostgREST rodava com `db-max-rows=1000` e cortava este
+    // pedido em silêncio, então o 2.000 declarado nunca foi verdade. Ao subir o
+    // teto do servidor, manter 2.000 dobraria de fato o payload deste fallback
+    // sem ninguém ter pedido. Fixando em 1.000, o comportamento é o mesmo de
+    // sempre e agora está explícito.
+    .limit(1000)
   return ((data as Message[]) || []).reverse()
 }
 

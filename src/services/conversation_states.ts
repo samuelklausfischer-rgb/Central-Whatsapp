@@ -1,4 +1,5 @@
 import supabase from '@/lib/supabase/client'
+import { buscarTodasAsPaginas } from '@/lib/supabase/paginate'
 import type { ConversationAssignment, TeamMember, ConversationRecentViewer } from '@/lib/supabase/types'
 
 export interface ConversationUserState {
@@ -21,16 +22,35 @@ export interface ConversationUserState {
   updated_at: string
 }
 
+// Paginado: o PostgREST corta em 1.000 linhas sem erro (ver lib/supabase/paginate.ts)
+// e o filtro aqui é só por `user_id` — 7 dos 12 usuários já passam de 1.000
+// estados (1213, 1192, 1189, 1185, 1145, 1144, 1139). Cada carga perdia de 139 a
+// 213 estados EM SILÊNCIO: conversas fixadas, marcadas como não lida e
+// `responded_at` sumindo de forma aparentemente aleatória.
+//
+// O `.order('id')` não é cosmético: sem ordenação total e única, o keyset pula e
+// repete linhas. A função não tinha ordenação nenhuma, então até o conjunto que
+// era descartado mudava conforme a ordem física da heap.
 export async function getMyStates(): Promise<ConversationUserState[]> {
-  const { data, error } = await supabase
-    .from('conversation_user_states')
-    .select('*')
-    .eq('user_id', (await supabase.auth.getSession()).data.session?.user?.id || '')
-  if (error) {
+  const userId = (await supabase.auth.getSession()).data.session?.user?.id || ''
+  try {
+    return await buscarTodasAsPaginas<ConversationUserState>(
+      (tamanho, cursor) => {
+        let q = supabase
+          .from('conversation_user_states')
+          .select('*')
+          .eq('user_id', userId)
+          .order('id', { ascending: true })
+          .limit(tamanho)
+        if (cursor) q = q.gt('id', cursor)
+        return q as any
+      },
+      (linha) => linha.id,
+    )
+  } catch (error) {
     console.error('Error fetching conversation states:', error)
     return []
   }
-  return (data as ConversationUserState[]) || []
 }
 
 export async function markConversationRead(deviceId: string, remoteSender: string): Promise<void> {
@@ -205,17 +225,32 @@ export async function getConversationRecentViewers(deviceId: string, remoteSende
 //
 // Ao passar a ler uma coluna nova em qualquer consumidor, incluir aqui — senão o
 // campo chega `undefined` em silêncio.
+// Paginado preventivamente: o filtro é por aparelho e o maior tem 533 linhas
+// hoje (53% do teto de 1.000 do PostgREST), então ainda não trunca — mas quando
+// cruzar, atribuições sumiriam sem erro nenhum, do mesmo jeito que os contatos
+// sumiram. `id` entra no select só para ancorar o keyset.
 export async function getDeviceAssignments(deviceId: string): Promise<Map<string, ConversationAssignment>> {
-  const { data, error } = await supabase
-    .from('conversation_assignments')
-    .select('remote_sender, status, assigned_to, invited_to, global_responded_at')
-    .eq('device_id', deviceId)
-  if (error) {
+  let linhas: ConversationAssignment[]
+  try {
+    linhas = await buscarTodasAsPaginas<ConversationAssignment>(
+      (tamanho, cursor) => {
+        let q = supabase
+          .from('conversation_assignments')
+          .select('id, remote_sender, status, assigned_to, invited_to, global_responded_at')
+          .eq('device_id', deviceId)
+          .order('id', { ascending: true })
+          .limit(tamanho)
+        if (cursor) q = q.gt('id', cursor)
+        return q as any
+      },
+      (linha) => (linha as any).id,
+    )
+  } catch (error) {
     console.error('getDeviceAssignments error:', error)
     return new Map()
   }
   const map = new Map<string, ConversationAssignment>()
-  for (const row of data ?? []) {
+  for (const row of linhas) {
     map.set(row.remote_sender, row as ConversationAssignment)
   }
   return map

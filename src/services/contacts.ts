@@ -1,4 +1,5 @@
 import supabase from '@/lib/supabase/client'
+import { buscarTodasAsPaginas } from '@/lib/supabase/paginate'
 import type { Contact } from '@/lib/supabase/types'
 
 // Cache write-through da lista de contatos, em escopo de módulo (mesmo padrão
@@ -19,14 +20,48 @@ let contactsCache: Contact[] | null = null
 // o chamador distinguir "sem contatos" de "ainda não carregou".
 export const getCachedContacts = (): Contact[] | null => contactsCache
 
-export const getContacts = async () => {
-  const { data } = await supabase
-    .from('contacts')
-    .select('id, remote_jid, name, nickname, avatar_url, avatar_updated_at')
-    .order('id', { ascending: true })
-  const contacts = (data as Contact[]) || []
-  contactsCache = contacts
-  return contacts
+const COLUNAS_CONTATO = 'id, remote_jid, name, nickname, avatar_url, avatar_updated_at'
+
+// Coalescing: o boot dispara DUAS cargas completas (o mount do ChatHub e o
+// SUBSCRIBED do canal de `contacts`, que também reincide em reconexão, `online`,
+// `focus` e `visibilitychange`). Sem isto, paginar transformaria 2 idas à rede
+// em ~6. Quem chegar enquanto uma busca está em voo recebe a mesma promise.
+let buscaEmVoo: Promise<Contact[]> | null = null
+
+export const getContacts = async (): Promise<Contact[]> => {
+  if (buscaEmVoo) return buscaEmVoo
+
+  buscaEmVoo = (async () => {
+    // Paginado porque o PostgREST corta em 1.000 linhas sem erro nenhum (ver
+    // lib/supabase/paginate.ts). São 1.486 contatos hoje: sem isto, 486 nunca
+    // chegavam ao app — as conversas deles apareciam com o telefone no lugar do
+    // nome salvo e a foto nunca fixava.
+    const contatos = await buscarTodasAsPaginas<Contact>(
+      (tamanho, cursor) => {
+        let q = supabase
+          .from('contacts')
+          .select(COLUNAS_CONTATO)
+          .order('id', { ascending: true })
+          .limit(tamanho)
+        if (cursor) q = q.gt('id', cursor)
+        return q as any
+      },
+      (linha) => linha.id,
+    )
+    // O cache só é substituído DEPOIS que todas as páginas voltaram. Antes esta
+    // função nem olhava `error`: uma falha virava `data` null, `contacts` virava
+    // `[]` e o cache bom era apagado. Com N páginas seriam N chances de gravar
+    // uma lista truncada como se fosse completa — os dois call sites têm
+    // `.catch(() => {})`, então lançar preserva o que já estava na tela.
+    contactsCache = contatos
+    return contatos
+  })()
+
+  try {
+    return await buscaEmVoo
+  } finally {
+    buscaEmVoo = null
+  }
 }
 
 // Chamadas pelo handler de Realtime de `contacts` (ChatHub.tsx) — mantêm o
@@ -176,11 +211,16 @@ export const clearAvatarQueue = (): void => {
 }
 
 export const fetchAvatar = (jid: string, instanceKey: string, options?: { retry?: boolean }) => {
-  // Chave por JID puro, sem a instância. `contacts` é uma tabela global — o mesmo
-  // `remote_jid` é uma linha só, compartilhada por todos os aparelhos. Com a
-  // instância na chave, um contato presente em 5 aparelhos era buscado 5 vezes
-  // por sessão para preencher exatamente o mesmo campo.
-  const cacheKey = jid
+  // Chave por (instância, jid), NÃO por jid puro.
+  //
+  // A v0.0.195 tinha unificado por jid, argumentando que `contacts` é global e o
+  // mesmo `remote_jid` é uma linha só. A economia era pequena e o custo, alto:
+  // como `avatarCheckedSet` e `avatarRetriedSet` vivem em escopo de módulo e
+  // sobrevivem à desmontagem, uma única tentativa malsucedida em QUALQUER
+  // aparelho passava a bloquear o contato em TODOS eles pelo resto da sessão —
+  // inclusive a única retentativa disponível quando a URL do CDN vence.
+  // Voltando a segmentar por instância, cada aparelho tem seu próprio orçamento.
+  const cacheKey = `${instanceKey}:${jid}`
 
   if (options?.retry) {
     // `retry` vem do onError da <img> (URL salva quebrou). Vale no máximo uma vez
@@ -203,6 +243,8 @@ export const fetchAvatar = (jid: string, instanceKey: string, options?: { retry?
     return avatarFetchPromises.get(cacheKey)!
   }
 
+  let canceladaPelaFila = false
+
   const promise = enqueueRequest(async () => {
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || ''
     const session = await supabase.auth.getSession()
@@ -217,12 +259,20 @@ export const fetchAvatar = (jid: string, instanceKey: string, options?: { retry?
     .catch((err) => {
       // Cancelamento por troca de aparelho não é falha da origem — marcar como
       // falha aplicaria um throttle de 2 min a um contato que sequer foi tentado.
-      if (err instanceof FilaDeAvatarLimpa) throw err
+      if (err instanceof FilaDeAvatarLimpa) {
+        canceladaPelaFila = true
+        throw err
+      }
       avatarFailedSet.add(cacheKey)
       setTimeout(() => avatarFailedSet.delete(cacheKey), 120000)
       throw err
     })
     .finally(() => {
+      // Não agendar limpeza quando a fila foi cancelada: `cancelar()` já apagou
+      // a chave, e um timer de 10s sobrevivendo ao cancelamento apagaria a
+      // entrada de uma busca NOVA disparada nesse intervalo — o dedupe cairia e
+      // sairiam duas requisições para o mesmo contato.
+      if (canceladaPelaFila) return
       setTimeout(() => avatarFetchPromises.delete(cacheKey), 10000)
     })
 
