@@ -75,6 +75,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { createScheduledMessage, type CreateScheduledMessageInput } from '@/services/scheduled_messages'
 import { SmartAvatar } from '@/components/chat/SmartAvatar'
+import { MessageActionsMenu } from '@/components/chat/MessageActionsMenu'
 import { AudioMessage } from '@/components/chat/AudioMessage'
 import { MediaViewer, type ViewerMedia } from '@/components/chat/MediaViewer'
 import { downloadFile } from '@/lib/download'
@@ -618,6 +619,24 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const [deleteConfirmMsg, setDeleteConfirmMsg] = useState<any>(null)
   const [reactionPopoverMessageId, setReactionPopoverMessageId] = useState<string | null>(null)
   const [messageMenuOpenId, setMessageMenuOpenId] = useState<string | null>(null)
+
+  // Handlers do menu de contexto da mensagem. Ficam aqui (e não dentro do
+  // MessageActionsMenu) porque mexem no estado do compositor — o menu é só
+  // apresentação, e assim serve igual aos dois ramos de renderização.
+  const handleCopyMessage = useCallback(async (msg: any) => {
+    try {
+      await navigator.clipboard.writeText(msg.content || '')
+      toast({ title: 'Mensagem copiada!' })
+    } catch {
+      toast({ title: 'Erro ao copiar', variant: 'destructive' })
+    }
+  }, [toast])
+
+  const handleEditMessage = useCallback((msg: any) => {
+    setEditingMessageId(msg.id)
+    setMsgText(msg.content)
+    setReplyingTo(null)
+  }, [])
   const [viewers, setViewers] = useState<ConversationViewer[]>([])
   const [assignment, setAssignment] = useState<ConversationAssignment | null>(null)
   const [recentViewers, setRecentViewers] = useState<ConversationRecentViewer[]>([])
@@ -2454,60 +2473,14 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                                <MoreVertical className="h-3.5 w-3.5" />
                              </button>
                            </DropdownMenuTrigger>
-                           <DropdownMenuContent align="end" className="bg-chat-panel border-chat-border shadow-chat min-w-[170px]">
-                             <DropdownMenuItem
-                               className="cursor-pointer focus:bg-chat-hover"
-                               onClick={(e) => {
-                                 e.stopPropagation()
-                                 setReplyingTo(msg)
-                               }}
-                             >
-                               <MessageSquare className="h-4 w-4 mr-2" />
-                               Responder
-                             </DropdownMenuItem>
-                             <DropdownMenuItem
-                               className="cursor-pointer focus:bg-chat-hover"
-                               onClick={async (e) => {
-                                 e.stopPropagation()
-                                 try {
-                                   await navigator.clipboard.writeText(msg.content || '')
-                                   toast({ title: 'Mensagem copiada!' })
-                                 } catch {
-                                   toast({ title: 'Erro ao copiar', variant: 'destructive' })
-                                 }
-                               }}
-                             >
-                               <Copy className="h-4 w-4 mr-2" />
-                               Copiar
-                             </DropdownMenuItem>
-                             {isMe && !msg.deleted_at && (
-                               <DropdownMenuItem
-                                 className="cursor-pointer focus:bg-chat-hover"
-                                 onClick={(e) => {
-                                   e.stopPropagation()
-                                   setEditingMessageId(msg.id)
-                                   setMsgText(msg.content)
-                                   setReplyingTo(null)
-                                 }}
-                               >
-                                 <Pencil className="h-4 w-4 mr-2" />
-                                 Editar
-                               </DropdownMenuItem>
-                             )}
-                             <DropdownMenuSeparator className="bg-chat-border" />
-                             {isMe && (
-                               <DropdownMenuItem
-                                 className="cursor-pointer focus:bg-chat-hover text-red-400"
-                                 onClick={(e) => {
-                                   e.stopPropagation()
-                                   setDeleteConfirmMsg(msg)
-                                 }}
-                               >
-                                 <Trash2 className="h-4 w-4 mr-2" />
-                                 Apagar
-                               </DropdownMenuItem>
-                             )}
-                           </DropdownMenuContent>
+                           <MessageActionsMenu
+                             msg={msg}
+                             isMe={isMe}
+                             onReply={setReplyingTo}
+                             onCopy={handleCopyMessage}
+                             onEdit={handleEditMessage}
+                             onDelete={setDeleteConfirmMsg}
+                           />
                          </DropdownMenu>
                        </span>
                      </div>
@@ -2569,60 +2542,14 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                                 <MoreVertical className="h-3.5 w-3.5" />
                               </button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="bg-chat-panel border-chat-border shadow-chat min-w-[170px]">
-                              <DropdownMenuItem
-                                className="cursor-pointer focus:bg-chat-hover"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  setReplyingTo(msg)
-                                }}
-                              >
-                                <MessageSquare className="h-4 w-4 mr-2" />
-                                Responder
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                className="cursor-pointer focus:bg-chat-hover"
-                                onClick={async (e) => {
-                                  e.stopPropagation()
-                                  try {
-                                    await navigator.clipboard.writeText(msg.content || '')
-                                    toast({ title: 'Mensagem copiada!' })
-                                  } catch {
-                                    toast({ title: 'Erro ao copiar', variant: 'destructive' })
-                                  }
-                                }}
-                              >
-                                <Copy className="h-4 w-4 mr-2" />
-                                Copiar
-                              </DropdownMenuItem>
-                              {isMe && !msg.deleted_at && (
-                                <DropdownMenuItem
-                                  className="cursor-pointer focus:bg-chat-hover"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    setEditingMessageId(msg.id)
-                                    setMsgText(msg.content)
-                                    setReplyingTo(null)
-                                  }}
-                                >
-                                  <Pencil className="h-4 w-4 mr-2" />
-                                  Editar
-                                </DropdownMenuItem>
-                              )}
-                              <DropdownMenuSeparator className="bg-chat-border" />
-                              {isMe && (
-                                <DropdownMenuItem
-                                  className="cursor-pointer focus:bg-chat-hover text-red-400"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    setDeleteConfirmMsg(msg)
-                                  }}
-                                >
-                                  <Trash2 className="h-4 w-4 mr-2" />
-                                  Apagar
-                                </DropdownMenuItem>
-                              )}
-                            </DropdownMenuContent>
+                            <MessageActionsMenu
+                              msg={msg}
+                              isMe={isMe}
+                              onReply={setReplyingTo}
+                              onCopy={handleCopyMessage}
+                              onEdit={handleEditMessage}
+                              onDelete={setDeleteConfirmMsg}
+                            />
                           </DropdownMenu>
                         )}
                       </div>
