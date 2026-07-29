@@ -191,10 +191,24 @@ export async function getConversationRecentViewers(deviceId: string, remoteSende
   return (data as ConversationRecentViewer[]) || []
 }
 
+// `select('*')` trazia as 18 colunas da tabela — 284-301 kB por troca de aparelho
+// nos aparelhos grandes, ~6x o payload da própria lista de conversas. Estas cinco
+// são as únicas que a UI lê daqui: `status` e `assigned_to` (badge de atribuição
+// e o `pinned` do ChatHub), `invited_to` (convite pendente) e
+// `global_responded_at` (selo de não respondido).
+//
+// NÃO incluir `assigned_to_name`/`invited_to_name`/`invited_by_name`: eles estão
+// no tipo `ConversationAssignment` e são lidos pelos componentes, mas NÃO existem
+// como coluna da tabela — pedi-los aqui devolve 400 e derruba os assignments
+// inteiros. Já chegavam `undefined` por este caminho no tempo do `select('*')`;
+// quem os preenche é a RPC de `getConversationAssignment`.
+//
+// Ao passar a ler uma coluna nova em qualquer consumidor, incluir aqui — senão o
+// campo chega `undefined` em silêncio.
 export async function getDeviceAssignments(deviceId: string): Promise<Map<string, ConversationAssignment>> {
   const { data, error } = await supabase
     .from('conversation_assignments')
-    .select('*')
+    .select('remote_sender, status, assigned_to, invited_to, global_responded_at')
     .eq('device_id', deviceId)
   if (error) {
     console.error('getDeviceAssignments error:', error)

@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo, ReactNode } from 'react'
 import supabase from '@/lib/supabase/client'
 import { clearAllDrafts } from '@/stores/conversationDrafts'
+import { clearDeviceSnapshots } from '@/stores/conversationSummaries'
 import type { Profile, Device } from '@/lib/supabase/types'
 
 interface AuthContextType {
@@ -219,6 +220,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // onAuthStateChange: aquele também dispara em falha de refresh de token, e
     // apagaria o que o atendente escreveu sem que ele tenha pedido para sair.
     clearAllDrafts()
+    // A lista de conversas em cache guarda prévias de mensagem — não pode
+    // sobreviver para o próximo atendente que logar na mesma máquina.
+    clearDeviceSnapshots()
     supabase.auth.signOut()
   }, [])
 

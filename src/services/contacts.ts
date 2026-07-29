@@ -111,35 +111,76 @@ const avatarRetriedSet = new Set<string>()
 
 const MAX_CONCURRENT_REQUESTS = 2
 let activeRequests = 0
-const requestQueue: (() => void)[] = []
+
+interface RequisicaoNaFila {
+  executar: () => void
+  cancelar: () => void
+}
+const requestQueue: RequisicaoNaFila[] = []
+
+/** Erro sentinela: fila esvaziada por troca de aparelho, não falha de rede. */
+class FilaDeAvatarLimpa extends Error {
+  constructor() {
+    super('Avatar queue cleared.')
+    this.name = 'FilaDeAvatarLimpa'
+  }
+}
 
 const processQueue = () => {
   if (activeRequests < MAX_CONCURRENT_REQUESTS && requestQueue.length > 0) {
     const next = requestQueue.shift()
     if (next) {
       activeRequests++
-      next()
+      next.executar()
     }
   }
 }
 
-const enqueueRequest = <T>(task: () => Promise<T>): Promise<T> => {
+const enqueueRequest = <T>(task: () => Promise<T>, cacheKey: string): Promise<T> => {
   return new Promise((resolve, reject) => {
-    requestQueue.push(() => {
-      task()
-        .then(resolve)
-        .catch(reject)
-        .finally(() => {
-          activeRequests--
-          processQueue()
-        })
+    requestQueue.push({
+      executar: () => {
+        task()
+          .then(resolve)
+          .catch(reject)
+          .finally(() => {
+            activeRequests--
+            processQueue()
+          })
+      },
+      // Ao cancelar, LIBERAR a chave dos caches de sessão: a requisição nunca
+      // chegou a sair, então o contato continua sem foto e precisa poder ser
+      // buscado de novo quando o usuário voltar para este aparelho. Sem isto o
+      // `avatarCheckedSet` trataria o cancelamento como "já checado" e a foto
+      // ficaria faltando até o app reiniciar.
+      cancelar: () => {
+        avatarCheckedSet.delete(cacheKey)
+        avatarFetchPromises.delete(cacheKey)
+        reject(new FilaDeAvatarLimpa())
+      },
     })
     processQueue()
   })
 }
 
+/**
+ * Descarta as requisições de avatar ainda NÃO iniciadas. Chamado na troca de
+ * aparelho: a fila do aparelho anterior pode ter centenas de itens (379 no maior)
+ * e, a 2 por vez, seguiria drenando por minutos, disputando a main thread com a
+ * lista que o usuário está esperando ver. As até 2 já em voo terminam normalmente
+ * — abortá-las exigiria AbortController na edge function e o ganho é irrelevante.
+ */
+export const clearAvatarQueue = (): void => {
+  const pendentes = requestQueue.splice(0, requestQueue.length)
+  for (const req of pendentes) req.cancelar()
+}
+
 export const fetchAvatar = (jid: string, instanceKey: string, options?: { retry?: boolean }) => {
-  const cacheKey = `${instanceKey}:${jid}`
+  // Chave por JID puro, sem a instância. `contacts` é uma tabela global — o mesmo
+  // `remote_jid` é uma linha só, compartilhada por todos os aparelhos. Com a
+  // instância na chave, um contato presente em 5 aparelhos era buscado 5 vezes
+  // por sessão para preencher exatamente o mesmo campo.
+  const cacheKey = jid
 
   if (options?.retry) {
     // `retry` vem do onError da <img> (URL salva quebrou). Vale no máximo uma vez
@@ -172,8 +213,11 @@ export const fetchAvatar = (jid: string, instanceKey: string, options?: { retry?
       { headers: { Authorization: `Bearer ${token}` } },
     )
     return res.json()
-  })
+  }, cacheKey)
     .catch((err) => {
+      // Cancelamento por troca de aparelho não é falha da origem — marcar como
+      // falha aplicaria um throttle de 2 min a um contato que sequer foi tentado.
+      if (err instanceof FilaDeAvatarLimpa) throw err
       avatarFailedSet.add(cacheKey)
       setTimeout(() => avatarFailedSet.delete(cacheKey), 120000)
       throw err

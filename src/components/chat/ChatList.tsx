@@ -53,6 +53,12 @@ export interface ChatListProps {
   currentUserId?: string
   onRefreshAll?: () => void
   isRefreshingAll?: boolean
+  /**
+   * Aparelho ainda nunca carregado nesta sessão. Sem esta flag, `conversations`
+   * vazio era indistinguível de "aparelho sem nenhuma conversa", e a tela de
+   * carregamento aparecia como "Nenhuma conversa por aqui".
+   */
+  carregandoConversas?: boolean
 }
 
 function formatChatTimestamp(dateString: string | undefined | null): string {
@@ -364,6 +370,7 @@ export function ChatList({
   currentUserId,
   onRefreshAll,
   isRefreshingAll,
+  carregandoConversas = false,
 }: ChatListProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const deferredSearch = useDeferredValue(searchQuery)
@@ -622,7 +629,28 @@ export function ChatList({
               </p>
             </div>
           )}
-          {conversations.length === 0 && !deferredSearch && selectedDeviceId && (
+          {/* Carregando: linhas fantasma no lugar do estado vazio. A altura imita
+              a do ChatRow para a lista não dar um salto quando os dados chegam. */}
+          {conversations.length === 0 && !deferredSearch && selectedDeviceId && carregandoConversas && (
+            <div className="flex flex-col gap-0.5" aria-busy="true" aria-label="Carregando conversas">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3 px-3 py-3">
+                  <div className="h-10 w-10 shrink-0 rounded-full bg-chat-muted/10 animate-pulse" />
+                  <div className="flex-1 min-w-0 flex flex-col gap-2">
+                    <div
+                      className="h-3 rounded bg-chat-muted/10 animate-pulse"
+                      style={{ width: `${55 + ((i * 7) % 30)}%` }}
+                    />
+                    <div
+                      className="h-2.5 rounded bg-chat-muted/10 animate-pulse"
+                      style={{ width: `${35 + ((i * 11) % 40)}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {conversations.length === 0 && !deferredSearch && selectedDeviceId && !carregandoConversas && (
             <div className="flex flex-col items-center justify-center py-12 text-center px-6">
               <MessageCircle className="h-8 w-8 text-chat-muted/30 mb-3" />
               <p className="text-chat-muted text-sm leading-relaxed">

@@ -12,7 +12,13 @@ import {
   getCachedContacts,
   upsertCachedContact,
   removeCachedContact,
+  clearAvatarQueue,
 } from '@/services/contacts'
+import {
+  getDeviceSnapshot,
+  setDeviceSnapshot,
+  setDeviceSummaries,
+} from '@/stores/conversationSummaries'
 import { getMyStates, getDeviceAssignments, type ConversationUserState } from '@/services/conversation_states'
 import type { ConversationAssignment } from '@/lib/supabase/types'
 import { getNotes } from '@/services/notes'
@@ -56,6 +62,23 @@ function messageFingerprint(deviceId: string, remoteSender: string, content: str
 const CONVERSATION_CACHE_MAX = 20
 
 const conversationCacheKey = (deviceId: string, contact: string) => `${deviceId}|${contact}`
+
+/**
+ * Duas URLs de avatar apontam para a MESMA foto?
+ *
+ * As fotos vêm do CDN do WhatsApp (`pps.whatsapp.net/...?ccb=..&oh=..&oe=..`) e o
+ * parâmetro `oh` é um HMAC regerado a CADA busca — medido em produção: 644
+ * contatos com foto, 644 valores de `oh` distintos. Comparar a URL inteira,
+ * portanto, dava diferente mesmo quando a imagem era idêntica: o guard de no-op
+ * não segurava, o array de `contacts` era recriado e o `contactIndex` novo furava
+ * o `memo` de todas as linhas da lista. Eram 33.329 PATCHes assim em produção.
+ * Comparar só o caminho, sem query string, fecha esse ramo.
+ */
+function mesmaFoto(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return a.split('?')[0] === b.split('?')[0]
+}
 
 const SIDEBAR_MIN = 300
 const SIDEBAR_MAX = 520
@@ -109,6 +132,9 @@ export default function ChatHub() {
   )
   const [userStates, setUserStates] = useState<ConversationUserState[]>([])
   const [assignments, setAssignments] = useState<Map<string, ConversationAssignment>>(new Map())
+  // Só é `true` quando o aparelho NUNCA foi carregado nesta sessão. Voltar para
+  // um aparelho já visitado pinta do snapshot e nunca acende o skeleton.
+  const [carregandoConversas, setCarregandoConversas] = useState(false)
   const [showArchived, setShowArchived] = useState(false)
   const [noteCountByJid, setNoteCountByJid] = useState<Map<string, number>>(new Map())
   const prevDeviceIdRef = useRef<string | null>(null)
@@ -269,7 +295,7 @@ export default function ChatHub() {
           // Só os campos realmente renderizados entram na comparação.
           const atual = prev[idx]
           if (
-            atual.avatar_url === e.record.avatar_url &&
+            mesmaFoto(atual.avatar_url, e.record.avatar_url) &&
             atual.name === e.record.name &&
             atual.nickname === e.record.nickname &&
             atual.remote_jid === e.record.remote_jid
@@ -309,22 +335,41 @@ export default function ChatHub() {
         .then((msgs) => { if (selectedDeviceIdRef.current === deviceId) setMessages(msgs) })
         .catch(() => { if (selectedDeviceIdRef.current === deviceId) setMessages([]) })
 
-    const summariesPromise = getConversationSummaries(deviceId)
-      .then((summaries) => {
-        if (selectedDeviceIdRef.current !== deviceId) return
-        setConversationSummaries(summaries)
-        if (summaries.length === 0) {
-          return fetchFallbackMessages()
-        }
-        setMessages([])
-      })
-      .catch(fetchFallbackMessages)
+    // Um commit só para os dois. Antes eram dois `.then` independentes, e como
+    // `conversations` (useMemo) depende de summaries E de assignments, a lista
+    // montava com as 668 linhas e remontava logo em seguida. Pior: `pinned`
+    // deriva de `assigned_to`, então a ORDEM mudava e a lista saltava na frente
+    // do usuário. `allSettled` porque assignments falhando não pode impedir a
+    // lista de aparecer.
+    return Promise.allSettled([
+      getConversationSummaries(deviceId),
+      getDeviceAssignments(deviceId),
+    ]).then(([resumo, atribuicoes]) => {
+      const summaries = resumo.status === 'fulfilled' ? resumo.value : null
+      const map = atribuicoes.status === 'fulfilled' ? atribuicoes.value : new Map()
 
-    const assignmentsPromise = getDeviceAssignments(deviceId)
-      .then((map) => { if (selectedDeviceIdRef.current === deviceId) setAssignments(map) })
-      .catch(() => {})
+      // Grava no snapshot SEMPRE, mesmo se o usuário já trocou de aparelho: a
+      // resposta continua sendo um retrato válido DESTE aparelho, e é o que
+      // torna a volta instantânea. Só a escrita no estado do React é descartada.
+      if (summaries) setDeviceSnapshot(deviceId, { summaries, assignments: map })
 
-    return Promise.all([summariesPromise, assignmentsPromise])
+      if (selectedDeviceIdRef.current !== deviceId) return
+
+      setAssignments(map)
+      // A RPC falhou: o skeleton só apaga quando o fallback terminar, senão a
+      // lista pisca "Nenhuma conversa por aqui" antes de as mensagens chegarem —
+      // e, se o fallback também vier vazio, ficaria carregando para sempre.
+      if (!summaries) {
+        return fetchFallbackMessages().finally(() => {
+          if (selectedDeviceIdRef.current === deviceId) setCarregandoConversas(false)
+        })
+      }
+
+      setConversationSummaries(summaries)
+      setCarregandoConversas(false)
+      if (summaries.length === 0) return fetchFallbackMessages()
+      setMessages([])
+    })
   }, [])
 
   useEffect(() => {
@@ -333,20 +378,49 @@ export default function ChatHub() {
       const deviceChanged = prevDeviceIdRef.current !== null && prevDeviceIdRef.current !== selectedDeviceId
       prevDeviceIdRef.current = selectedDeviceId
       if (deviceChanged) {
-        // Limpar ANTES de disparar o fetch. Sem isto a sidebar segue mostrando as
-        // conversas do aparelho ANTERIOR já cruzadas com o selectedDeviceId NOVO
-        // (o useMemo de `conversations` usa o id novo para achar os estados), e
-        // clicar nesse intervalo abre uma conversa que pode nem existir no
-        // aparelho novo. `setMessages([])` é obrigatório junto: sem ele, limpar
-        // as summaries cai no branch de fallback que remonta a lista a partir de
-        // `messages` — ou seja, o aparelho antigo de volta.
+        // A conversa aberta é ortogonal ao aparelho e pode nem existir no novo —
+        // continua sendo fechada sempre.
         setSelectedContact(null)
         setConversationMessages([])
+        conversationCacheRef.current.clear()
+
+        // A fila de avatares do aparelho anterior chega a 379 itens e, a 2 por
+        // vez, seguiria drenando por minutos disputando a main thread com a
+        // lista que o usuário está esperando agora.
+        clearAvatarQueue()
+
+        // Nunca esvaziar a lista para depois buscar. Havia um snapshot deste
+        // aparelho? Pinta na hora e revalida em background. Nunca houve? Aí sim
+        // esvazia, mas acendendo o skeleton — porque lista vazia sem essa flag é
+        // renderizada como "Nenhuma conversa por aqui", que é a mensagem de
+        // aparelho SEM conversa, não de carregamento. Era exatamente isso que
+        // aparecia por segundos a cada troca.
+        //
+        // O cruzamento perigoso que a limpeza antiga evitava (conversas do
+        // aparelho anterior casadas com o selectedDeviceId novo em `:755`) some
+        // por construção: o snapshot é indexado por deviceId, então o que se
+        // pinta pertence, por definição, ao aparelho que está sendo aberto.
+      }
+
+      // Fora do `if (deviceChanged)` de propósito: a PRIMEIRA carga do app
+      // também precisa disso. Ali `deviceChanged` é false (não havia aparelho
+      // anterior), o estado já nasce vazio, e sem acender o skeleton a tela de
+      // abertura mostraria "Nenhuma conversa por aqui" até a rede responder.
+      const snapshot = getDeviceSnapshot(selectedDeviceId)
+      if (snapshot) {
+        setConversationSummaries(snapshot.summaries)
+        setAssignments(snapshot.assignments)
+        setMessages([])
+        setCarregandoConversas(false)
+      } else if (deviceChanged) {
         setConversationSummaries([])
         setMessages([])
         setAssignments(new Map())
-        conversationCacheRef.current.clear()
+        setCarregandoConversas(true)
+      } else {
+        setCarregandoConversas(true)
       }
+
       loadDeviceData(selectedDeviceId)
     } else {
       setMessages([])
@@ -464,10 +538,16 @@ export default function ChatHub() {
     () => debounce((deviceId: string) => {
       getConversationSummaries(deviceId)
         .then((summaries) => {
+          // O snapshot é atualizado mesmo se o usuário já trocou de aparelho:
+          // continua sendo o retrato mais recente DESTE aparelho, e é o que faz
+          // a volta pintar já com as mensagens que chegaram enquanto ele estava
+          // em outro. Só a escrita no estado do React respeita a seleção atual.
+          setDeviceSummaries(deviceId, summaries)
           // Descarta se o usuário já trocou de dispositivo antes desta
           // chamada (debounced) resolver — senão sobrescreve o resumo certo.
           if (selectedDeviceIdRef.current !== deviceId) return
           setConversationSummaries(summaries)
+          setCarregandoConversas(false)
         })
         .catch(() => {})
     }, 150),
@@ -952,6 +1032,7 @@ export default function ChatHub() {
             currentUserId={user?.id}
             onRefreshAll={handleRefreshAll}
             isRefreshingAll={isRefreshingAll}
+            carregandoConversas={carregandoConversas}
           />
         ) : (
           <div
@@ -977,6 +1058,7 @@ export default function ChatHub() {
               currentUserId={user?.id}
               onRefreshAll={handleRefreshAll}
               isRefreshingAll={isRefreshingAll}
+            carregandoConversas={carregandoConversas}
             />
             <div
               className="absolute -right-[6px] top-0 bottom-0 w-[14px] cursor-col-resize z-10 flex items-center justify-center"
