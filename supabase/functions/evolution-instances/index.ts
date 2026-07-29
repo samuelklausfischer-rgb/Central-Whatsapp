@@ -49,6 +49,97 @@ async function requireAdmin(authHeader: string) {
   return { user: authUser }
 }
 
+/**
+ * Porta de acesso do `group_participants`.
+ *
+ * As demais ações desta função são de administração de instância e exigem
+ * `is_admin`. Ver os membros de um grupo é operação de ATENDIMENTO — qualquer
+ * atendente que já tem acesso àquele aparelho precisa poder. Por isso valida a
+ * sessão e o acesso ao aparelho, não o papel de admin.
+ */
+async function requireDeviceAccess(authHeader: string, deviceId: string) {
+  if (!authHeader) return { error: json({ error: 'Authorization header required' }, 401) }
+  if (!deviceId) return { error: json({ error: 'deviceId is required' }, 400) }
+
+  const userResp = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    headers: { Authorization: authHeader, apikey: SUPABASE_SERVICE_KEY },
+  })
+  if (!userResp.ok) return { error: json({ error: 'Invalid session' }, 401) }
+  const authUser = await userResp.json()
+
+  const profileResp = await fetch(
+    `${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(authUser.id)}&select=is_admin,is_super_admin,devices_restricted`,
+    { headers: serviceHeaders },
+  )
+  if (!profileResp.ok) return { error: json({ error: 'Unable to validate profile' }, 500) }
+  const perfis = await profileResp.json()
+  const perfil = Array.isArray(perfis) ? perfis[0] : null
+  if (!perfil) return { error: json({ error: 'Profile not found' }, 403) }
+
+  // Mesma regra de `can_access_device`: admin sem restrição enxerga tudo; os
+  // demais precisam do aparelho liberado explicitamente.
+  const temTodos = perfil.is_super_admin || (perfil.is_admin && !perfil.devices_restricted)
+  if (!temTodos) {
+    const liberadoResp = await fetch(
+      `${SUPABASE_URL}/rest/v1/user_allowed_devices?user_id=eq.${encodeURIComponent(authUser.id)}&device_id=eq.${encodeURIComponent(deviceId)}&select=device_id`,
+      { headers: serviceHeaders },
+    )
+    const liberados = liberadoResp.ok ? await liberadoResp.json() : []
+    if (!Array.isArray(liberados) || liberados.length === 0) {
+      return { error: json({ error: 'Device not allowed for this user' }, 403) }
+    }
+  }
+
+  return { user: authUser }
+}
+
+/**
+ * Participantes de um grupo, direto da Evolution.
+ *
+ * `findGroupInfos` traz, por participante, EXATAMENTE três campos:
+ * `{ id: "...@lid", phoneNumber: "...@s.whatsapp.net", admin: "admin"|"superadmin"|null }`.
+ * **Não existe campo de nome** — quem resolve o nome é o app, cruzando o telefone
+ * com a tabela `contacts`.
+ *
+ * ~18% dos grupos respondem 404 ("Error fetching group") porque a instância saiu
+ * ou foi removida do grupo. Devolvemos `indisponivel: true` em vez de erro, para
+ * o app cair no que já sabe (quem falou no grupo) sem tratar isso como falha.
+ */
+async function groupParticipantsAction(body: JsonRecord) {
+  const instanceName = String(body.instanceName || '').trim()
+  const groupJid = String(body.groupJid || '').trim()
+  if (!instanceName || !groupJid) {
+    return json({ error: 'instanceName and groupJid are required' }, 400)
+  }
+
+  const resp = await evolutionRequest(
+    'GET',
+    `/group/findGroupInfos/${encodeURIComponent(instanceName)}?groupJid=${encodeURIComponent(groupJid)}`,
+  )
+
+  if (!resp.ok) {
+    return json({ indisponivel: true, status: resp.status, participants: [] })
+  }
+
+  const dados = (resp.payload ?? {}) as JsonRecord
+  const brutos = Array.isArray(dados.participants) ? dados.participants : []
+  const participants = brutos
+    .map((p: any) => ({
+      id: String(p?.id ?? ''),
+      // Chega como "5547...@s.whatsapp.net"; o app trabalha com dígitos.
+      phone: String(p?.phoneNumber ?? '').replace(/@.*$/, '').replace(/\D/g, ''),
+      admin: p?.admin ?? null,
+    }))
+    .filter((p: any) => p.id || p.phone)
+
+  return json({
+    indisponivel: false,
+    subject: (dados as any).subject ?? null,
+    size: typeof (dados as any).size === 'number' ? (dados as any).size : participants.length,
+    participants,
+  })
+}
+
 async function getEvolutionConfig() {
   let apiKey = Deno.env.get('EVOLUTION_API_KEY') || ''
   let apiUrl = (Deno.env.get('EVOLUTION_API_URL') || '').replace(/\/+$/, '')
@@ -392,12 +483,23 @@ Deno.serve(async (req: Request) => {
     return json({ error: 'Supabase environment not configured' }, 500)
   }
 
-  const admin = await requireAdmin(req.headers.get('Authorization') || '')
-  if (admin.error) return admin.error
+  const authHeader = req.headers.get('Authorization') || ''
 
   try {
     const body = await req.json().catch(() => ({})) as JsonRecord
     const action = String(body.action || '').trim()
+
+    // `group_participants` é operação de atendimento, não de administração:
+    // valida sessão + acesso ao aparelho. Todo o resto continua exigindo admin,
+    // exatamente como antes.
+    if (action === 'group_participants') {
+      const acesso = await requireDeviceAccess(authHeader, String(body.deviceId || '').trim())
+      if (acesso.error) return acesso.error
+      return await groupParticipantsAction(body)
+    }
+
+    const admin = await requireAdmin(authHeader)
+    if (admin.error) return admin.error
 
     switch (action) {
       case 'list':
