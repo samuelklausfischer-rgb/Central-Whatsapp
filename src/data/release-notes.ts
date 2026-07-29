@@ -7,6 +7,18 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.195',
+    date: '2026-07-29 01:30',
+    title: 'Lista de conversas aparece na hora ao trocar de aparelho',
+    details: [
+      '⚡ Voltar para um aparelho que você já abriu nesta sessão mostra a lista na hora, sem esperar carregar de novo',
+      '⏳ Na primeira vez que você abre um aparelho, aparecem linhas de carregamento — antes a tela dizia "Nenhuma conversa por aqui", como se o aparelho estivesse vazio',
+      '🎯 A lista para de mudar de ordem sozinha logo depois de aparecer',
+      '🚀 Trocar de aparelho ficou mais leve: o app para de buscar as fotos do aparelho anterior, que continuavam sendo baixadas por minutos e travavam a tela',
+      '🖼️ Fotos de perfil deixam de ser buscadas repetidamente para o mesmo contato quando ele aparece em vários aparelhos',
+    ],
+  },
+  {
     version: '0.0.194',
     date: '2026-07-28 22:30',
     title: 'Nome do contato para de voltar para o telefone e foto de grupo corrigida',
