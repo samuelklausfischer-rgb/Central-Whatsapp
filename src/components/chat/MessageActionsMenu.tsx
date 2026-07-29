@@ -1,4 +1,4 @@
-import { MessageSquare, Copy, Pencil, Trash2, Forward } from 'lucide-react'
+import { MessageSquare, Copy, Pencil, Trash2, Forward, Reply } from 'lucide-react'
 import {
   DropdownMenuContent,
   DropdownMenuItem,
@@ -30,6 +30,12 @@ export interface MessageActionsMenuProps {
   onEdit: (msg: any) => void
   onDelete: (msg: any) => void
   onForward: (msg: any) => void
+  /**
+   * Só aparece em grupo, e só para mensagem de OUTRA pessoa: responder no
+   * privado a quem escreveu no grupo, sem nada acontecer no grupo.
+   */
+  onReplyPrivately?: (msg: any) => void
+  podeResponderPrivadamente?: boolean
 }
 
 export function MessageActionsMenu({
@@ -40,6 +46,8 @@ export function MessageActionsMenu({
   onEdit,
   onDelete,
   onForward,
+  onReplyPrivately,
+  podeResponderPrivadamente = false,
 }: MessageActionsMenuProps) {
   return (
     <DropdownMenuContent align="end" className="bg-chat-panel border-chat-border shadow-chat min-w-[170px]">
@@ -53,6 +61,18 @@ export function MessageActionsMenu({
         <MessageSquare className="h-4 w-4 mr-2" />
         Responder
       </DropdownMenuItem>
+      {podeResponderPrivadamente && onReplyPrivately && (
+        <DropdownMenuItem
+          className="cursor-pointer focus:bg-chat-hover"
+          onClick={(e) => {
+            e.stopPropagation()
+            onReplyPrivately(msg)
+          }}
+        >
+          <Reply className="h-4 w-4 mr-2" />
+          Responder privadamente
+        </DropdownMenuItem>
+      )}
       <DropdownMenuItem
         className="cursor-pointer focus:bg-chat-hover"
         onClick={(e) => {

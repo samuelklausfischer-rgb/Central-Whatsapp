@@ -79,6 +79,8 @@ import { SmartAvatar } from '@/components/chat/SmartAvatar'
 import { MessageActionsMenu } from '@/components/chat/MessageActionsMenu'
 import { ConversationGallery } from '@/components/chat/ConversationGallery'
 import { ForwardDialog } from '@/components/chat/ForwardDialog'
+import { GroupMembersPanel } from '@/components/chat/GroupMembersPanel'
+import { getParticipantesDoGrupo, escolherConversaDoParticipante } from '@/services/groups'
 import { AudioMessage } from '@/components/chat/AudioMessage'
 import { MediaViewer, type ViewerMedia } from '@/components/chat/MediaViewer'
 import { downloadFile } from '@/lib/download'
@@ -640,6 +642,64 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     setMsgText(msg.content)
     setReplyingTo(null)
   }, [])
+
+  /**
+   * Responder no privado a quem escreveu no grupo — o grupo não recebe nada.
+   *
+   * A citação vai como TEXTO (linhas prefixadas com "> "), e não como citação
+   * nativa do WhatsApp: para citar nativamente uma mensagem de OUTRA conversa, o
+   * `quoted.key` teria de apontar para o JID do grupo enquanto o envio vai para o
+   * privado, e a função de envio monta esse campo sempre com o destino. Além
+   * disso não foi possível confirmar, sem enviar mensagem real, se a Evolution
+   * repassa citação entre conversas diferentes — o risco era a citação sumir em
+   * silêncio e a resposta chegar sem contexto nenhum.
+   *
+   * Abre a conversa privada com o texto já montado no compositor: quem envia é o
+   * atendente, depois de ler.
+   */
+  const handleReplyPrivately = useCallback(
+    async (msg: any) => {
+      const lid = msg?.group_participant
+      if (!lid || !device?.id) return
+      const participante = { id: String(lid), phone: '', admin: null }
+      // Resolve o telefone pela lista de participantes (a Evolution é a única
+      // fonte que liga LID a telefone).
+      let jidDestino: string | null = null
+      try {
+        const info = await getParticipantesDoGrupo(device.id, device.instance_key, contact)
+        const achado = info.participantes.find((p) => p.id === String(lid))
+        if (achado?.phone) {
+          jidDestino = await escolherConversaDoParticipante(device.id, achado)
+        }
+      } catch {
+        jidDestino = null
+      }
+      if (!jidDestino) {
+        jidDestino = await escolherConversaDoParticipante(device.id, participante as any)
+      }
+      if (!jidDestino) {
+        toast({
+          title: 'Não foi possível abrir a conversa',
+          description: 'Não encontramos o telefone deste participante.',
+          variant: 'destructive',
+        })
+        return
+      }
+
+      const autor = msg.sender_name ? `${msg.sender_name}:` : 'No grupo:'
+      const trecho = String(msg.content ?? '')
+        .split('\n')
+        .map((l: string) => `> ${l}`)
+        .join('\n')
+      saveDraft(conversationDraftKey(device.id, jidDestino), {
+        ...EMPTY_DRAFT,
+        text: `${autor}\n${trecho}\n\n`,
+      })
+      onSheetOpenChange?.(false)
+      onOpenConversationByJid?.(jidDestino)
+    },
+    [device?.id, device?.instance_key, contact, onOpenConversationByJid, onSheetOpenChange, toast],
+  )
   const [viewers, setViewers] = useState<ConversationViewer[]>([])
   const [assignment, setAssignment] = useState<ConversationAssignment | null>(null)
   const [recentViewers, setRecentViewers] = useState<ConversationRecentViewer[]>([])
@@ -649,6 +709,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const [mediaView, setMediaView] = useState<ViewerMedia | null>(null)
   const [galeriaAberta, setGaleriaAberta] = useState(false)
   const [encaminhandoMsg, setEncaminhandoMsg] = useState<any>(null)
+  const [membrosAbertos, setMembrosAbertos] = useState(false)
 
   // Abre um item da galeria no visualizador que já existe. Vídeo e imagem são os
   // dois tipos que a aba Fotos produz.
@@ -1650,15 +1711,30 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     sender_name: conversation?.sender_name
   })
 
+  // O mesmo diálogo de apelido serve para o contato da conversa e para um
+  // participante do grupo — só muda o JID de destino. `null` significa "é o
+  // contato da conversa", que é o comportamento antigo.
+  const [apelidoDoJid, setApelidoDoJid] = useState<string | null>(null)
+
   const handleEditNickname = () => {
+    setApelidoDoJid(null)
     setNicknameInput(contactRecord?.nickname || '')
     setIsNicknameOpen(true)
   }
 
+  const handleEditNicknameParticipante = useCallback((jid: string, nomeAtual: string) => {
+    setApelidoDoJid(jid)
+    setNicknameInput(nomeAtual)
+    setIsNicknameOpen(true)
+  }, [])
+
   const handleSaveNickname = async () => {
     try {
-      await updateContactByJid(contact, { nickname: nicknameInput })
+      // `updateContactByJid` cria o contato se ainda não existir — é o caso comum
+      // de participante de grupo que nunca conversou no privado.
+      await updateContactByJid(apelidoDoJid ?? contact, { nickname: nicknameInput })
       setIsNicknameOpen(false)
+      setApelidoDoJid(null)
       toast({ title: 'Apelido salvo com sucesso' })
     } catch (err) {
       toast({ title: 'Erro ao salvar apelido', variant: 'destructive' })
@@ -1960,6 +2036,38 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                       remoteSender={contact}
                       onAbrirMidia={abrirMidiaDaGaleria}
                     />
+                  )}
+
+                  {isGroupContact && device?.id && contact && (
+                    <>
+                      <Button
+                        className="w-full justify-start h-12 bg-chat-hover hover:bg-chat-hover border-chat-border text-chat-text transition-all"
+                        variant="outline"
+                        onClick={() => setMembrosAbertos((v) => !v)}
+                      >
+                        <Users className="h-4 w-4 mr-3 text-chat-muted" />
+                        Participantes
+                        <ChevronDown
+                          className={cn(
+                            'h-4 w-4 ml-auto text-chat-muted transition-transform',
+                            membrosAbertos && 'rotate-180',
+                          )}
+                        />
+                      </Button>
+                      {membrosAbertos && (
+                        <GroupMembersPanel
+                          deviceId={device.id}
+                          instanceName={device.instance_key}
+                          groupJid={contact}
+                          contactIndex={contactIndex}
+                          onEditarApelido={handleEditNicknameParticipante}
+                          onAbrirConversa={(jid) => {
+                            onSheetOpenChange?.(false)
+                            onOpenConversationByJid?.(jid)
+                          }}
+                        />
+                      )}
+                    </>
                   )}
                   <Button
                     className="w-full justify-start h-12 bg-chat-hover hover:bg-chat-hover border-chat-border text-chat-text transition-all"
@@ -2522,6 +2630,8 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                              onEdit={handleEditMessage}
                              onDelete={setDeleteConfirmMsg}
   onForward={setEncaminhandoMsg}
+  onReplyPrivately={handleReplyPrivately}
+  podeResponderPrivadamente={isGroupContact && !isMe && !!msg.group_participant}
                            />
                          </DropdownMenu>
                        </span>
@@ -2592,6 +2702,8 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                               onEdit={handleEditMessage}
                               onDelete={setDeleteConfirmMsg}
   onForward={setEncaminhandoMsg}
+  onReplyPrivately={handleReplyPrivately}
+  podeResponderPrivadamente={isGroupContact && !isMe && !!msg.group_participant}
                             />
                           </DropdownMenu>
                         )}
