@@ -5,7 +5,7 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { ChatList } from '@/components/chat/ChatList'
 import { ChatWindow } from '@/components/chat/ChatWindow'
 import { syncDeviceAvatar } from '@/services/devices'
-import { getMessages, getConversationSummaries, getConversationMessages, type ConversationSummary } from '@/services/messages'
+import { getMessages, getConversationSummaries, getConversationMessages, sendMessage, type ConversationSummary } from '@/services/messages'
 import {
   getContacts,
   updateContactByJid,
@@ -756,6 +756,48 @@ export default function ChatHub() {
     }
   }, [selectedDeviceId, selectedContact, loadDeviceData, loadConversationMessages])
 
+  /**
+   * Encaminha uma mensagem para outra conversa do MESMO aparelho.
+   *
+   * NÃO usa o caminho otimista de propósito. `addOptimisticMessage` grava o array
+   * da conversa ABERTA numa chave de conversa diferente — que é exatamente o
+   * defeito de "conversa de outra pessoa sob o nome errado" corrigido na v0.0.196.
+   * Aqui o retorno da RPC (a linha real) é aplicado no store pela chave do
+   * DESTINO, então a mensagem já está lá quando o atendente abrir aquela conversa,
+   * sem nunca tocar no que está na tela.
+   */
+  const handleForwardMessage = useCallback(
+    async (remoteSenderDestino: string, texto: string, anexo?: { url: string; type: string; name: string }) => {
+      if (!selectedDeviceId || !user?.id) throw new Error('Sem aparelho selecionado')
+
+      const resultado = await sendMessage({
+        content: texto,
+        device_id: selectedDeviceId,
+        sender_id: user.id,
+        is_read: true,
+        remote_sender: remoteSenderDestino,
+        mediaUrl: anexo?.url,
+        mediaType: anexo?.type,
+        mediaName: anexo?.name,
+      })
+
+      const linhaReal = resultado?.message
+      if (linhaReal?.id && linhaReal?.remote_sender) {
+        // A RPC normaliza o destino (só dígitos no privado, JID completo em
+        // grupo) e grava assim. Usar o valor DE VOLTA da linha, e não o que foi
+        // digitado, garante que a chave do store bate com a que a conversa usa —
+        // caso contrário a mensagem "não apareceria" ao abrir o destino.
+        aplicarEventoDeMensagem(
+          chaveDaConversa(selectedDeviceId, linhaReal.remote_sender),
+          'create',
+          linhaReal,
+        )
+      }
+      debouncedRefreshSummaries(selectedDeviceId)
+    },
+    [selectedDeviceId, user?.id, debouncedRefreshSummaries],
+  )
+
   // Botão "tentar novamente" do painel de erro.
   const handleRetryMessages = useCallback(() => {
     if (selectedDeviceId && selectedContact) {
@@ -1159,6 +1201,8 @@ export default function ChatHub() {
           onOptimisticFail={markOptimisticFailed}
           estadoConversa={estadoConversa}
           onRetryMessages={handleRetryMessages}
+          conversas={conversations}
+          onForwardMessage={handleForwardMessage}
         />
       )}
       <Dialog open={isNewContactOpen} onOpenChange={setIsNewContactOpen}>

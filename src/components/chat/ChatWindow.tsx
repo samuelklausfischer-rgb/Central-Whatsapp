@@ -78,6 +78,7 @@ import { createScheduledMessage, type CreateScheduledMessageInput } from '@/serv
 import { SmartAvatar } from '@/components/chat/SmartAvatar'
 import { MessageActionsMenu } from '@/components/chat/MessageActionsMenu'
 import { ConversationGallery } from '@/components/chat/ConversationGallery'
+import { ForwardDialog } from '@/components/chat/ForwardDialog'
 import { AudioMessage } from '@/components/chat/AudioMessage'
 import { MediaViewer, type ViewerMedia } from '@/components/chat/MediaViewer'
 import { downloadFile } from '@/lib/download'
@@ -555,7 +556,7 @@ const getDateLabel = (value: string) => {
   return format(date, 'dd/MM/yyyy')
 }
 
-export function ChatWindow({ device, contact, conversation, assignment: assignmentProp, contacts, onBack, isMobile, sheetOpen, onSheetOpenChange, onStartConversation, onOpenConversationByJid, onOptimisticSend, onOptimisticConfirm, onOptimisticFail, estadoConversa = 'pronto', onRetryMessages }: any) {
+export function ChatWindow({ device, contact, conversation, assignment: assignmentProp, contacts, onBack, isMobile, sheetOpen, onSheetOpenChange, onStartConversation, onOpenConversationByJid, onOptimisticSend, onOptimisticConfirm, onOptimisticFail, estadoConversa = 'pronto', onRetryMessages, conversas = [], onForwardMessage }: any) {
   const { user } = useAuth()
   const { toast } = useToast()
 
@@ -647,6 +648,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const dismissedRef = useRef(false)
   const [mediaView, setMediaView] = useState<ViewerMedia | null>(null)
   const [galeriaAberta, setGaleriaAberta] = useState(false)
+  const [encaminhandoMsg, setEncaminhandoMsg] = useState<any>(null)
 
   // Abre um item da galeria no visualizador que já existe. Vídeo e imagem são os
   // dois tipos que a aba Fotos produz.
@@ -2519,6 +2521,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                              onCopy={handleCopyMessage}
                              onEdit={handleEditMessage}
                              onDelete={setDeleteConfirmMsg}
+  onForward={setEncaminhandoMsg}
                            />
                          </DropdownMenu>
                        </span>
@@ -2588,6 +2591,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                               onCopy={handleCopyMessage}
                               onEdit={handleEditMessage}
                               onDelete={setDeleteConfirmMsg}
+  onForward={setEncaminhandoMsg}
                             />
                           </DropdownMenu>
                         )}
@@ -3388,6 +3392,16 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           }}
         />
         <MediaViewer media={mediaView} onClose={() => setMediaView(null)} />
+        <ForwardDialog
+          aberto={!!encaminhandoMsg}
+          onFechar={() => setEncaminhandoMsg(null)}
+          msg={encaminhandoMsg}
+          conversas={conversas}
+          contacts={contacts}
+          contactIndex={contactIndex}
+          instanceKey={device?.instance_key}
+          onEncaminhar={onForwardMessage}
+        />
       </div>
     </div>
   )

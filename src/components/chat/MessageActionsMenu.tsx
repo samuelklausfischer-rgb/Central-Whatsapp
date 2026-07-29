@@ -1,4 +1,4 @@
-import { MessageSquare, Copy, Pencil, Trash2 } from 'lucide-react'
+import { MessageSquare, Copy, Pencil, Trash2, Forward } from 'lucide-react'
 import {
   DropdownMenuContent,
   DropdownMenuItem,
@@ -29,6 +29,7 @@ export interface MessageActionsMenuProps {
   onCopy: (msg: any) => void
   onEdit: (msg: any) => void
   onDelete: (msg: any) => void
+  onForward: (msg: any) => void
 }
 
 export function MessageActionsMenu({
@@ -38,6 +39,7 @@ export function MessageActionsMenu({
   onCopy,
   onEdit,
   onDelete,
+  onForward,
 }: MessageActionsMenuProps) {
   return (
     <DropdownMenuContent align="end" className="bg-chat-panel border-chat-border shadow-chat min-w-[170px]">
@@ -50,6 +52,16 @@ export function MessageActionsMenu({
       >
         <MessageSquare className="h-4 w-4 mr-2" />
         Responder
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        className="cursor-pointer focus:bg-chat-hover"
+        onClick={(e) => {
+          e.stopPropagation()
+          onForward(msg)
+        }}
+      >
+        <Forward className="h-4 w-4 mr-2" />
+        Encaminhar
       </DropdownMenuItem>
       <DropdownMenuItem
         className="cursor-pointer focus:bg-chat-hover"
