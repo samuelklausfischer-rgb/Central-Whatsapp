@@ -133,15 +133,20 @@ export function aplicarEventoDeMensagem(
   tempIdParaSubstituir?: string | null,
 ): boolean {
   const atual = porConversa.get(chave)
-  if (!atual || atual.estado === 'ausente') return false
+  // `erro` é parada dura junto com `ausente`: sem isto, uma única mensagem
+  // chegando por Realtime apagaria o painel de erro (com o botão "tentar
+  // novamente") e o app passaria a AFIRMAR um histórico de uma mensagem só.
+  if (!atual || atual.estado === 'ausente' || atual.estado === 'erro') return false
 
   let proximas: any[]
   if (acao === 'create') {
     if (atual.mensagens.some((m) => m.id === registro.id)) {
       proximas = atual.mensagens.map((m) => (m.id === registro.id ? registro : m))
-    } else if (tempIdParaSubstituir) {
+    } else if (tempIdParaSubstituir && atual.mensagens.some((m) => m.id === tempIdParaSubstituir)) {
       proximas = atual.mensagens.map((m) => (m.id === tempIdParaSubstituir ? registro : m))
     } else {
+      // Inclui o caso "temp já saiu do array": sem este fallback o `map` seria
+      // no-op e a mensagem real seria DESCARTADA em silêncio.
       proximas = [...atual.mensagens, registro]
     }
   } else if (acao === 'update') {
@@ -159,7 +164,7 @@ export function aplicarEventoDeMensagem(
 /** Usado pelo envio otimista, que precisa pintar antes de existir no banco. */
 export function definirMensagensSePresente(chave: string, mensagens: any[]): void {
   const atual = porConversa.get(chave)
-  if (!atual || atual.estado === 'ausente') return
+  if (!atual || atual.estado === 'ausente' || atual.estado === 'erro') return
   gravar(chave, { mensagens, estado: atual.estado, ultimaMensagemId: ultimoIdDe(mensagens) })
 }
 

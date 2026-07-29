@@ -173,7 +173,10 @@ export default function ChatHub() {
   const devicesRef = useRef<any[]>(devices)
   const userIdRef = useRef<string | undefined>(user?.id)
   // Mensagens otimistas pendentes (temp) aguardando o eco do realtime.
-  const pendingTempsRef = useRef<{ tempId: string; fp: string; ts: number }[]>([])
+  // `chave` guarda a conversa de ORIGEM do envio. Sem ela, a confirmação usaria a
+  // conversa aberta no momento em que a RPC responde — e quem enviasse e trocasse
+  // de contato em seguida gravaria o resultado na conversa errada.
+  const pendingTempsRef = useRef<{ tempId: string; fp: string; ts: number; chave: string }[]>([])
   // Última vez que a rede de segurança rodou. Precisa viver no nível do
   // componente: dentro do efeito ele seria recriado a cada troca de conversa e
   // não deduplicaria a rajada de focus/online/visibility do Alt-Tab.
@@ -590,21 +593,30 @@ export default function ChatHub() {
     // Limpa temps antigos que nunca foram reconciliados (segurança).
     const cutoff = Date.now() - 120000
     pendingTempsRef.current = pendingTempsRef.current.filter((p) => p.ts >= cutoff)
+    const chave = chaveDaConversa(tempMsg.device_id, tempMsg.remote_sender)
     pendingTempsRef.current.push({
       tempId: tempMsg.id,
       fp: messageFingerprint(tempMsg.device_id, tempMsg.remote_sender, tempMsg.content),
       ts: Date.now(),
+      chave,
     })
     // Escreve no store e espelha, para o balão otimista sobreviver a sair e
     // voltar da conversa antes de o eco do realtime chegar.
     setConversationMessages((prev) => {
       const proximas = [...prev, tempMsg]
-      definirMensagensSePresente(chaveDaConversa(tempMsg.device_id, tempMsg.remote_sender), proximas)
+      definirMensagensSePresente(chave, proximas)
       return proximas
     })
   }, [])
 
   const confirmOptimisticMessage = useCallback((tempId: string, realMsg?: any) => {
+    // Lê a conversa de origem ANTES de remover o pending: a resposta da RPC pode
+    // chegar depois de o atendente já ter trocado de contato.
+    const chaveDeOrigem =
+      pendingTempsRef.current.find((p) => p.tempId === tempId)?.chave ??
+      (realMsg?.device_id && realMsg?.remote_sender
+        ? chaveDaConversa(realMsg.device_id, realMsg.remote_sender)
+        : null)
     // Remove o pending para o eco do realtime não tentar reconciliar de novo.
     pendingTempsRef.current = pendingTempsRef.current.filter((p) => p.tempId !== tempId)
     setConversationMessages((prev) => {
@@ -622,8 +634,20 @@ export default function ChatHub() {
         // Sem a linha real: ao menos marca como enviada.
         proximas = prev.map((m) => (m.id === tempId ? { ...m, status: 'sent' } : m))
       }
-      if (selectedDeviceId && selectedContactRef.current) {
-        definirMensagensSePresente(chaveDaConversa(selectedDeviceId, selectedContactRef.current), proximas)
+      // `prev` é o array da conversa ABERTA. Gravá-lo numa chave diferente
+      // reintroduziria exatamente o defeito que este refactor eliminou, então só
+      // espelha quando a origem do envio ainda é o que está na tela.
+      const conversaAberta = selectedDeviceIdRef.current && selectedContactRef.current
+        ? chaveDaConversa(selectedDeviceIdRef.current, selectedContactRef.current)
+        : null
+      if (chaveDeOrigem && chaveDeOrigem === conversaAberta) {
+        definirMensagensSePresente(chaveDeOrigem, proximas)
+      } else if (chaveDeOrigem && realMsg?.id) {
+        // Trocou de conversa entre enviar e confirmar. Aplicar na conversa de
+        // ORIGEM pela chave dela — sem isto o balão otimista fica órfão lá, o eco
+        // do Realtime não casa fingerprint nenhum (o pending já saiu) e anexa a
+        // linha real ao lado: a mensagem apareceria duplicada ao voltar.
+        aplicarEventoDeMensagem(chaveDeOrigem, 'create', realMsg, tempId)
       }
       return proximas
     })
@@ -631,11 +655,13 @@ export default function ChatHub() {
   }, [selectedDeviceId, debouncedRefreshSummaries])
 
   const markOptimisticFailed = useCallback((tempId: string) => {
+    const chaveDeOrigem = pendingTempsRef.current.find((p) => p.tempId === tempId)?.chave ?? null
     pendingTempsRef.current = pendingTempsRef.current.filter((p) => p.tempId !== tempId)
     setConversationMessages((prev) => {
       const proximas = prev.map((m) => (m.id === tempId ? { ...m, status: 'failed' } : m))
-      if (selectedDeviceId && selectedContactRef.current) {
-        definirMensagensSePresente(chaveDaConversa(selectedDeviceId, selectedContactRef.current), proximas)
+      if (chaveDeOrigem && selectedDeviceIdRef.current && selectedContactRef.current
+        && chaveDeOrigem === chaveDaConversa(selectedDeviceIdRef.current, selectedContactRef.current)) {
+        definirMensagensSePresente(chaveDeOrigem, proximas)
       }
       return proximas
     })
