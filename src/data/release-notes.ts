@@ -7,6 +7,20 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.196',
+    date: '2026-07-29 14:30',
+    title: 'Conversa do contato certo, mensagens novas na hora e nomes de volta',
+    details: [
+      '🛡️ Ao trocar de contato, a conversa da pessoa anterior não aparece mais por alguns segundos sob o nome da nova — era o defeito mais sério, porque responder ou apagar um balão nesse intervalo agia na conversa errada',
+      '📨 Mensagem que chega com a conversa fechada agora está lá quando você abre — antes a lista da esquerda já avisava mas a conversa demorava a mostrar, e dava a impressão de que a sua mensagem não tinha ido',
+      '📇 Contatos que apareciam pelo número voltaram a mostrar o nome salvo: o app só enxergava os primeiros mil contatos e ignorava os outros 486 em silêncio',
+      '📌 Conversas fixadas e marcadas como não lida pararam de sumir sozinhas — o mesmo limite cortava os seus marcadores',
+      '⏳ Abrir uma conversa mostra linhas de carregamento em vez de dizer que ela está vazia; se a internet falhar, aparece aviso com "tentar novamente"',
+      '🏷️ A etiqueta "Hoje" parou de flutuar por cima das mensagens cortando o texto',
+      '🖼️ Fotos de perfil que sumiam e não voltavam mais durante o dia foram corrigidas',
+    ],
+  },
+  {
     version: '0.0.195',
     date: '2026-07-29 01:30',
     title: 'Lista de conversas aparece na hora ao trocar de aparelho',
