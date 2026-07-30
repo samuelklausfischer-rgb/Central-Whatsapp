@@ -32,9 +32,12 @@ jobs:
 
       - uses: android-actions/setup-android@v3
 
+      # Node 22+: o CLI do Capacitor recusa versões abaixo disso. O Vite compila
+      # normalmente no 20 e só o `cap sync` falha, então o erro aparece no fim de
+      # um build que parecia bem-sucedido.
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
 
       - run: npm ci --ignore-scripts
