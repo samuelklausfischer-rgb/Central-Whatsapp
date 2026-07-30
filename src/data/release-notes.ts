@@ -7,6 +7,16 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.199',
+    date: '2026-07-30 23:00',
+    title: 'Encaminhar deixa de parecer mensagem escrita na hora',
+    details: [
+      '↱ Mensagem encaminhada aparece marcada como "Encaminhada", igual ao WhatsApp — tanto no que você encaminha quanto no que chega encaminhado para a clínica, que antes era indistinguível de mensagem comum',
+      '✍️ O encaminhamento sai sem a sua assinatura: encaminhamento de verdade no WhatsApp não leva assinatura de quem repassou, e era isso que fazia a mensagem parecer escrita na hora',
+      'ℹ️ O aviso "Encaminhada" aparece dentro do Central Whats. No WhatsApp de quem recebe ele ainda não aparece — depende de um recurso que a ferramenta que conecta ao WhatsApp não oferece hoje',
+    ],
+  },
+  {
     version: '0.0.198',
     date: '2026-07-30 21:00',
     title: 'A conversa abre na última mensagem, como no WhatsApp',
