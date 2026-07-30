@@ -26,6 +26,63 @@
   <body>
     <div id="root"></div>
     <script src="/env-config.js"></script>
+    <!--
+      Rede de segurança contra TELA PRETA.
+
+      O `ErrorBoundary` do React só existe depois que o React monta. Se o bundle
+      não carregar, não compilar, ou o `createRoot` estourar, não sobra NADA na
+      tela — e num celular não há console para consultar. Este bloco é inline de
+      propósito: precisa funcionar mesmo quando nenhum arquivo externo carregou.
+
+      Vale para todas as plataformas; no desktop nunca dispara, porque o `#root`
+      é preenchido em milissegundos.
+    -->
+    <script>
+      (function () {
+        var raiz = document.getElementById('root')
+        var jaMostrou = false
+
+        function mostrar(titulo, detalhe) {
+          if (jaMostrou || !raiz || raiz.childElementCount > 0) return
+          jaMostrou = true
+          raiz.innerHTML =
+            '<div style="font:14px/1.5 system-ui,sans-serif;color:#e5e7eb;background:#111827;' +
+            'min-height:100vh;padding:24px;box-sizing:border-box;-webkit-user-select:text;user-select:text">' +
+            '<div style="font-size:16px;font-weight:600;margin-bottom:12px">Central Whats não conseguiu abrir</div>' +
+            '<div style="color:#9ca3af;margin-bottom:16px">Mostre esta tela para quem cuida do app.</div>' +
+            '<div style="font-weight:600;margin-bottom:4px">' + titulo + '</div>' +
+            '<pre style="white-space:pre-wrap;word-break:break-all;background:#1f2937;padding:12px;' +
+            'border-radius:8px;font-size:12px;margin:0 0 16px">' + detalhe + '</pre>' +
+            '<div style="color:#6b7280;font-size:11px;word-break:break-all">' +
+            location.href + '<br>' + navigator.userAgent + '</div></div>'
+        }
+
+        // Erro de script E falha ao carregar arquivo (o segundo só é visto em fase
+        // de captura, porque eventos de recurso não borbulham).
+        window.addEventListener(
+          'error',
+          function (e) {
+            if (e && e.target && e.target !== window && e.target.src) {
+              mostrar('Arquivo não carregou', String(e.target.src))
+              return
+            }
+            mostrar('Erro de JavaScript', (e && (e.message || e.error)) || 'desconhecido')
+          },
+          true,
+        )
+
+        window.addEventListener('unhandledrejection', function (e) {
+          var r = e && e.reason
+          mostrar('Falha não tratada', (r && (r.stack || r.message)) || String(r))
+        })
+
+        // Vigia: falha silenciosa não dispara evento nenhum. Se em 12s a tela
+        // continuar vazia, é isto que aparece em vez do preto.
+        setTimeout(function () {
+          mostrar('A tela ficou vazia', 'O app carregou mas não desenhou nada em 12 segundos.')
+        }, 12000)
+      })()
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

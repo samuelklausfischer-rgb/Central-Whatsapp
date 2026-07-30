@@ -1,8 +1,22 @@
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, HashRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
+import { isNativeAndroid } from '@/lib/app-info'
 
+/**
+ * `HashRouter` onde NÃO existe servidor para resolver rotas.
+ *
+ * No Electron o app vem de arquivo local; no APK, de um servidor embutido que só
+ * conhece `index.html`. Nos dois casos uma URL como `/dashboard` não é
+ * resolvível: basta o WebView recarregar (o Android recria a Activity ao girar a
+ * tela, ao mudar o tema do sistema ou ao retomar depois de liberar memória) para
+ * o app voltar num caminho que não existe. Pior: com `--base ./`, os assets
+ * passariam a ser procurados em `/dashboard/assets/...`. Tela preta, sem erro.
+ *
+ * A checagem do Android vem do Capacitor, e não do userAgent, porque o WebView
+ * se identifica como Chrome comum — não há marca própria para procurar.
+ */
 const isElectron = window.navigator.userAgent.includes('Electron')
-const Router = isElectron ? HashRouter : BrowserRouter
+const Router = isElectron || isNativeAndroid() ? HashRouter : BrowserRouter
 import { ThemeProvider } from 'next-themes'
 import { Toaster } from '@/components/ui/toaster'
 import { Toaster as Sonner } from '@/components/ui/sonner'

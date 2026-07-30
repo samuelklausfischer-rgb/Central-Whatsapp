@@ -30,8 +30,16 @@ const config: CapacitorConfig = {
      * `http://` quebraria a gravação de áudio sem nenhum erro óbvio.
      */
     allowMixedContent: false,
-    /** Sem "puxar para atualizar" acidental dentro da conversa. */
-    webContentsDebuggingEnabled: false,
+    /**
+     * Inspeção remota LIGADA.
+     *
+     * Sem isto, um app que abre em tela preta não tem como ser diagnosticado:
+     * não há console no celular e o `chrome://inspect` do computador não
+     * enxerga o WebView. O custo é que quem tiver o aparelho conectado por USB
+     * consegue inspecionar o app — aceitável enquanto a distribuição é interna,
+     * e a ser revisto antes de abrir para fora da clínica.
+     */
+    webContentsDebuggingEnabled: true,
   },
 
   plugins: {
