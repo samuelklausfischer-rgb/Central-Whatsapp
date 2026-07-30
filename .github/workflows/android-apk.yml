@@ -24,11 +24,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # JDK 17: o Android Gradle Plugin 8.x não roda em Java 8 nem 11.
+      # JDK 21, não 17: o módulo `capacitor-android` compila com
+      # `sourceCompatibility JavaVersion.VERSION_21` (ver
+      # `node_modules/@capacitor/android/capacitor/build.gradle`). Com o 17 o
+      # Gradle falha só lá no fim, em `compileDebugJavaWithJavac`, com
+      # "invalid source release: 21".
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - uses: android-actions/setup-android@v3
 
