@@ -92,6 +92,14 @@ export const sendMessage = async (data: {
   mediaType?: string
   mediaName?: string
   reply_to_id?: string
+  /**
+   * JIDs ou telefones a mencionar. A RPC normaliza para JID completo, que é o
+   * formato que o WhatsApp espera — sem isso a menção sai como texto comum, com
+   * o número escrito na mensagem e ninguém notificado.
+   */
+  mentioned?: string[]
+  /** Marca todos os participantes; a Evolution preenche a lista sozinha. */
+  mentionEveryone?: boolean
 }) => {
   const session = await supabase.auth.getSession()
   if (!session.data.session) throw new Error('Not authenticated')
@@ -109,6 +117,8 @@ export const sendMessage = async (data: {
     p_media_type: data.mediaType || null,
     p_media_name: data.mediaName || null,
     p_reply_to_id: data.reply_to_id || null,
+    p_mentioned: data.mentioned && data.mentioned.length > 0 ? data.mentioned : null,
+    p_mention_everyone: data.mentionEveryone ?? false,
   })
 
   if (error) throw new Error(error.message)

@@ -84,6 +84,14 @@ import { ForwardDialog } from '@/components/chat/ForwardDialog'
 import { GroupMembersPanel } from '@/components/chat/GroupMembersPanel'
 import { ContactPickerDialog } from '@/components/chat/ContactPickerDialog'
 import { ShareThisContactDialog } from '@/components/chat/ShareThisContactDialog'
+import { MentionAutocomplete } from '@/components/chat/MentionAutocomplete'
+import {
+  mencaoEmDigitacao,
+  aplicarMencao,
+  extrairMencionados,
+  ehMencao,
+  PADRAO_MENCAO,
+} from '@/lib/mentions'
 import { compartilharContatos, podeCompartilhar, paraCartao } from '@/services/contact_share'
 import { getParticipantesDoGrupo, escolherConversaDoParticipante } from '@/services/groups'
 import { AudioMessage } from '@/components/chat/AudioMessage'
@@ -243,8 +251,16 @@ const formatInline = (
   onOpenConversation?: (jid: string) => void,
   offset: number = 0,
   ranges: HighlightRange[] = EMPTY_RANGES,
+  resolveMention?: (phone: string) => string,
 ): React.ReactNode => {
-  const regex = /(https?:\/\/[^\s]+|`[^`]+`|\*[^*]+\*|_[^_]+_|~[^~]+~)/g
+  // A menção (@ + 10-15 dígitos) entra aqui para ser tratada ANTES do
+  // `splitByPhoneNumbers`: sem isso o número viraria link de telefone e sobraria
+  // um "@" solto na frente — que é exatamente como as menções recebidas aparecem
+  // hoje no app.
+  const regex = new RegExp(
+    `(https?://[^\\s]+|${PADRAO_MENCAO}|\`[^\`]+\`|\\*[^*]+\\*|_[^_]+_|~[^~]+~)`,
+    'g',
+  )
   const parts = text.split(regex)
 
   let cursor = offset
@@ -272,29 +288,47 @@ const formatInline = (
           key={i}
           className="bg-foreground/10 px-1.5 py-0.5 rounded text-[13px] font-mono text-foreground/90"
         >
-          {formatInline(part.slice(1, -1), isMe, onOpenConversation, partOffset + 1, ranges)}
+          {formatInline(part.slice(1, -1), isMe, onOpenConversation, partOffset + 1, ranges, resolveMention)}
         </code>
       )
     }
     if (part.startsWith('*') && part.endsWith('*')) {
       return (
         <strong key={i} className="font-bold">
-          {formatInline(part.slice(1, -1), isMe, onOpenConversation, partOffset + 1, ranges)}
+          {formatInline(part.slice(1, -1), isMe, onOpenConversation, partOffset + 1, ranges, resolveMention)}
         </strong>
       )
     }
     if (part.startsWith('_') && part.endsWith('_')) {
       return (
         <em key={i} className="italic">
-          {formatInline(part.slice(1, -1), isMe, onOpenConversation, partOffset + 1, ranges)}
+          {formatInline(part.slice(1, -1), isMe, onOpenConversation, partOffset + 1, ranges, resolveMention)}
         </em>
       )
     }
     if (part.startsWith('~') && part.endsWith('~')) {
       return (
         <del key={i} className="line-through">
-          {formatInline(part.slice(1, -1), isMe, onOpenConversation, partOffset + 1, ranges)}
+          {formatInline(part.slice(1, -1), isMe, onOpenConversation, partOffset + 1, ranges, resolveMention)}
         </del>
+      )
+    }
+
+    // Menção: o texto guarda o NÚMERO (é ele que o WhatsApp usa para notificar),
+    // e aqui trocamos por nome só na exibição — igual ao WhatsApp, que mostra
+    // @Fulano sobre um texto que por baixo tem o número. Sem o resolvedor, cai
+    // no comportamento antigo.
+    if (ehMencao(part)) {
+      const fone = part.slice(1)
+      const rotulo = resolveMention ? resolveMention(fone) : fone
+      return (
+        <span
+          key={i}
+          title={`+${fone}`}
+          className={`font-medium rounded px-0.5 ${isMe ? 'bg-primary-foreground/15' : 'text-primary'}`}
+        >
+          @{rotulo}
+        </span>
       )
     }
 
@@ -414,6 +448,7 @@ const renderMessage = (
   isMe: boolean,
   onOpenConversation?: (jid: string) => void,
   ranges: HighlightRange[] = EMPTY_RANGES,
+  resolveMention?: (phone: string) => string,
 ) => {
   if (!content) return null
   const parts = content.split(/(```[\s\S]*?```)/g)
@@ -497,7 +532,7 @@ const renderMessage = (
                   : 'border-secondary-foreground/40 bg-secondary-foreground/10 text-secondary-foreground'
               }`}
             >
-              {formatInline(isQuote[1], isMe, onOpenConversation, quoteOffset, ranges)}
+              {formatInline(isQuote[1], isMe, onOpenConversation, quoteOffset, ranges, resolveMention)}
             </blockquote>,
           )
         } else {
@@ -508,7 +543,7 @@ const renderMessage = (
 
           result.push(
             <Fragment key={`line-${j}`}>
-              {formatInline(line, isMe, onOpenConversation, thisLineOffset, ranges)}
+              {formatInline(line, isMe, onOpenConversation, thisLineOffset, ranges, resolveMention)}
               {j < lines.length - 1 && !isNextBlock && <br />}
             </Fragment>,
           )
@@ -535,13 +570,15 @@ const MessageBody = React.memo(function MessageBody({
   isMe,
   onOpenConversation,
   ranges,
+  resolveMention,
 }: {
   content: string
   isMe: boolean
   onOpenConversation?: (jid: string) => void
   ranges: HighlightRange[]
+  resolveMention?: (phone: string) => string
 }) {
-  return <>{renderMessage(content, isMe, onOpenConversation, ranges)}</>
+  return <>{renderMessage(content, isMe, onOpenConversation, ranges, resolveMention)}</>
 })
 
 const getDateKey = (value: string) => {
@@ -717,6 +754,12 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const [membrosAbertos, setMembrosAbertos] = useState(false)
   const [seletorContatoAberto, setSeletorContatoAberto] = useState(false)
   const [compartilharEsteAberto, setCompartilharEsteAberto] = useState(false)
+  // Menção em curso no compositor: `{ termo, inicio }` enquanto o usuário digita
+  // depois de um "@". `null` = autocomplete fechado.
+  const [mencaoAtiva, setMencaoAtiva] = useState<{ termo: string; inicio: number } | null>(null)
+  // "Todos" fica à parte porque não vira número no texto, e sim a flag
+  // `mentionsEveryOne` no envio.
+  const [mencionarTodos, setMencionarTodos] = useState(false)
 
   // Abre um item da galeria no visualizador que já existe. Vídeo e imagem são os
   // dois tipos que a aba Fotos produz.
@@ -1082,6 +1125,16 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     }
   }, [sheetOpen, device, contact])
 
+  /**
+   * Trocar de conversa zera o estado de menção. O rascunho de texto sobrevive à
+   * troca (comportamento antigo), e sem isto a marcação de "todos" atravessaria
+   * junto — notificando o grupo errado.
+   */
+  useEffect(() => {
+    setMencaoAtiva(null)
+    setMencionarTodos(false)
+  }, [contact])
+
   useEffect(() => {
     if (!device || !contact) {
       setAssignment(null)
@@ -1320,6 +1373,13 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       const replySnapshot = replyingTo
         ? { content: replyingTo.content, sender_name: replyingTo.sender_name, id: replyingTo.id }
         : null
+      // Menção só existe em grupo. Fora dele, mesmo que o texto tenha um número
+      // com arroba, não vai nada no campo de menção — é só texto.
+      const emGrupo = isGroupJid(contact)
+      const mencionados = emGrupo ? extrairMencionados(content) : []
+      // O `@todos` só notifica o grupo se a flag for junto. Reconferir o texto
+      // impede que a flag sobreviva a um apagar do `@todos` antes de enviar.
+      const marcarTodos = emGrupo && mencionarTodos && /@todos\b/i.test(content)
       const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
       const tempMsg = {
         id: tempId,
@@ -1339,6 +1399,8 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       // não há janela para trocar de conversa no meio.
       setMsgText('')
       setReplyingTo(null)
+      setMencaoAtiva(null)
+      setMencionarTodos(false)
       onOptimisticSend?.(tempMsg)
       try {
         // Envia o texto CRU — o servidor adiciona a assinatura. A RPC retorna a
@@ -1350,6 +1412,8 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           is_read: true,
           remote_sender: contact,
           reply_to_id: replyId,
+          mentioned: mencionados,
+          mentionEveryone: marcarTodos,
         })
         onOptimisticConfirm?.(tempId, res?.message)
       } catch (err) {
@@ -1713,6 +1777,19 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
 
   const contactRecord = findContactByIdentifier(contact, contactIndex)
   const isGroupContact = isGroupJid(contact)
+
+  /**
+   * Troca o número por nome ao EXIBIR. O texto guardado e enviado continua com o
+   * número — é ele que faz o WhatsApp notificar a pessoa. Mesma precedência do
+   * resto do app: apelido > nome > número.
+   */
+  const resolverNomeDaMencao = useCallback(
+    (telefone: string) => {
+      const contato = findContactByIdentifier(telefone, contactIndex)
+      return contato?.nickname || contato?.name || telefone
+    },
+    [contactIndex],
+  )
 
   const displayName = resolveContactDisplayName(contact, contactIndex, {
     sender_name: conversation?.sender_name
@@ -2602,6 +2679,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                           isMe={isMe}
                           onOpenConversation={onOpenConversationByJid}
                           ranges={rangesByMessageId.get(msg.id) ?? EMPTY_RANGES}
+                          resolveMention={resolverNomeDaMencao}
                         />
                        <span
   className={`inline-flex translate-y-[30%] items-center gap-1 whitespace-nowrap ${
@@ -3163,13 +3241,65 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                 )}
               </div>
             ) : (
-              <div className="flex-1 bg-chat-panel border border-chat-border hover:border-chat-border rounded-2xl flex items-end focus-within:ring-1 focus-within:ring-blue-400/30 focus-within:border-blue-400/30 transition-all duration-300 overflow-hidden shadow-inner group">
+              <div className="relative flex-1 bg-chat-panel border border-chat-border hover:border-chat-border rounded-2xl flex items-end focus-within:ring-1 focus-within:ring-blue-400/30 focus-within:border-blue-400/30 transition-all duration-300 shadow-inner group">
+                {/* Autocomplete de menção. Só em grupo: em conversa privada o
+                    WhatsApp não usa menção e oferecer ali só confunde. */}
+                {isGroupContact && mencaoAtiva && device?.id && (
+                  <MentionAutocomplete
+                    deviceId={device.id}
+                    instanceName={device.instance_key}
+                    groupJid={contact}
+                    contactIndex={contactIndex}
+                    termo={mencaoAtiva.termo}
+                    onEscolher={(telefone) => {
+                      const textarea = msgTextareaRef.current
+                      const cursor = textarea?.selectionStart ?? msgText.length
+                      const { texto, cursor: novoCursor } = aplicarMencao(
+                        msgText,
+                        mencaoAtiva.inicio,
+                        cursor,
+                        telefone,
+                      )
+                      setMsgText(texto)
+                      setMencaoAtiva(null)
+                      // Reposiciona o cursor depois do React aplicar o valor novo.
+                      requestAnimationFrame(() => {
+                        const el = msgTextareaRef.current
+                        if (el) {
+                          el.focus()
+                          el.setSelectionRange(novoCursor, novoCursor)
+                        }
+                      })
+                    }}
+                    onMencionarTodos={() => {
+                      const textarea = msgTextareaRef.current
+                      const cursor = textarea?.selectionStart ?? msgText.length
+                      // "@todos" é só o rótulo visível; quem notifica é a flag
+                      // `mentionsEveryOne` no envio.
+                      const insercao = '@todos '
+                      setMsgText(
+                        msgText.slice(0, mencaoAtiva.inicio) + insercao + msgText.slice(cursor),
+                      )
+                      setMencionarTodos(true)
+                      setMencaoAtiva(null)
+                      requestAnimationFrame(() => msgTextareaRef.current?.focus())
+                    }}
+                    onFechar={() => setMencaoAtiva(null)}
+                  />
+                )}
                 <textarea
                   ref={msgTextareaRef}
                   className="flex-1 bg-transparent border-none min-h-[44px] max-h-[120px] px-4 py-2.5 text-[15px] text-chat-text placeholder:text-chat-muted focus-visible:outline-none resize-none leading-relaxed custom-scrollbar pt-3"
                   placeholder="Digite uma mensagem..."
                   value={msgText}
-                  onChange={(e) => setMsgText(e.target.value)}
+                  onChange={(e) => {
+                    setMsgText(e.target.value)
+                    setMencaoAtiva(
+                      isGroupContact
+                        ? mencaoEmDigitacao(e.target.value, e.target.selectionStart ?? 0)
+                        : null,
+                    )
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault()

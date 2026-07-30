@@ -45,3 +45,6 @@ core.[0-9]*
 
 # Git worktrees (isolated workspaces, e.g. perf/* work)
 .worktrees/
+
+# Saida do build do Electron (806 MB de binarios; vai para o GitHub Releases)
+central-whats-app/release/
