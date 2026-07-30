@@ -85,6 +85,9 @@ import { GroupMembersPanel } from '@/components/chat/GroupMembersPanel'
 import { ContactPickerDialog } from '@/components/chat/ContactPickerDialog'
 import { ShareThisContactDialog } from '@/components/chat/ShareThisContactDialog'
 import { MentionAutocomplete } from '@/components/chat/MentionAutocomplete'
+import { UnavailableAttachmentBubble } from '@/components/chat/UnavailableAttachmentBubble'
+import { ChatImage } from '@/components/chat/ChatImage'
+import { anexoEstaVivo } from '@/services/gallery'
 import {
   mencaoEmDigitacao,
   aplicarMencao,
@@ -614,6 +617,8 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const [isNicknameOpen, setIsNicknameOpen] = useState(false)
   const [nicknameInput, setNicknameInput] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
+  /** Conteúdo da conversa. É a altura DELE que cresce quando a mídia carrega. */
+  const conteudoRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
   const prevConvKeyRef = useRef<string | null>(null)
 
@@ -1107,6 +1112,59 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     handleScroll()
     el.addEventListener('scroll', handleScroll, { passive: true })
     return () => el.removeEventListener('scroll', handleScroll)
+  }, [device?.id, contact])
+
+  /**
+   * Mantém a conversa colada na última mensagem enquanto a mídia carrega.
+   *
+   * O PROBLEMA: imagem, sticker e vídeo entram na tela com altura ZERO (não há
+   * `width`/`height` nem `aspect-ratio`, e o banco não guarda dimensão) e só
+   * ganham altura quando o arquivo chega. A rolagem para o fim acontece uma vez
+   * só, antes disso — e crescer conteúdo **não dispara evento de scroll**, então
+   * nada percebia e nada corrigia. Cada foto que aparecia empurrava a conversa
+   * para baixo e a janela do atendente ficava para trás: a conversa abria no fim
+   * e escorregava sozinha para o meio do histórico. Medido: 415 conversas com
+   * mídia assim, mediana de 3 (≈ uma tela inteira de desvio) e p90 de 26.
+   *
+   * A SOLUÇÃO: observar a altura do conteúdo e reancorar a cada mudança,
+   * enquanto o atendente estiver no fim. É o comportamento do WhatsApp — gruda
+   * no fim por mais que a mídia cresça, e solta assim que ele rola para cima de
+   * propósito (aí `isNearBottomRef` vira false e este efeito não age mais).
+   *
+   * Efeito colateral bom: como o desvio fica em ~0, o limiar de 120px do efeito
+   * acima nunca é cruzado por crescimento — antes, o primeiro giro da roda do
+   * mouse marcava "não está no fundo" e desligava até a recuperação do poll.
+   */
+  useEffect(() => {
+    const el = scrollRef.current
+    const conteudo = conteudoRef.current
+    if (!el) return
+
+    const reancorar = () => {
+      if (!isNearBottomRef.current) return
+      el.scrollTop = el.scrollHeight
+    }
+
+    // Gatilho 1: qualquer mudança de altura do conteúdo. Pega tudo — foto,
+    // vídeo, prévia de PDF que chega, balão que quebra em mais linhas.
+    let observador: ResizeObserver | null = null
+    if (conteudo && typeof ResizeObserver !== 'undefined') {
+      observador = new ResizeObserver(reancorar)
+      observador.observe(conteudo)
+    }
+
+    // Gatilho 2: `load` de cada <img>/<video> dentro da conversa. Redundante com
+    // o observador na maior parte do tempo, e de propósito: `ResizeObserver` é
+    // entregue no passo de renderização e NÃO dispara enquanto a janela está
+    // oculta ou minimizada — o que deixaria a conversa desancorada justamente
+    // quando o atendente volta para o app depois de a mídia ter carregado.
+    // `load` não borbulha, por isso a escuta é em fase de captura.
+    el.addEventListener('load', reancorar, true)
+
+    return () => {
+      observador?.disconnect()
+      el.removeEventListener('load', reancorar, true)
+    }
   }, [device?.id, contact])
 
   // Busca (Ctrl+F): rola até a mensagem da ocorrência atual. Roda só quando a
@@ -2375,9 +2433,14 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       <div className="relative flex-1 overflow-hidden bg-chat-conversation">
         <div className="pointer-events-none absolute inset-0 z-0 chat-conversation-bg-layer" />
         <div
-          className="relative z-10 h-full overflow-y-auto px-5 sm:px-10 lg:px-12 py-4 space-y-3 custom-scrollbar"
+          className="relative z-10 h-full overflow-y-auto px-5 sm:px-10 lg:px-12 custom-scrollbar"
           ref={scrollRef}
         >
+        {/* Wrapper observado pelo ResizeObserver. Precisa existir: observar o
+            container de rolagem devolveria o tamanho da JANELA, que não muda
+            quando uma foto carrega — é a altura do CONTEÚDO que cresce.
+            `py-4 space-y-3` mora aqui porque `space-y` age nos filhos diretos. */}
+        <div ref={conteudoRef} className="py-4 space-y-3">
         {messages.length === 0 && estadoConversa === 'carregando' ? (
           // Carregando: bolhas fantasma alternadas. Antes só existiam dois
           // caminhos — "tem mensagem" ou "não tem" —, então enquanto a busca
@@ -2551,6 +2614,14 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                             )
                           }
                           if (att && typeof att === 'object' && att.url) {
+                            // Arquivo do servidor antigo, que não existe mais.
+                            // Vem ANTES de qualquer ramo de mídia: renderizar o
+                            // `<img>`/`<audio>`/documento normal dispararia uma
+                            // requisição condenada e a altura mudaria depois que
+                            // a conversa já tivesse rolado para o fim.
+                            if (!anexoEstaVivo(att.url)) {
+                              return <UnavailableAttachmentBubble key={idx} name={att.name} />
+                            }
                             if (att.type === 'audio') {
                              return (
                                <div key={idx}>
@@ -2564,8 +2635,12 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                                 key={idx}
                                 type="button"
                                 onClick={() => setMediaView({ url: att.url, type: 'video', name: att.name })}
-                                className="group relative block max-w-[300px] overflow-hidden rounded-xl border border-chat-border bg-black shadow-sm"
+                                className="group relative block w-[300px] max-w-full min-h-[180px] overflow-hidden rounded-xl border border-chat-border bg-black shadow-sm"
                               >
+                                {/* `min-h` fixo no contêiner, não liberado depois: o
+                                    fundo é preto e `object-contain` já letterboxa,
+                                    então um vídeo baixo fica com barras em vez de
+                                    fazer o balão pular quando os metadados chegam. */}
                                 <video
                                   src={att.url}
                                   muted
@@ -2586,9 +2661,9 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                                 key={idx}
                                 type="button"
                                 onClick={() => setMediaView({ url: att.url, type: 'image', name: att.name })}
-                                className="block max-w-[240px] overflow-hidden rounded-xl border border-chat-border hover:opacity-90 hover:scale-[1.02] transition-all duration-300 shadow-sm cursor-zoom-in"
+                                className="block w-[240px] max-w-full overflow-hidden rounded-xl border border-chat-border hover:opacity-90 hover:scale-[1.02] transition-all duration-300 shadow-sm cursor-zoom-in"
                               >
-                                <img
+                                <ChatImage
                                   src={att.url}
                                   alt={att.name || 'Imagem'}
                                   className="w-full h-auto object-cover pointer-events-none"
@@ -2603,12 +2678,13 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                                 href={att.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="block max-w-[160px] overflow-hidden rounded-xl hover:opacity-90 hover:scale-[1.02] transition-all duration-300"
+                                className="block w-[160px] max-w-full overflow-hidden rounded-xl hover:opacity-90 hover:scale-[1.02] transition-all duration-300"
                               >
-                                <img
+                                <ChatImage
                                   src={att.url}
                                   alt={att.name || 'Figurinha'}
                                   className="w-full h-auto object-contain"
+                                  reservaClassName="min-h-[120px]"
                                 />
                               </a>
                             )
@@ -2919,6 +2995,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           </React.Fragment>
           )
         }))}
+        </div>
         </div>
       </div>
 
