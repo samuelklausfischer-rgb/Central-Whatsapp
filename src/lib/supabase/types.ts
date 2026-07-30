@@ -66,6 +66,12 @@ export interface Message {
   edited_at: string | null
   deleted_at: string | null
   revoked_at: string | null
+  /**
+   * Mensagem encaminhada. Diferente de `edited_at`/`deleted_at`/`revoked_at`,
+   * que são eventos posteriores, esta é propriedade de nascimento — por isso
+   * booleano e não timestamp.
+   */
+  is_forwarded: boolean
   created_at: string
   updated_at: string
 }

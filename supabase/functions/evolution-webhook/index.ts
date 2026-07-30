@@ -750,6 +750,22 @@ Deno.serve(async (req: Request) => {
   const remoteSender = isGroup ? rawJid : rawJid.replace(/@s\.whatsapp\.net/g, '').replace(/@lid/g, '').replace(/\D/g, '')
   const groupParticipant = isGroup && participant ? participant : null
 
+  /**
+   * Mensagem que chegou ENCAMINHADA.
+   *
+   * A Evolution iça o `contextInfo` de dentro da mensagem para o TOPO do payload
+   * (em `prepareMessage`, no `whatsapp.baileys.service.ts`), e ele sobrevive à
+   * conversão de `extendedTextMessage` para `conversation` que acontece logo em
+   * seguida — por isso a leitura é direta em `messageData.contextInfo`.
+   *
+   * Este campo era descartado por inteiro: encaminhamento recebido ficava
+   * indistinguível de mensagem escrita na hora.
+   *
+   * Comparação estrita com `true`: o mesmo `contextInfo` carrega `quotedMessage`
+   * (resposta citada) e outros campos, e nenhum deles pode virar encaminhamento.
+   */
+  const isForwarded = messageData.contextInfo?.isForwarded === true
+
   if (!remoteSender) {
     return new Response(JSON.stringify({ status: 'ignored', reason: 'no remote sender' }), { status: 200 })
   }
@@ -927,6 +943,7 @@ Deno.serve(async (req: Request) => {
       ...(attachments ? { attachments } : {}),
       ...(externalId ? { external_id: externalId } : {}),
       ...(groupParticipant ? { group_participant: groupParticipant } : {}),
+      ...(isForwarded ? { is_forwarded: true } : {}),
     }),
   })
 

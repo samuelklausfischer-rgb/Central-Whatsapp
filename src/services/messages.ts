@@ -100,6 +100,17 @@ export const sendMessage = async (data: {
   mentioned?: string[]
   /** Marca todos os participantes; a Evolution preenche a lista sozinha. */
   mentionEveryone?: boolean
+  /**
+   * Encaminhamento. Faz duas coisas na função do banco: NÃO prepende a
+   * assinatura do atendente (encaminhamento de verdade no WhatsApp não tem
+   * assinatura) e grava a linha marcada, para o balão mostrar "Encaminhada".
+   *
+   * O rótulo aparece só DENTRO do Central Whats. Marcar a mensagem como
+   * encaminhada no WhatsApp de quem recebe exige `contextInfo.isForwarded`, que
+   * a Evolution API não expõe em nenhuma versão — conferido no DTO da 2.3.7 e
+   * da 2.4.0-rc2, e por busca no repositório inteiro.
+   */
+  forwarded?: boolean
 }) => {
   const session = await supabase.auth.getSession()
   if (!session.data.session) throw new Error('Not authenticated')
@@ -119,6 +130,7 @@ export const sendMessage = async (data: {
     p_reply_to_id: data.reply_to_id || null,
     p_mentioned: data.mentioned && data.mentioned.length > 0 ? data.mentioned : null,
     p_mention_everyone: data.mentionEveryone ?? false,
+    p_forwarded: data.forwarded ?? false,
   })
 
   if (error) throw new Error(error.message)

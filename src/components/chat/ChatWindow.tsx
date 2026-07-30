@@ -47,6 +47,7 @@ import {
   User,
   CheckCircle,
   Search,
+  Forward,
 } from 'lucide-react'
 import {
   Dialog,
@@ -2586,6 +2587,15 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                             {isTechnicalPlaceholder(msg.reply_to_snapshot.content) ? 'Voz' : msg.reply_to_snapshot.content || ''}
                           </div>
                       </div>
+                    </div>
+                  )}
+                  {/* Encaminhada, como no WhatsApp: itálico, apagado, acima do
+                      conteúdo. Vale nos dois sentidos — o WhatsApp também marca
+                      para quem enviou. Mensagem apagada não leva rótulo. */}
+                  {!msg.deleted_at && msg.is_forwarded && (
+                    <div className="flex items-center gap-1 mb-0.5 text-[12px] italic text-chat-muted/70">
+                      <Forward className="h-3 w-3 shrink-0" />
+                      Encaminhada
                     </div>
                   )}
                     {messageAttachments.length > 0 && (

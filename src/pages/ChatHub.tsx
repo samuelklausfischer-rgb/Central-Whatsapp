@@ -779,6 +779,10 @@ export default function ChatHub() {
         mediaUrl: anexo?.url,
         mediaType: anexo?.type,
         mediaName: anexo?.name,
+        // Sai SEM a assinatura do atendente e nasce marcada. Antes o
+        // encaminhamento chegava do outro lado como mensagem escrita na hora,
+        // assinada — nada nele dizia que era um encaminhamento.
+        forwarded: true,
       })
 
       const linhaReal = resultado?.message
