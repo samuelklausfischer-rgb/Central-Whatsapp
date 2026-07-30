@@ -4,23 +4,12 @@ import {
   Sun,
   Moon,
   LayoutGrid,
-  ListTodo,
-  StickyNote,
-  Zap,
-  CalendarClock,
   ChevronDown,
-  LayoutDashboard,
-  MessageSquare,
-  Mail,
   ShieldAlert,
   RefreshCw,
   Download,
   CheckCircle,
   AlertCircle,
-  Bell,
-  BarChart3,
-  Percent,
-  Activity,
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { useState, useRef, useEffect } from 'react'
@@ -35,7 +24,12 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useAuth } from '@/hooks/use-auth'
-import { canAccessFinanceiroTools } from '@/lib/permissions'
+import {
+  DESTINOS_PRINCIPAIS,
+  ferramentasDoUsuario,
+  ehAcao,
+  type ItemDeFerramenta,
+} from '@/lib/navegacao'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { ReleaseNotesDialog } from '@/components/ReleaseNotesDialog'
 import { ReportarProblemaDialog } from '@/components/ReportarProblemaDialog'
@@ -43,39 +37,7 @@ import { NotificationsDialog } from '@/components/NotificationsDialog'
 import { useUpdater } from '@/hooks/use-updater'
 import logoUrl from '/logo.png'
 
-type FerramentaItem =
-  | { title: string; description: string; icon: React.ElementType; url: string; action?: never }
-  | { title: string; description: string; icon: React.ElementType; action: string; url?: never }
-
-const ferramentas: FerramentaItem[] = [
-  { title: 'Tarefas', description: 'Kanban interno', icon: ListTodo, url: '/crm' },
-  { title: 'Anotações', description: 'Notas rápidas', icon: StickyNote, url: '/notes' },
-  { title: 'Gatilhos', description: 'Mensagens auto', icon: Zap, url: '/triggers' },
-  { title: 'Agendamentos', description: 'Envios futuros', icon: CalendarClock, url: '/scheduled-messages' },
-  { title: 'Notificações', description: 'Som e alertas', icon: Bell, action: 'notifications' },
-]
-
-const prnItem: FerramentaItem = {
-  title: 'Análise PRN',
-  description: 'Cockpit financeiro',
-  icon: BarChart3,
-  url: '/ferramentas/analise-prn',
-}
-
-const rateioItem: FerramentaItem = {
-  title: 'Rateio Mobilemed',
-  description: 'Rateio PRN/MedImagem',
-  icon: Percent,
-  url: '/ferramentas/rateio-mobilemed',
-}
-
-// Só super-admin. Ver a explicação em SuperAdminRoute (App.tsx).
-const relatorioAppItem: FerramentaItem = {
-  title: 'Relatório App',
-  description: 'Uso por usuário',
-  icon: Activity,
-  url: '/ferramentas/relatorio-app',
-}
+type FerramentaItem = ItemDeFerramenta
 
 function FerramentasMenu() {
   const [open, setOpen] = useState(false)
@@ -84,11 +46,8 @@ function FerramentasMenu() {
   const navigate = useNavigate()
   const { user } = useAuth()
 
-  const items = [
-    ...ferramentas,
-    ...(canAccessFinanceiroTools(user) ? [prnItem, rateioItem] : []),
-    ...(user?.is_super_admin ? [relatorioAppItem] : []),
-  ]
+  // Mesma lista (e mesmos gates) que a folha "Mais" do celular usa.
+  const items = ferramentasDoUsuario(user)
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -100,11 +59,11 @@ function FerramentasMenu() {
 
   function handleItem(item: FerramentaItem) {
     setOpen(false)
-    if (item.url) {
-      navigate(item.url)
-    } else if (item.action === 'notifications') {
-      setNotifOpen(true)
+    if (ehAcao(item)) {
+      if (item.action === 'notifications') setNotifOpen(true)
+      return
     }
+    navigate(item.url)
   }
 
   return (
@@ -163,11 +122,8 @@ export function Header() {
   const userInitials = (user?.name?.[0] || user?.username?.[0] || 'U').toUpperCase()
   const isDark = resolvedTheme === 'dark'
 
-  const navLinks = [
-    { title: 'Dashboard', url: '/dashboard', icon: LayoutDashboard },
-    { title: 'Chat', url: '/chat', icon: MessageSquare },
-    { title: 'Email', url: '/email', icon: Mail },
-  ]
+  // Mesmos destinos que viram as abas do rodapé no celular.
+  const navLinks = DESTINOS_PRINCIPAIS
 
   return (
     <header className="relative z-30 flex h-16 shrink-0 items-center gap-3 border-b border-border bg-background/80 px-4 backdrop-blur-xl sm:px-6">

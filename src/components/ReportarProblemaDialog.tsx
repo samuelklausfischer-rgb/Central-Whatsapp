@@ -15,10 +15,23 @@ const tipos: { value: HubReportTipo; label: string; icon: React.ElementType; hin
   { value: 'ideia', label: 'Ideia', icon: Lightbulb, hint: 'Sugestão de melhoria' },
 ]
 
-export function ReportarProblemaDialog() {
+/**
+ * `open`/`onOpenChange` são OPCIONAIS: sem eles o diálogo traz o próprio botão,
+ * como sempre fez no desktop. Com eles, o botão some e quem manda é de fora —
+ * é assim que ele vira uma linha da folha "Mais" do celular.
+ *
+ * Mesma forma que `NotificationsDialog` já usa.
+ */
+export function ReportarProblemaDialog({
+  open: openExterno,
+  onOpenChange,
+}: { open?: boolean; onOpenChange?: (v: boolean) => void } = {}) {
   const { user } = useAuth()
   const { toast } = useToast()
-  const [open, setOpen] = useState(false)
+  const [openInterno, setOpenInterno] = useState(false)
+  const controlado = onOpenChange !== undefined
+  const open = controlado ? !!openExterno : openInterno
+  const setOpen = controlado ? onOpenChange : setOpenInterno
   const [tipo, setTipo] = useState<HubReportTipo>('problema')
   const [titulo, setTitulo] = useState('')
   const [descricao, setDescricao] = useState('')
@@ -81,16 +94,18 @@ export function ReportarProblemaDialog() {
         if (!v) resetar()
       }}
     >
-      <DialogTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="rounded-full text-muted-foreground hover:text-foreground"
-          title="Reportar problema ou sugerir ideia"
-        >
-          <MessageSquarePlus className="h-5 w-5" />
-        </Button>
-      </DialogTrigger>
+      {!controlado && (
+        <DialogTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="rounded-full text-muted-foreground hover:text-foreground"
+            title="Reportar problema ou sugerir ideia"
+          >
+            <MessageSquarePlus className="h-5 w-5" />
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="max-w-md bg-background/95 backdrop-blur-xl border-muted">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-lg">

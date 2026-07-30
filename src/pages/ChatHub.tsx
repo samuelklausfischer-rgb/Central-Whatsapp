@@ -32,6 +32,7 @@ import {
 import { getMyStates, getDeviceAssignments, type ConversationUserState } from '@/services/conversation_states'
 import type { ConversationAssignment } from '@/lib/supabase/types'
 import { registrarVoltar } from '@/lib/android-back'
+import { definirConversaAberta } from '@/stores/mobileChrome'
 import { getNotes } from '@/services/notes'
 import { useRealtime } from '@/hooks/use-realtime'
 import { useAuth } from '@/hooks/use-auth'
@@ -885,6 +886,19 @@ export default function ChatHub() {
       return true
     })
   }, [selectedContact, handleCloseConversation])
+
+  /**
+   * Avisa o `Layout` que há conversa ocupando a tela, para ele sumir com a barra
+   * de cima e as abas de baixo no celular.
+   *
+   * Vai por store de módulo porque o sinal sobe do filho para o pai. A limpeza
+   * zera ao sair do chat — sem ela, ir para o Painel com uma conversa aberta
+   * deixaria o app sem navegação nenhuma.
+   */
+  useEffect(() => {
+    definirConversaAberta(!!selectedContact)
+    return () => definirConversaAberta(false)
+  }, [selectedContact])
 
   useEffect(() => {
     if (!selectedContact) return

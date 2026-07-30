@@ -16,21 +16,35 @@ function groupByVersion(notes: ReleaseNote[]) {
   return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0], undefined, { numeric: true }))
 }
 
-export function ReleaseNotesDialog() {
+/**
+ * `open`/`onOpenChange` são OPCIONAIS: sem eles o diálogo continua trazendo o
+ * próprio botão de brilho, como sempre fez no desktop. Com eles, o botão some e
+ * quem manda é de fora — é assim que ele vira uma linha da folha "Mais" do
+ * celular, onde um botão-ícone solto não teria sentido.
+ *
+ * Mesma forma que `NotificationsDialog` já usa.
+ */
+export function ReleaseNotesDialog({
+  open,
+  onOpenChange,
+}: { open?: boolean; onOpenChange?: (v: boolean) => void } = {}) {
   const groups = groupByVersion(releaseNotes)
+  const controlado = onOpenChange !== undefined
 
   return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="rounded-full text-muted-foreground hover:text-foreground"
-          title="Últimas atualizações"
-        >
-          <Sparkles className="h-5 w-5" />
-        </Button>
-      </DialogTrigger>
+    <Dialog {...(controlado ? { open, onOpenChange } : {})}>
+      {!controlado && (
+        <DialogTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="rounded-full text-muted-foreground hover:text-foreground"
+            title="Últimas atualizações"
+          >
+            <Sparkles className="h-5 w-5" />
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="max-w-lg max-h-[85vh] p-0 gap-0 overflow-hidden bg-background/95 backdrop-blur-xl border-muted">
         <DialogHeader className="px-6 pt-6 pb-3 border-b border-border/50">
           <DialogTitle className="flex items-center gap-2 text-lg">
