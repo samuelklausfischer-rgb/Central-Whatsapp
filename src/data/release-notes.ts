@@ -7,6 +7,18 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.198',
+    date: '2026-07-30 21:00',
+    title: 'A conversa abre na última mensagem, como no WhatsApp',
+    details: [
+      '📍 Abrir um contato para de escorregar para o meio do histórico: a conversa fica na última mensagem e continua lá enquanto as fotos carregam',
+      '🖼️ As fotos não empurram mais a conversa para baixo ao aparecerem — era isso que dava a impressão de que o app estava "perseguindo" os anexos',
+      '📜 Rolar para cima para ler o histórico continua funcionando: a conversa só volta ao fim quando você quiser, e não é mais puxada de volta sozinha',
+      '📎 Anexo cujo arquivo não existe mais no servidor deixa de aparecer como imagem quebrada e passa a mostrar o nome do arquivo com o aviso "arquivo indisponível"',
+      '⚡ Conversas antigas abrem mais leves: o app parou de tentar baixar milhares de arquivos que já não existem',
+    ],
+  },
+  {
     version: '0.0.197',
     date: '2026-07-30 18:00',
     title: 'Encaminhar, galeria, participantes do grupo, compartilhar contato e mencionar',

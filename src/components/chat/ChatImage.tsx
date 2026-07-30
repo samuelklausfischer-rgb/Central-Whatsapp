@@ -19,18 +19,26 @@ export function ChatImage({
   src,
   alt,
   className,
-  reservaClassName = 'min-h-[160px]',
+  reservaClassName = 'w-[240px] min-h-[160px]',
 }: {
   src: string
   alt: string
   className?: string
-  /** Altura mínima enquanto carrega. Figurinha usa uma menor que foto. */
+  /**
+   * Tamanho reservado ENQUANTO carrega — largura e altura. A largura importa
+   * tanto quanto a altura: sem ela o balão nasceria com ~30px e daria um pulo
+   * horizontal quando a foto chegasse. Figurinha usa um valor menor que foto.
+   */
   reservaClassName?: string
 }) {
   const [assentou, setAssentou] = useState(false)
 
   return (
-    <span className={cn('block w-full', !assentou && reservaClassName)}>
+    // Depois que a imagem assenta, a reserva SAI e a largura volta a ser a
+    // natural (limitada pelo `max-w` do botão em volta). Manter a largura fixa
+    // aqui esticava foto pequena — QR code de boleto, etiqueta de exame, print —
+    // para 238px, borrada, num balão do dobro do tamanho necessário.
+    <span className={cn('block', assentou ? 'w-full' : reservaClassName)}>
       <img
         src={src}
         alt={alt}

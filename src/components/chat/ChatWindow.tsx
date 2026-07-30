@@ -2661,7 +2661,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                                 key={idx}
                                 type="button"
                                 onClick={() => setMediaView({ url: att.url, type: 'image', name: att.name })}
-                                className="block w-[240px] max-w-full overflow-hidden rounded-xl border border-chat-border hover:opacity-90 hover:scale-[1.02] transition-all duration-300 shadow-sm cursor-zoom-in"
+                                className="block max-w-[240px] overflow-hidden rounded-xl border border-chat-border hover:opacity-90 hover:scale-[1.02] transition-all duration-300 shadow-sm cursor-zoom-in"
                               >
                                 <ChatImage
                                   src={att.url}
@@ -2678,13 +2678,13 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                                 href={att.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="block w-[160px] max-w-full overflow-hidden rounded-xl hover:opacity-90 hover:scale-[1.02] transition-all duration-300"
+                                className="block max-w-[160px] overflow-hidden rounded-xl hover:opacity-90 hover:scale-[1.02] transition-all duration-300"
                               >
                                 <ChatImage
                                   src={att.url}
                                   alt={att.name || 'Figurinha'}
                                   className="w-full h-auto object-contain"
-                                  reservaClassName="min-h-[120px]"
+                                  reservaClassName="w-[160px] min-h-[120px]"
                                 />
                               </a>
                             )
