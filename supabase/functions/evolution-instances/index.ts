@@ -106,11 +106,29 @@ async function requireDeviceAccess(authHeader: string, deviceId: string) {
  * o app cair no que já sabe (quem falou no grupo) sem tratar isso como falha.
  */
 async function groupParticipantsAction(body: JsonRecord) {
-  const instanceName = String(body.instanceName || '').trim()
+  const deviceId = String(body.deviceId || '').trim()
   const groupJid = String(body.groupJid || '').trim()
-  if (!instanceName || !groupJid) {
-    return json({ error: 'instanceName and groupJid are required' }, 400)
+  if (!deviceId || !groupJid) {
+    return json({ error: 'deviceId and groupJid are required' }, 400)
   }
+
+  /**
+   * A instância é resolvida a partir do `deviceId` JÁ AUTORIZADO, e o
+   * `instanceName` que o cliente manda é IGNORADO.
+   *
+   * O portão autoriza um aparelho; se a ação obedecesse ao nome de instância do
+   * corpo, autorizar o aparelho A e agir sobre a instância B seria só uma questão
+   * de trocar um campo do JSON. Mesmo padrão da função `send-message`, que
+   * também resolve `instance_key` pelo `device_id`.
+   */
+  const deviceResp = await fetch(
+    `${SUPABASE_URL}/rest/v1/devices?id=eq.${encodeURIComponent(deviceId)}&deleted_at=is.null&select=instance_key`,
+    { headers: serviceHeaders },
+  )
+  if (!deviceResp.ok) return json({ error: 'Unable to resolve device' }, 500)
+  const devices = await deviceResp.json()
+  const instanceName = String((Array.isArray(devices) ? devices[0]?.instance_key : '') || '').trim()
+  if (!instanceName) return json({ error: 'device not found' }, 400)
 
   const resp = await evolutionRequest(
     'GET',

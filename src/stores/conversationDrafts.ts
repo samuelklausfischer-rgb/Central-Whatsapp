@@ -42,6 +42,15 @@ export interface ConversationDraft {
   audioBlob: Blob | null
   /** Agendamento preenchido no diálogo de envio futuro. */
   scheduleDate: string
+  /**
+   * "@todos" escolhido no autocomplete de menção, para ESTE grupo.
+   *
+   * Mora no rascunho, e não em estado de tela, porque o texto `@todos ...`
+   * sobrevive à troca de conversa: uma flag global era zerada na troca e o aviso
+   * voltava com o `@todos` escrito e sem notificar ninguém. Por conversa, texto
+   * e marcação nunca discordam.
+   */
+  mentionEveryone: boolean
   /** Diálogo de anotação — grava em `notes.contact_jid`. */
   noteTitle: string
   noteContent: string
@@ -60,6 +69,7 @@ export const EMPTY_DRAFT: ConversationDraft = {
   attachments: [],
   audioBlob: null,
   scheduleDate: '',
+  mentionEveryone: false,
   noteTitle: '',
   noteContent: '',
   noteCategory: 'geral',

@@ -75,6 +75,22 @@ export function ContactPickerDialog({
     })
   }, [])
 
+  /**
+   * Fechar SEMPRE limpa a seleção e a busca.
+   *
+   * Este diálogo não desmonta junto com a conversa (o ChatWindow do desktop é
+   * montado sem `key`), então cancelar sem limpar deixava o contato marcado
+   * pendurado. Ao reabrir em OUTRA conversa ele vinha marcado, podendo estar
+   * fora da área visível da rolagem ou escondido pelo filtro — e ia junto no
+   * envio, para a pessoa errada.
+   */
+  const fechar = useCallback(() => {
+    if (enviando) return
+    setMarcados(new Set())
+    setBusca('')
+    onFechar()
+  }, [enviando, onFechar])
+
   const enviar = useCallback(async () => {
     if (marcados.size === 0 || enviando) return
     const escolhidos = compartilhaveis.filter((c) => marcados.has(c.remote_jid)).map(paraCartao)
@@ -82,6 +98,7 @@ export function ContactPickerDialog({
     try {
       await onEnviar(escolhidos)
       setMarcados(new Set())
+      setBusca('')
       onFechar()
     } finally {
       setEnviando(false)
@@ -89,7 +106,7 @@ export function ContactPickerDialog({
   }, [marcados, enviando, compartilhaveis, onEnviar, onFechar])
 
   return (
-    <Dialog open={aberto} onOpenChange={(v) => !v && !enviando && onFechar()}>
+    <Dialog open={aberto} onOpenChange={(v) => !v && fechar()}>
       <DialogContent className="sm:max-w-[440px] bg-chat-panel border-chat-border">
         <DialogHeader>
           <DialogTitle className="text-chat-text">
@@ -147,7 +164,7 @@ export function ContactPickerDialog({
         </ScrollArea>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onFechar} disabled={enviando}>
+          <Button variant="outline" onClick={fechar} disabled={enviando}>
             Cancelar
           </Button>
           <Button onClick={enviar} disabled={marcados.size === 0 || enviando}>

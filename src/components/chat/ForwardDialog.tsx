@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -43,8 +43,25 @@ export function ForwardDialog({
 }: Props) {
   const [enviandoPara, setEnviandoPara] = useState<string | null>(null)
   const [enviados, setEnviados] = useState<Set<string>>(new Set())
+  const [falhas, setFalhas] = useState<Set<string>>(new Set())
 
   const verificacao = useMemo(() => podeEncaminhar(msg), [msg])
+
+  /**
+   * Zera o histórico a cada abertura e a cada mensagem nova.
+   *
+   * Este diálogo NÃO desmonta: no desktop o ChatWindow é montado sem `key` e
+   * sobrevive à troca de conversa. Sem este reset, o ✓ de um destino já usado
+   * ficava colado nele — a linha aparecia concluída e `disabled` para todos os
+   * encaminhamentos seguintes da sessão, inclusive de outras conversas, e o
+   * atendente clicava sem que nada acontecesse. O rodapé até abria escrito
+   * "Concluir" num diálogo em que nada tinha sido enviado.
+   */
+  useEffect(() => {
+    setEnviados(new Set())
+    setFalhas(new Set())
+    setEnviandoPara(null)
+  }, [aberto, msg?.id])
 
   const encaminhar = useCallback(
     async (remoteSender: string) => {
@@ -53,9 +70,21 @@ export function ForwardDialog({
       // banco faz chamada HTTP bloqueante segurando a conexão, e disparar vários
       // em paralelo poderia prender várias das 100 conexões se a Evolution travar.
       setEnviandoPara(remoteSender)
+      setFalhas((prev) => {
+        if (!prev.has(remoteSender)) return prev
+        const proximo = new Set(prev)
+        proximo.delete(remoteSender)
+        return proximo
+      })
       try {
         await onEncaminhar(remoteSender, legendaParaEncaminhar(msg), verificacao.anexo)
         setEnviados((prev) => new Set(prev).add(remoteSender))
+      } catch {
+        // Sem este `catch` a rejeição virava unhandled promise rejection: o envio
+        // falhava (aparelho desconectado, recusa da Evolution, timeout da RPC) e o
+        // atendente não recebia nada — nem erro, nem marca. Ficava só a ausência
+        // do ✓, que ninguém lê como falha.
+        setFalhas((prev) => new Set(prev).add(remoteSender))
       } finally {
         setEnviandoPara(null)
       }
@@ -85,6 +114,13 @@ export function ForwardDialog({
               emAndamento={enviandoPara}
               travado={!!enviandoPara}
             />
+            {falhas.size > 0 && (
+              <p className="text-xs text-destructive">
+                {falhas.size === 1
+                  ? 'Não foi possível encaminhar para 1 conversa. Toque nela para tentar de novo.'
+                  : `Não foi possível encaminhar para ${falhas.size} conversas. Toque nelas para tentar de novo.`}
+              </p>
+            )}
           </>
         )}
 

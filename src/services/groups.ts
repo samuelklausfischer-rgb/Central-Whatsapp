@@ -44,6 +44,14 @@ export interface InfoDoGrupo {
 // no mesmo turno de trabalho.
 const TTL_MS = 10 * 60 * 1000
 
+/**
+ * TTL do resultado PARCIAL (Evolution fora, caímos no banco). Curto de
+ * propósito: parcial não tem telefone de ninguém, e o autocomplete de menção
+ * lista só quem tem telefone. Guardar uma falha por 10 minutos deixava o `@`
+ * daquele grupo vazio muito depois de a rede voltar.
+ */
+const TTL_FALHA_MS = 20 * 1000
+
 interface Entrada {
   info: InfoDoGrupo
   em: number
@@ -128,7 +136,17 @@ export async function getParticipantesDoGrupo(
     info = { participantes: doBanco, parcial: true, total: doBanco.length }
   }
 
-  cache.set(k, { info, em: Date.now() })
+  /**
+   * Resultado PARCIAL não fica 10 minutos no cache.
+   *
+   * `parcial` significa que a Evolution não respondeu e caímos no banco, onde
+   * todo participante vem sem telefone — e o autocomplete de menção só lista
+   * quem tem telefone. Com o TTL cheio, uma indisponibilidade de um segundo
+   * deixava o `@` daquele grupo sem nenhuma pessoa selecionável por 10 minutos,
+   * já com a rede restabelecida, porque o compositor não tem como forçar
+   * recarga (só o botão "Atualizar lista", dentro do painel de Participantes).
+   */
+  cache.set(k, { info, em: info.parcial ? Date.now() - (TTL_MS - TTL_FALHA_MS) : Date.now() })
   return info
 }
 
@@ -147,7 +165,15 @@ export async function escolherConversaDoParticipante(
   deviceId: string,
   participante: Participante,
 ): Promise<string | null> {
-  const candidatos = [participante.phone, participante.id].filter(Boolean)
+  // O LID chega da Evolution COM sufixo (`123...@lid`), mas `messages.remote_sender`
+  // grava LID em dígitos puros — medido: 9.029 mensagens em 34 conversas com chave
+  // LID, e ZERO `remote_sender` terminando em `@lid`. Sem normalizar, o candidato
+  // LID não casava linha nenhuma: a consulta abaixo, o `order` e o critério
+  // "mensagem mais recente" eram código morto, e isto equivalia a
+  // `return participante.phone || null`. O sufixo só serve para casar com
+  // `messages.group_participant`, o único campo que guarda o formato com `@lid`.
+  const lidEmDigitos = participante.id ? participante.id.replace(/@.*$/, '').replace(/\D/g, '') : ''
+  const candidatos = [...new Set([participante.phone, lidEmDigitos].filter(Boolean))]
   if (candidatos.length === 0) return null
 
   const { data, error } = await supabase

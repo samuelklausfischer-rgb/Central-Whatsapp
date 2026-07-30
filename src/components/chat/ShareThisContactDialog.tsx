@@ -46,6 +46,13 @@ export function ShareThisContactDialog({
   const [emAndamento, setEmAndamento] = useState<string | null>(null)
   const [enviando, setEnviando] = useState(false)
   const [falhas, setFalhas] = useState<string[]>([])
+  /**
+   * Progresso da RODADA em curso, não o total de sucessos.
+   *
+   * O contador usava `concluidos.size + 1`, que conta sucessos: uma falha no
+   * meio fazia o número travar (falha no 2º e o 3º destino ainda exibia "2/5").
+   */
+  const [progresso, setProgresso] = useState<{ feitos: number; total: number } | null>(null)
 
   const alternar = useCallback((jid: string) => {
     setMarcados((prev) => {
@@ -61,6 +68,7 @@ export function ShareThisContactDialog({
     setMarcados(new Set())
     setConcluidos(new Set())
     setFalhas([])
+    setProgresso(null)
     onFechar()
   }, [enviando, onFechar])
 
@@ -68,8 +76,17 @@ export function ShareThisContactDialog({
     if (marcados.size === 0 || enviando) return
     setEnviando(true)
     setFalhas([])
-    const destinos = [...marcados]
+    // Só quem AINDA NÃO recebeu. Depois de uma falha parcial, o botão "Enviar" é
+    // a única ação óbvia para tentar de novo — e percorrer `marcados` inteiro
+    // mandava o cartão uma segunda vez para todos os que já tinham dado certo.
+    const destinos = [...marcados].filter((d) => !concluidos.has(d))
+    if (destinos.length === 0) {
+      setEnviando(false)
+      fechar()
+      return
+    }
     const erros: string[] = []
+    let feitos = 0
     for (const destino of destinos) {
       setEmAndamento(destino)
       try {
@@ -80,12 +97,18 @@ export function ShareThisContactDialog({
         // o atendente não sair achando que todos foram.
         erros.push(destino)
       }
+      feitos++
+      setProgresso({ feitos, total: destinos.length })
     }
     setEmAndamento(null)
     setEnviando(false)
+    setProgresso(null)
     setFalhas(erros)
+    // Sobraram só as falhas na seleção: clicar em "Enviar" de novo tenta
+    // exatamente elas, e o rótulo do botão passa a contar só o que falta.
+    setMarcados(new Set(erros))
     if (erros.length === 0) fechar()
-  }, [marcados, enviando, onEnviarPara, fechar])
+  }, [marcados, concluidos, enviando, onEnviarPara, fechar])
 
   return (
     <Dialog open={aberto} onOpenChange={(v) => !v && fechar()}>
@@ -121,7 +144,7 @@ export function ShareThisContactDialog({
           <Button onClick={enviar} disabled={marcados.size === 0 || enviando}>
             {enviando && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             {enviando
-              ? `Enviando ${concluidos.size + 1}/${marcados.size}`
+              ? `Enviando ${Math.min((progresso?.feitos ?? 0) + 1, progresso?.total ?? marcados.size)}/${progresso?.total ?? marcados.size}`
               : `Enviar${marcados.size > 0 ? ` (${marcados.size})` : ''}`}
           </Button>
         </DialogFooter>

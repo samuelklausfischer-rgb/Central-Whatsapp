@@ -482,7 +482,7 @@ const renderMessage = (
               className="list-disc pl-5 my-2 space-y-1 marker:text-foreground/50"
             >
               {currentList.items.map((item, idx) => (
-                <li key={idx}>{formatInline(item.text, isMe, onOpenConversation, item.offset, ranges)}</li>
+                <li key={idx}>{formatInline(item.text, isMe, onOpenConversation, item.offset, ranges, resolveMention)}</li>
               ))}
             </ul>,
           )
@@ -493,7 +493,7 @@ const renderMessage = (
               className="list-decimal pl-5 my-2 space-y-1 marker:text-foreground/50"
             >
               {currentList.items.map((item, idx) => (
-                <li key={idx}>{formatInline(item.text, isMe, onOpenConversation, item.offset, ranges)}</li>
+                <li key={idx}>{formatInline(item.text, isMe, onOpenConversation, item.offset, ranges, resolveMention)}</li>
               ))}
             </ol>,
           )
@@ -733,9 +733,16 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         .split('\n')
         .map((l: string) => `> ${l}`)
         .join('\n')
-      saveDraft(conversationDraftKey(device.id, jidDestino), {
-        ...EMPTY_DRAFT,
-        text: `${autor}\n${trecho}\n\n`,
+      // MESCLA no rascunho do destino, não substitui. Com `...EMPTY_DRAFT` a
+      // entrada anterior era trocada inteira: quem tinha texto digitado, anexo
+      // escolhido ou áudio gravado naquela conversa privada perdia tudo, sem
+      // aviso e sem desfazer. A citação entra ANTES do que já estava.
+      const chaveDestino = conversationDraftKey(device.id, jidDestino)
+      const atual = getDraft(chaveDestino) ?? EMPTY_DRAFT
+      const citacao = `${autor}\n${trecho}\n\n`
+      saveDraft(chaveDestino, {
+        ...atual,
+        text: atual.text ? `${citacao}${atual.text}` : citacao,
       })
       onSheetOpenChange?.(false)
       onOpenConversationByJid?.(jidDestino)
@@ -838,6 +845,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       attachments,
       audioBlob,
       scheduleDate,
+      mentionEveryone: mencionarTodos,
       noteTitle,
       noteContent,
       noteCategory,
@@ -866,6 +874,11 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     setReplyingTo(d.replyingTo)
     setAttachments(d.attachments)
     setScheduleDate(d.scheduleDate)
+    // A marcação de "todos" volta JUNTO com o texto que a contém. Zerá-la aqui
+    // (e restaurar o texto com `@todos` escrito) fazia o aviso sair sem
+    // notificar o grupo, sem nenhum sinal na tela.
+    setMencionarTodos(d.mentionEveryone)
+    setMencaoAtiva(null)
     setNoteTitle(d.noteTitle)
     setNoteContent(d.noteContent)
     setNoteCategory(d.noteCategory)
@@ -1125,16 +1138,6 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     }
   }, [sheetOpen, device, contact])
 
-  /**
-   * Trocar de conversa zera o estado de menção. O rascunho de texto sobrevive à
-   * troca (comportamento antigo), e sem isto a marcação de "todos" atravessaria
-   * junto — notificando o grupo errado.
-   */
-  useEffect(() => {
-    setMencaoAtiva(null)
-    setMencionarTodos(false)
-  }, [contact])
-
   useEffect(() => {
     if (!device || !contact) {
       setAssignment(null)
@@ -1359,6 +1362,25 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     e.preventDefault()
     if ((!msgText.trim() && attachments.length === 0 && !audioBlob) || !device || !user || !contact) return
 
+    /**
+     * Menção, calculada UMA vez para todos os caminhos de envio.
+     *
+     * Ficava dentro do ramo otimista de texto puro, e por isso a legenda de uma
+     * foto saía sem os campos de menção: o número chegava escrito na legenda e
+     * ninguém era notificado. E como a nossa própria tela resolve o nome pelo
+     * texto, o balão aqui mostrava `@Fulano` destacado — quem enviou tinha
+     * certeza de que tinha funcionado.
+     *
+     * Só em grupo. Fora dele, mesmo que o texto tenha um número com arroba, não
+     * vai nada no campo de menção — é só texto.
+     */
+    const emGrupo = isGroupJid(contact)
+    const textoParaMencao = msgText.trim()
+    const mencionados = emGrupo ? extrairMencionados(textoParaMencao) : []
+    // O `@todos` só notifica o grupo se a flag for junto. Reconferir o texto
+    // impede que a flag sobreviva a um apagar do `@todos` antes de enviar.
+    const marcarTodos = emGrupo && mencionarTodos && /@todos\b/i.test(textoParaMencao)
+
     // Caminho otimista (texto puro, sem edição/áudio/anexo): mostra o balão na
     // hora e limpa o input, sem esperar o round-trip RPC -> Evolution -> insert.
     if (!editingMessageId && msgText.trim() && attachments.length === 0 && !audioBlob) {
@@ -1373,13 +1395,6 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       const replySnapshot = replyingTo
         ? { content: replyingTo.content, sender_name: replyingTo.sender_name, id: replyingTo.id }
         : null
-      // Menção só existe em grupo. Fora dele, mesmo que o texto tenha um número
-      // com arroba, não vai nada no campo de menção — é só texto.
-      const emGrupo = isGroupJid(contact)
-      const mencionados = emGrupo ? extrairMencionados(content) : []
-      // O `@todos` só notifica o grupo se a flag for junto. Reconferir o texto
-      // impede que a flag sobreviva a um apagar do `@todos` antes de enviar.
-      const marcarTodos = emGrupo && mencionarTodos && /@todos\b/i.test(content)
       const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
       const tempMsg = {
         id: tempId,
@@ -1440,6 +1455,8 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           setEditingMessageId(null)
           setMsgText('')
           setReplyingTo(null)
+          setMencaoAtiva(null)
+          setMencionarTodos(false)
         })
         toast({ title: 'Mensagem editada' })
         return
@@ -1459,7 +1476,13 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           mediaType: 'audio',
           reply_to_id: replyingTo?.id,
         })
-        limparCompositorAposEnvio(chaveEnvio, discardAudio)
+        // Áudio não tem legenda no endpoint da Evolution: o texto digitado não
+        // viaja com ele, então não existe menção para levar — só limpar.
+        limparCompositorAposEnvio(chaveEnvio, () => {
+          discardAudio()
+          setMencaoAtiva(null)
+          setMencionarTodos(false)
+        })
       } else if (attachments.length > 0) {
         const uploaded: { url: string; type: string; name: string }[] = []
         for (let fi = 0; fi < attachments.length; fi++) {
@@ -1472,8 +1495,12 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         setUploadProgress(null)
         for (let i = 0; i < uploaded.length; i++) {
           const att = uploaded[i]
+          // Só a PRIMEIRA mídia leva a legenda; as outras vão com rótulo. A
+          // menção acompanha a legenda, então também vale só para a primeira —
+          // repetir em todas notificaria a pessoa uma vez por anexo.
+          const levaLegenda = i === 0 && content !== '[Anexo]'
           await sendMessage({
-            content: i === 0 && content !== '[Anexo]' ? content : `[${att.type === 'image' ? 'Imagem' : att.type === 'video' ? 'Vídeo' : 'Documento'}]`,
+            content: levaLegenda ? content : `[${att.type === 'image' ? 'Imagem' : att.type === 'video' ? 'Vídeo' : 'Documento'}]`,
             device_id: device.id,
             sender_id: user.id,
             is_read: true,
@@ -1482,6 +1509,8 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
             mediaType: att.type,
             mediaName: att.name,
             reply_to_id: replyingTo?.id,
+            mentioned: levaLegenda ? mencionados : [],
+            mentionEveryone: levaLegenda ? marcarTodos : false,
           })
         }
       } else {
@@ -1492,12 +1521,16 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           is_read: true,
           remote_sender: contact,
           reply_to_id: replyingTo?.id,
+          mentioned: mencionados,
+          mentionEveryone: marcarTodos,
         })
       }
       limparCompositorAposEnvio(chaveEnvio, () => {
         setMsgText('')
         setAttachments([])
         setReplyingTo(null)
+        setMencaoAtiva(null)
+        setMencionarTodos(false)
       })
     } catch (err) {
       toast({
@@ -1783,6 +1816,21 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
    * número — é ele que faz o WhatsApp notificar a pessoa. Mesma precedência do
    * resto do app: apelido > nome > número.
    */
+  /**
+   * A faixa da menção que está sob o cursor NESTE instante.
+   *
+   * Existe porque `mencaoAtiva` só é recalculado no `onChange`, e clicar com o
+   * mouse dentro do texto (ou Home, ou seta) move o cursor sem disparar
+   * `onChange`. Quem for inserir a menção precisa da posição real, não da que
+   * estava valendo quando a pessoa parou de digitar.
+   */
+  const faixaDaMencaoAgora = useCallback(() => {
+    const el = msgTextareaRef.current
+    const cursor = el?.selectionStart ?? msgText.length
+    const faixa = mencaoEmDigitacao(msgText, cursor)
+    return faixa ? { ...faixa, cursor } : null
+  }, [msgText])
+
   const resolverNomeDaMencao = useCallback(
     (telefone: string) => {
       const contato = findContactByIdentifier(telefone, contactIndex)
@@ -3252,12 +3300,19 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                     contactIndex={contactIndex}
                     termo={mencaoAtiva.termo}
                     onEscolher={(telefone) => {
-                      const textarea = msgTextareaRef.current
-                      const cursor = textarea?.selectionStart ?? msgText.length
+                      // A faixa da menção é RECALCULADA do estado atual, nunca lida
+                      // de `mencaoAtiva`: mover o cursor com o mouse não dispara
+                      // `onChange`, então o `inicio` guardado pode estar velho — e
+                      // com offset velho o recorte duplicava um trecho do texto.
+                      const atual = faixaDaMencaoAgora()
+                      if (!atual) {
+                        setMencaoAtiva(null)
+                        return
+                      }
                       const { texto, cursor: novoCursor } = aplicarMencao(
                         msgText,
-                        mencaoAtiva.inicio,
-                        cursor,
+                        atual.inicio,
+                        atual.cursor,
                         telefone,
                       )
                       setMsgText(texto)
@@ -3272,13 +3327,16 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                       })
                     }}
                     onMencionarTodos={() => {
-                      const textarea = msgTextareaRef.current
-                      const cursor = textarea?.selectionStart ?? msgText.length
+                      const atual = faixaDaMencaoAgora()
+                      if (!atual) {
+                        setMencaoAtiva(null)
+                        return
+                      }
                       // "@todos" é só o rótulo visível; quem notifica é a flag
                       // `mentionsEveryOne` no envio.
                       const insercao = '@todos '
                       setMsgText(
-                        msgText.slice(0, mencaoAtiva.inicio) + insercao + msgText.slice(cursor),
+                        msgText.slice(0, atual.inicio) + insercao + msgText.slice(atual.cursor),
                       )
                       setMencionarTodos(true)
                       setMencaoAtiva(null)
@@ -3299,6 +3357,14 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                         ? mencaoEmDigitacao(e.target.value, e.target.selectionStart ?? 0)
                         : null,
                     )
+                  }}
+                  // Clique, Home e setas movem o cursor SEM disparar `onChange`.
+                  // Sem isto a lista continuava aberta com o cursor longe da
+                  // menção, e o Enter — capturado por ela — não enviava nada.
+                  onSelect={(e) => {
+                    if (!isGroupContact) return
+                    const el = e.currentTarget
+                    setMencaoAtiva(mencaoEmDigitacao(el.value, el.selectionStart ?? 0))
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
