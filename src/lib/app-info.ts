@@ -1,6 +1,7 @@
+import { Capacitor } from '@capacitor/core'
 import { releaseNotes } from '@/data/release-notes'
 
-export type AppPlatform = 'app' | 'web'
+export type AppPlatform = 'app' | 'android' | 'web'
 
 interface ElectronBridge {
   getAppVersion?: () => Promise<string>
@@ -11,12 +12,32 @@ function bridge(): ElectronBridge | undefined {
 }
 
 /**
- * 'app' = desktop Electron, 'web' = navegador.
+ * Rodando dentro do APK.
+ *
+ * `isNativePlatform()` é falso no navegador mesmo com o Capacitor instalado —
+ * é isso que mantém `npm run dev`, a build web e o Electron intactos: nenhum
+ * caminho nativo é tomado fora do aparelho.
+ */
+export function isNativeAndroid(): boolean {
+  try {
+    return Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 'app' = desktop Electron, 'android' = APK, 'web' = navegador.
+ *
+ * Android é checado ANTES do Electron: os dois nunca coexistem, e pôr a
+ * checagem nativa primeiro evita depender da ordem em que a ponte aparece.
+ *
  * Mesmo critério já usado em `use-updater.ts` (presença da ponte do preload),
  * com o userAgent como reforço — `App.tsx` usa o userAgent para escolher o
  * Router, então os dois caminhos ficam consistentes.
  */
 export function getAppPlatform(): AppPlatform {
+  if (isNativeAndroid()) return 'android'
   if (bridge()) return 'app'
   if (typeof navigator !== 'undefined' && navigator.userAgent.includes('Electron')) return 'app'
   return 'web'

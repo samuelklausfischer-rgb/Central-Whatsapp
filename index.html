@@ -2,7 +2,15 @@
 <html lang="pt-BR" class="dark" suppressHydrationWarning>
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- `viewport-fit=cover` é o que habilita `env(safe-area-inset-*)`. A partir
+         do Android 15 (targetSdk 35+) o sistema FORÇA desenho de ponta a ponta:
+         sem isto o cabeçalho fica embaixo do relógio e o compositor do chat
+         embaixo da barra de navegação. `maximum-scale=1` evita o zoom que o
+         Android dá ao focar um campo, que desalinharia a conversa inteira. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no"
+    />
     <script>
       (function(){try{var e=localStorage.getItem('theme');if(e==='light'||(!e&&window.matchMedia('(prefers-color-scheme:light)').matches))document.documentElement.classList.remove('dark')}catch(e){}})();
     </script>

@@ -19,9 +19,19 @@
     "format:check": "oxfmt --check",
     "preview": "vite preview",
     "test": "echo \"there are no tests for this project\" && exit 0",
-    "test:watch": "echo \"there are no tests for this project\" && exit 0"
+    "test:watch": "echo \"there are no tests for this project\" && exit 0",
+    "build:mobile": "vite build --base ./ && cap sync android",
+    "apk:debug": "npm run build:mobile && cd android && gradlew.bat assembleDebug",
+    "apk:release": "npm run build:mobile && cd android && gradlew.bat assembleRelease"
   },
   "dependencies": {
+    "@capacitor/android": "^8.4.2",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/core": "^8.4.2",
+    "@capacitor/filesystem": "^8.1.2",
+    "@capacitor/keyboard": "^8.0.5",
+    "@capacitor/share": "^8.0.1",
+    "@capacitor/status-bar": "^8.0.3",
     "@hookform/resolvers": "^5.2.2",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",
@@ -83,6 +93,7 @@
     "zod": "^4.4.2"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.4.2",
     "@tailwindcss/typography": "^0.5.19",
     "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",

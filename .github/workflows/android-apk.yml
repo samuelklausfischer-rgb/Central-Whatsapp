@@ -1,0 +1,111 @@
+# Gera o APK do Central Whats.
+#
+# POR QUE NO CI, e não na máquina do escritório: o build do Android exige JDK 17+
+# e o SDK do Android (vários GB). A máquina de operação da clínica tem Java 8 e
+# nenhum SDK, e instalar isso ali só para gerar um arquivo não se paga. Aqui o
+# build também fica reprodutível — o mesmo commit gera o mesmo APK.
+#
+# O APK sai como ARTEFATO da execução: baixar em Actions → a execução → Artifacts.
+name: APK Android
+
+on:
+  workflow_dispatch:
+    inputs:
+      tipo:
+        description: 'debug (assinado com a chave de teste) ou release (exige keystore)'
+        type: choice
+        options: [debug, release]
+        default: debug
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # JDK 17: o Android Gradle Plugin 8.x não roda em Java 8 nem 11.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci --ignore-scripts
+
+      # O binário do Electron não é necessário aqui e é o download mais pesado
+      # do `npm install` — por isso o `--ignore-scripts` acima.
+
+      # As variáveis são EMBUTIDAS no bundle em tempo de build. Sem elas o app
+      # instala, abre e fica sem backend, SEM erro de build — a armadilha já
+      # documentada do release do Windows. Os valores padrão são os mesmos que o
+      # `Dockerfile` do repo já usa (chaves publicáveis); defina os secrets para
+      # sobrescrever.
+      - name: Montar .env.local
+        run: |
+          cat > .env.local <<EOF
+          VITE_SUPABASE_URL=${{ secrets.VITE_SUPABASE_URL || 'https://apps-supabase.srofjl.easypanel.host' }}
+          VITE_SUPABASE_PUBLISHABLE_KEY=${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_FINANCEIRO_SUPABASE_URL=${{ secrets.VITE_FINANCEIRO_SUPABASE_URL || 'https://afwrsrnzmqzteojbeeei.supabase.co' }}
+          VITE_FINANCEIRO_SUPABASE_ANON_KEY=${{ secrets.VITE_FINANCEIRO_SUPABASE_ANON_KEY }}
+          EOF
+
+      - run: npm run build:mobile
+
+      # Falha ALTO se o backend não entrou no bundle. Sem esta checagem o APK sai
+      # "com sucesso" e só quebra no celular de quem instalou.
+      - name: Conferir que o backend está embutido
+        run: |
+          if grep -rql "apps-supabase" android/app/src/main/assets/public/assets/*.js; then
+            echo "OK: URL do backend presente no bundle"
+          else
+            echo "FALHA: bundle sem a URL do backend — o APK sairia sem conexão"
+            exit 1
+          fi
+
+      - name: Montar keystore (só release)
+        if: inputs.tipo == 'release'
+        run: |
+          if [ -z "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "FALHA: release pedido sem ANDROID_KEYSTORE_BASE64 configurado."
+            echo "Sem keystore próprio o APK sairia assinado com a chave de teste,"
+            echo "e trocar a chave depois OBRIGA a equipe a desinstalar e reinstalar."
+            exit 1
+          fi
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/release.keystore
+
+      - name: Gradle
+        working-directory: android
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          if [ "${{ inputs.tipo }}" = "release" ]; then
+            ./gradlew assembleRelease --no-daemon
+          else
+            ./gradlew assembleDebug --no-daemon
+          fi
+
+      - name: Nomear o arquivo com a versão
+        id: nome
+        run: |
+          V=$(node -p "require('./package.json').version")
+          SRC=$(find android/app/build/outputs/apk -name "*.apk" | head -1)
+          DEST="Central-Whats-${V}-${{ inputs.tipo }}.apk"
+          cp "$SRC" "$DEST"
+          echo "arquivo=$DEST" >> "$GITHUB_OUTPUT"
+          ls -la "$DEST"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.nome.outputs.arquivo }}
+          path: ${{ steps.nome.outputs.arquivo }}
+          retention-days: 30

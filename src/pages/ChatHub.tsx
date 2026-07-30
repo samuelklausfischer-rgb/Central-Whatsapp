@@ -31,6 +31,7 @@ import {
 } from '@/stores/conversationMessages'
 import { getMyStates, getDeviceAssignments, type ConversationUserState } from '@/services/conversation_states'
 import type { ConversationAssignment } from '@/lib/supabase/types'
+import { registrarVoltar } from '@/lib/android-back'
 import { getNotes } from '@/services/notes'
 import { useRealtime } from '@/hooks/use-realtime'
 import { useAuth } from '@/hooks/use-auth'
@@ -871,6 +872,19 @@ export default function ChatHub() {
     setSelectedContact(null)
     setIsSheetOpen(false)
   }, [])
+
+  /**
+   * No Android, o voltar do sistema sai da conversa para a lista — não fecha o
+   * app. Registrado só enquanto há conversa aberta: sem conversa, o voltar
+   * segue para o próximo nível (trocar de tela, e na raiz minimizar).
+   */
+  useEffect(() => {
+    if (!selectedContact) return
+    return registrarVoltar(() => {
+      handleCloseConversation()
+      return true
+    })
+  }, [selectedContact, handleCloseConversation])
 
   useEffect(() => {
     if (!selectedContact) return

@@ -130,6 +130,36 @@
     @apply bg-background text-foreground;
     @apply transition-colors duration-200;
   }
+
+  /**
+   * Áreas seguras do celular (relógio em cima, barra de navegação embaixo,
+   * recorte da câmera).
+   *
+   * A partir do Android 15 o sistema FORÇA desenho de ponta a ponta — não há
+   * como recusar. Sem estas reservas, o cabeçalho nasce embaixo do relógio e o
+   * compositor do chat embaixo da barra de navegação: o atendente não consegue
+   * nem tocar no campo de escrever.
+   *
+   * `env()` vale 0 onde não há recorte, então desktop e navegador não mudam.
+   * A classe é aplicada só dentro do APK.
+   */
+  .app-safe-areas {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+
+  /**
+   * O WebView mostra um brilho azul ao chegar no fim da rolagem e abre menu de
+   * seleção ao segurar um texto — os dois destoam de um app de mensagens.
+   * `touch-action: manipulation` mata o atraso de 300 ms do duplo toque.
+   */
+  .app-android {
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
 }
 
 @layer utilities {
