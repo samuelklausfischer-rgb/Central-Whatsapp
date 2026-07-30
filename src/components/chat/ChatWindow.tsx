@@ -43,6 +43,8 @@ import {
   Eye,
   UserCheck,
   Users,
+  Share2,
+  User,
   CheckCircle,
   Search,
 } from 'lucide-react'
@@ -80,6 +82,9 @@ import { MessageActionsMenu } from '@/components/chat/MessageActionsMenu'
 import { ConversationGallery } from '@/components/chat/ConversationGallery'
 import { ForwardDialog } from '@/components/chat/ForwardDialog'
 import { GroupMembersPanel } from '@/components/chat/GroupMembersPanel'
+import { ContactPickerDialog } from '@/components/chat/ContactPickerDialog'
+import { ShareThisContactDialog } from '@/components/chat/ShareThisContactDialog'
+import { compartilharContatos, podeCompartilhar, paraCartao } from '@/services/contact_share'
 import { getParticipantesDoGrupo, escolherConversaDoParticipante } from '@/services/groups'
 import { AudioMessage } from '@/components/chat/AudioMessage'
 import { MediaViewer, type ViewerMedia } from '@/components/chat/MediaViewer'
@@ -710,6 +715,8 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const [galeriaAberta, setGaleriaAberta] = useState(false)
   const [encaminhandoMsg, setEncaminhandoMsg] = useState<any>(null)
   const [membrosAbertos, setMembrosAbertos] = useState(false)
+  const [seletorContatoAberto, setSeletorContatoAberto] = useState(false)
+  const [compartilharEsteAberto, setCompartilharEsteAberto] = useState(false)
 
   // Abre um item da galeria no visualizador que já existe. Vídeo e imagem são os
   // dois tipos que a aba Fotos produz.
@@ -2038,6 +2045,20 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                     />
                   )}
 
+                  {/* Compartilhar ESTE contato com outras conversas. Só aparece
+                      quando há telefone de verdade: grupo não é cartão de contato
+                      e chave @lid não é telefone. */}
+                  {podeCompartilhar({ remote_jid: contact } as any) && (
+                    <Button
+                      className="w-full justify-start h-12 bg-chat-hover hover:bg-chat-hover border-chat-border text-chat-text transition-all"
+                      variant="outline"
+                      onClick={() => setCompartilharEsteAberto(true)}
+                    >
+                      <Share2 className="h-4 w-4 mr-3 text-chat-muted" />
+                      Compartilhar contato
+                    </Button>
+                  )}
+
                   {isGroupContact && device?.id && contact && (
                     <>
                       <Button
@@ -3021,6 +3042,14 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                   <Paperclip className="h-4 w-4 text-chat-muted" />
                   Arquivo
                 </button>
+                <button
+                  type="button"
+                  onClick={() => { setSeletorContatoAberto(true); setIsPlusOpen(false) }}
+                  className="w-full flex items-center gap-3 px-2 py-2 rounded-md hover:bg-chat-hover transition-colors text-sm text-chat-text"
+                >
+                  <User className="h-4 w-4 text-chat-muted" />
+                  Contato
+                </button>
                 <div className="border-t border-chat-border my-2" />
                 <div className="text-[11px] font-semibold text-chat-muted uppercase tracking-wider px-2 pb-1.5 pt-0.5">
                   Gatilhos Rápidos
@@ -3504,6 +3533,57 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           }}
         />
         <MediaViewer media={mediaView} onClose={() => setMediaView(null)} />
+        {/* Porta 1: "+" → escolher contato(s) → envia na conversa ABERTA. */}
+        <ContactPickerDialog
+          aberto={seletorContatoAberto}
+          onFechar={() => setSeletorContatoAberto(false)}
+          contacts={contacts || []}
+          instanceKey={device?.instance_key}
+          destinoLabel={displayName}
+          onEnviar={async (contatos) => {
+            try {
+              await compartilharContatos({
+                deviceId: device.id,
+                remoteSender: contact,
+                contatos,
+                senderId: user?.id,
+              })
+              toast({
+                title: contatos.length > 1 ? `${contatos.length} contatos enviados` : 'Contato enviado',
+              })
+            } catch (err: any) {
+              toast({
+                title: 'Erro ao enviar contato',
+                description: err?.message,
+                variant: 'destructive',
+              })
+            }
+          }}
+        />
+
+        {/* Porta 2: painel de info → compartilhar ESTE contato com outras conversas. */}
+        <ShareThisContactDialog
+          aberto={compartilharEsteAberto}
+          onFechar={() => setCompartilharEsteAberto(false)}
+          contatoLabel={displayName}
+          conversas={conversas}
+          contactIndex={contactIndex}
+          instanceKey={device?.instance_key}
+          onEnviarPara={async (destino) => {
+            await compartilharContatos({
+              deviceId: device.id,
+              remoteSender: destino,
+              contatos: [
+                {
+                  name: contactRecord?.nickname || contactRecord?.name || displayName,
+                  phone: contact,
+                },
+              ],
+              senderId: user?.id,
+            })
+          }}
+        />
+
         <ForwardDialog
           aberto={!!encaminhandoMsg}
           onFechar={() => setEncaminhandoMsg(null)}
