@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@color/ic_launcher_background"/>
-    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+    <!-- Cor chapada, e não imagem: o fundo precisa cobrir os 108dp inteiros.
+         O gerador usa um PNG recuado em 16,7%, e aí a borda fica vazia. -->
+    <background android:drawable="@color/ic_launcher_background" />
+    <!-- O recuo aqui é a área segura: o Android só garante visível o centro 66%. -->
+    <foreground>
+        <inset android:drawable="@mipmap/ic_launcher_foreground" android:inset="16.7%" />
+    </foreground>
 </adaptive-icon>

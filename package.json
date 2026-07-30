@@ -22,7 +22,8 @@
     "test:watch": "echo \"there are no tests for this project\" && exit 0",
     "build:mobile": "vite build --base ./ && cap sync android",
     "apk:debug": "npm run build:mobile && cd android && gradlew.bat assembleDebug",
-    "apk:release": "npm run build:mobile && cd android && gradlew.bat assembleRelease"
+    "apk:release": "npm run build:mobile && cd android && gradlew.bat assembleRelease",
+    "assets:mobile": "node scripts/gerar-assets-mobile.mjs && capacitor-assets generate --android && node scripts/ajustar-icone-android.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.2",
@@ -93,6 +94,7 @@
     "zod": "^4.4.2"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^8.4.2",
     "@tailwindcss/typography": "^0.5.19",
     "@types/node": "^25.6.0",
