@@ -7,6 +7,22 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.197',
+    date: '2026-07-30 18:00',
+    title: 'Encaminhar, galeria, participantes do grupo, compartilhar contato e mencionar',
+    details: [
+      '📤 Encaminhar mensagem: no menu da mensagem, escolha a conversa de destino — vale para texto, foto, vídeo e documento',
+      '🖼️ Galeria da conversa: abra as informações do contato e veja reunidas todas as fotos, documentos e links daquela conversa',
+      '👥 Participantes do grupo: veja quem está no grupo, dê apelido, abra a conversa privada da pessoa ou responda a ela no privado sem o grupo receber nada',
+      '📇 Compartilhar contato: pelo "+" do compositor ou pelas informações do contato. Dá para escolher vários contatos de uma vez e vários destinos',
+      '🔔 Mencionar: digite @ num grupo para marcar alguém, ou escolha "Todos" — a pessoa é notificada no WhatsApp dela de verdade, como numa menção normal',
+      '🏷️ A menção aparece com o nome da pessoa em vez do número, inclusive nas menções que a clínica recebe, que antes mostravam o número cru',
+      '🚫 Contato sem telefone de verdade não aparece mais no compartilhamento: enviar um deles mandava um número inexistente, e o erro só aparecia do outro lado',
+      '✅ Encaminhamento que falha agora avisa na tela — antes o clique não fazia nada e não dizia por quê',
+      '📝 "Responder no privado" não apaga mais o que você já tinha escrito naquela conversa: a citação entra junto',
+    ],
+  },
+  {
     version: '0.0.196',
     date: '2026-07-29 14:30',
     title: 'Conversa do contato certo, mensagens novas na hora e nomes de volta',
