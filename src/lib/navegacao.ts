@@ -10,6 +10,8 @@ import {
   BarChart3,
   Percent,
   Activity,
+  FileText,
+  Gavel,
   ShieldAlert,
   Settings,
 } from 'lucide-react'
@@ -91,18 +93,50 @@ const RELATORIO_APP: DestinoNav = {
   url: '/ferramentas/relatorio-app',
 }
 
+/** Apps externos embutidos em iframe, com a sessão do Central Whats. */
+const RELATORIOS: DestinoNav = {
+  title: 'Relatórios',
+  description: 'Relatório semanal',
+  icon: FileText,
+  url: '/ferramentas/relatorios',
+}
+
+const LICITACOES: DestinoNav = {
+  title: 'Licitações',
+  description: 'Editais e análises',
+  icon: Gavel,
+  url: '/ferramentas/licitacoes',
+}
+
 type UsuarioDeNav = Pick<Profile, 'is_admin' | 'department'> & { is_super_admin?: boolean | null }
+
+/**
+ * Liberação das ferramentas externas. Não sai do `profile` como as outras: mora
+ * no banco (`public.tool_access` e `relatorios.profiles`) e chega por
+ * `useToolAccess()`. Opcional para que quem só monta menu estático continue
+ * chamando `ferramentasDoUsuario(user)` sem mudar nada.
+ */
+export interface AcessoFerramentasExternas {
+  relatorios: boolean
+  licitacoes: boolean
+}
 
 /**
  * Ferramentas que ESTE usuário pode ver.
  *
  * As rotas já são protegidas em `App.tsx` (`FinanceiroToolRoute`,
- * `SuperAdminRoute`); esconder aqui é para não oferecer porta que bate na cara.
+ * `SuperAdminRoute`, `ExternalToolRoute`); esconder aqui é para não oferecer
+ * porta que bate na cara.
  */
-export function ferramentasDoUsuario(user: UsuarioDeNav | null | undefined): ItemDeFerramenta[] {
+export function ferramentasDoUsuario(
+  user: UsuarioDeNav | null | undefined,
+  externas?: AcessoFerramentasExternas,
+): ItemDeFerramenta[] {
   return [
     ...FERRAMENTAS_BASE,
     ...(canAccessFinanceiroTools(user) ? [ANALISE_PRN, RATEIO] : []),
+    ...(externas?.relatorios ? [RELATORIOS] : []),
+    ...(externas?.licitacoes ? [LICITACOES] : []),
     ...(user?.is_super_admin ? [RELATORIO_APP] : []),
   ]
 }

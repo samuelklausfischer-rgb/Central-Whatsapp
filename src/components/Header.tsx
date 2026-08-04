@@ -24,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useAuth } from '@/hooks/use-auth'
+import { useToolAccess } from '@/hooks/use-tool-access'
 import {
   DESTINOS_PRINCIPAIS,
   ferramentasDoUsuario,
@@ -47,7 +48,7 @@ function FerramentasMenu() {
   const { user } = useAuth()
 
   // Mesma lista (e mesmos gates) que a folha "Mais" do celular usa.
-  const items = ferramentasDoUsuario(user)
+  const items = ferramentasDoUsuario(user, useToolAccess())
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {

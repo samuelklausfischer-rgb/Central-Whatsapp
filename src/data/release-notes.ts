@@ -7,6 +7,18 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.201',
+    date: '2026-08-04 18:00',
+    title: 'Relatórios e Licitações agora abrem dentro do Central Whats',
+    details: [
+      '📊 O Sistema de Relatórios virou item em Ferramentas: abre já logado como você, mostra os seus projetos e salva no seu nome — sem digitar senha de novo',
+      '⚖️ O PRN Licitações também entrou em Ferramentas, para quem tem acesso liberado',
+      '🙋 No Licitações cada pessoa passa a entrar com a própria conta, e não mais pelo login compartilhado: quem cadastrou ou revisou um edital fica registrado com nome e sobrenome',
+      '🔑 Quem libera o acesso ao Licitações é o administrador, em Gestão de Equipe — a chave fica no cadastro de cada usuário',
+      'ℹ️ Os Relatórios aparecem para quem já tem perfil lá; se não aparecer para você, peça a um coordenador para criar o seu',
+    ],
+  },
+  {
     version: '0.0.200',
     date: '2026-08-04 13:30',
     title: 'Selecionar várias mensagens de uma vez',

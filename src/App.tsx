@@ -26,6 +26,7 @@ import { AppProvider } from './stores/useAppStore'
 import SettingsLayout from './pages/settings/SettingsLayout'
 import Login from './pages/Login'
 import { AuthProvider, useAuth } from './hooks/use-auth'
+import { ToolAccessProvider, useToolAccess } from './hooks/use-tool-access'
 import { UpdateGate } from './components/UpdateGate'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { canAccessFinanceiroTools } from './lib/permissions'
@@ -47,6 +48,8 @@ const AdminPage = lazy(() => import('./pages/admin/AdminPage'))
 const AnalisePrn = lazy(() => import('./pages/tools/AnalisePrn'))
 const RateioMobilemed = lazy(() => import('./pages/tools/RateioMobilemed'))
 const RelatorioApp = lazy(() => import('./pages/tools/RelatorioApp'))
+const Relatorios = lazy(() => import('./pages/tools/Relatorios'))
+const Licitacoes = lazy(() => import('./pages/tools/Licitacoes'))
 
 const ProtectedRoute = () => {
   const { isAuthenticated, loading } = useAuth()
@@ -77,9 +80,24 @@ const FinanceiroToolRoute = () => {
   return canAccessFinanceiroTools(user) ? <Outlet /> : <Navigate to="/dashboard" replace />
 }
 
+// A liberação das ferramentas externas vem do banco, não do perfil já carregado.
+// Enquanto ela não chega, esperar: redirecionar no `false` inicial jogaria para
+// o dashboard todo mundo que abre a rota direto (link salvo, F5 na própria tela).
+const ExternalToolRoute = ({ tool }: { tool: 'relatorios' | 'licitacoes' }) => {
+  const access = useToolAccess()
+  if (access.loading)
+    return (
+      <div className="h-full w-full flex items-center justify-center text-muted-foreground">
+        Carregando...
+      </div>
+    )
+  return access[tool] ? <Outlet /> : <Navigate to="/dashboard" replace />
+}
+
 const App = () => {
   const appContent = (
     <AuthProvider>
+        <ToolAccessProvider>
         <AppProvider>
           <TooltipProvider>
           <Toaster />
@@ -107,6 +125,12 @@ const App = () => {
                 <Route element={<SuperAdminRoute />}>
                   <Route path="/ferramentas/relatorio-app" element={<RelatorioApp />} />
                 </Route>
+                <Route element={<ExternalToolRoute tool="relatorios" />}>
+                  <Route path="/ferramentas/relatorios" element={<Relatorios />} />
+                </Route>
+                <Route element={<ExternalToolRoute tool="licitacoes" />}>
+                  <Route path="/ferramentas/licitacoes" element={<Licitacoes />} />
+                </Route>
                 <Route path="/settings" element={<SettingsLayout />}>
                   <Route path="general" element={<GeneralSettings />} />
                   <Route path="labels" element={<LabelsSettings />} />
@@ -124,6 +148,7 @@ const App = () => {
           </Suspense>
         </TooltipProvider>
       </AppProvider>
+      </ToolAccessProvider>
     </AuthProvider>
   )
   return (

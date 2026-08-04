@@ -13,13 +13,18 @@ ARG VITE_SUPABASE_URL="https://apps-supabase.srofjl.easypanel.host"
 ARG VITE_SUPABASE_PUBLISHABLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzUyNzAwMDAwLCJleHAiOjIzODQ1MDAwMDB9.Gseqw0-_o6Nmwmz3mCWvgxjjCfJB1LhVgTV83uJe-F4"
 ARG VITE_FINANCEIRO_SUPABASE_URL="https://afwrsrnzmqzteojbeeei.supabase.co"
 ARG VITE_FINANCEIRO_SUPABASE_ANON_KEY="sb_publishable_f0HmcgxIyRvw0e6pA_q6GQ_EF6t-k5W"
+# Apps embutidos na aba Ferramentas (URLs públicas, sem segredo).
+ARG VITE_RELATORIOS_APP_URL="https://frontends-relatorios.srofjl.easypanel.host"
+ARG VITE_LICITACAO_APP_URL="https://frontends-front-licitacao.srofjl.easypanel.host"
 ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
 ENV VITE_SUPABASE_PUBLISHABLE_KEY=$VITE_SUPABASE_PUBLISHABLE_KEY
 ENV VITE_FINANCEIRO_SUPABASE_URL=$VITE_FINANCEIRO_SUPABASE_URL
 ENV VITE_FINANCEIRO_SUPABASE_ANON_KEY=$VITE_FINANCEIRO_SUPABASE_ANON_KEY
+ENV VITE_RELATORIOS_APP_URL=$VITE_RELATORIOS_APP_URL
+ENV VITE_LICITACAO_APP_URL=$VITE_LICITACAO_APP_URL
 
 RUN npm run build
-RUN node -e "const fs=require('node:fs'); const cfg={VITE_SUPABASE_URL:process.env.VITE_SUPABASE_URL||'',VITE_SUPABASE_PUBLISHABLE_KEY:process.env.VITE_SUPABASE_PUBLISHABLE_KEY||''}; fs.writeFileSync('/app/dist/env-config.js','window.__APP_CONFIG__ = '+JSON.stringify(cfg,null,2)+';\\n');"
+RUN node -e "const fs=require('node:fs'); const cfg={VITE_SUPABASE_URL:process.env.VITE_SUPABASE_URL||'',VITE_SUPABASE_PUBLISHABLE_KEY:process.env.VITE_SUPABASE_PUBLISHABLE_KEY||'',VITE_RELATORIOS_APP_URL:process.env.VITE_RELATORIOS_APP_URL||'',VITE_LICITACAO_APP_URL:process.env.VITE_LICITACAO_APP_URL||''}; fs.writeFileSync('/app/dist/env-config.js','window.__APP_CONFIG__ = '+JSON.stringify(cfg,null,2)+';\\n');"
 
 FROM nginx:stable-alpine AS production
 

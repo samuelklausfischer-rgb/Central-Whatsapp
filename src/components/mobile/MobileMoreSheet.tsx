@@ -5,6 +5,7 @@ import { useTheme } from 'next-themes'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useAuth } from '@/hooks/use-auth'
+import { useToolAccess } from '@/hooks/use-tool-access'
 import { ferramentasDoUsuario, itensDeConta, ehAcao, type ItemDeFerramenta } from '@/lib/navegacao'
 import { NotificationsDialog } from '@/components/NotificationsDialog'
 import { ReleaseNotesDialog } from '@/components/ReleaseNotesDialog'
@@ -37,7 +38,7 @@ export function MobileMoreSheet({
   const [problemaAberto, setProblemaAberto] = useState(false)
 
   const escuro = resolvedTheme === 'dark'
-  const ferramentas = ferramentasDoUsuario(user)
+  const ferramentas = ferramentasDoUsuario(user, useToolAccess())
   const conta = itensDeConta(user)
   const iniciais = (user?.name?.[0] || user?.username?.[0] || 'U').toUpperCase()
 

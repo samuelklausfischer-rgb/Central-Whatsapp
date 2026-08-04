@@ -18,7 +18,14 @@ const naAndroid = isNativeAndroid()
 
 export default function Layout() {
   const location = useLocation()
-  const isChat = location.pathname.startsWith('/chat')
+  // Telas que gerenciam a própria rolagem e precisam da altura toda. As
+  // ferramentas embutidas entram aqui porque o iframe herda a altura do pai:
+  // dentro do container com padding e max-w-7xl o app filho ficaria espremido
+  // e com barra de rolagem dupla.
+  const isFullBleed =
+    location.pathname.startsWith('/chat') ||
+    location.pathname === '/ferramentas/relatorios' ||
+    location.pathname === '/ferramentas/licitacoes'
 
   /**
    * A casca é escolhida por LARGURA, não por "é o APK". Uma janela estreita no
@@ -61,13 +68,13 @@ export default function Layout() {
       <main
         className={cn(
           'relative z-10 flex-1 animate-fade-in-up flex flex-col',
-          isChat ? 'overflow-hidden' : 'overflow-y-auto p-4 md:p-6 lg:p-8',
+          isFullBleed ? 'overflow-hidden' : 'overflow-y-auto p-4 md:p-6 lg:p-8',
           // No celular o respiro lateral do painel é menor: 32px de padding em
           // 360px de tela é quase 10% da largura só de margem.
-          !isChat && noCelular && 'p-3',
+          !isFullBleed && noCelular && 'p-3',
         )}
       >
-        <div className={`mx-auto w-full ${isChat ? 'h-full max-w-none' : 'max-w-7xl'}`}>
+        <div className={`mx-auto w-full ${isFullBleed ? 'h-full max-w-none' : 'max-w-7xl'}`}>
           <Outlet />
         </div>
       </main>

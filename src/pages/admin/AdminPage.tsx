@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   DownloadCloud,
   Edit,
+  Gavel,
   Mail,
   Plus,
   RefreshCw,
@@ -13,6 +14,7 @@ import {
   User as UserIcon,
 } from 'lucide-react'
 import { getUsers, createUser, updateUser, deleteUser, type ManagedUser } from '@/services/users'
+import { getToolUserIds, setToolAccess } from '@/services/tool_access'
 import { getDevices, updateDevice } from '@/services/devices'
 import {
   configureEvolutionWebhooks,
@@ -69,6 +71,11 @@ export default function AdminPage() {
   const [isImportingInstances, setIsImportingInstances] = useState(false)
   const [isConfiguringWebhooks, setIsConfiguringWebhooks] = useState(false)
 
+  // Liberação do Licitações: vive em public.tool_access, não em profiles. Uma
+  // coluna em profiles seria auto-atribuível — a policy users_update_own_profile
+  // só trava `is_admin` no WITH CHECK.
+  const [licitacaoUserIds, setLicitacaoUserIds] = useState<Set<string>>(new Set())
+
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -76,6 +83,7 @@ export default function AdminPage() {
     password: '',
     department: '',
     is_admin: false,
+    licitacoes_access: false,
     allowed_devices: [] as string[],
   })
 
@@ -113,9 +121,14 @@ export default function AdminPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [uData, dData] = await Promise.all([getUsers(), getDevices()])
+      const [uData, dData, licitacaoIds] = await Promise.all([
+        getUsers(),
+        getDevices(),
+        getToolUserIds('licitacoes'),
+      ])
       setUsers(uData)
       setDevices(dData)
+      setLicitacaoUserIds(new Set(licitacaoIds))
     } catch (e) {
       console.error(e)
       toast({ title: 'Erro ao carregar equipe', variant: 'destructive' })
@@ -140,6 +153,7 @@ export default function AdminPage() {
       password: '',
       department: '',
       is_admin: false,
+      licitacoes_access: false,
       allowed_devices: [],
     })
     setIsDialogOpen(true)
@@ -154,6 +168,7 @@ export default function AdminPage() {
       password: '',
       department: user.department || '',
       is_admin: user.is_admin || false,
+      licitacoes_access: licitacaoUserIds.has(user.id),
       allowed_devices: user.allowed_devices || [],
     })
     setIsDialogOpen(true)
@@ -304,9 +319,15 @@ export default function AdminPage() {
 
       if (editingUser) {
         await updateUser(editingUser.id, dataToSave)
+        await setToolAccess(editingUser.id, 'licitacoes', formData.licitacoes_access)
         toast({ title: 'Usuário atualizado com sucesso' })
       } else {
-        await createUser(dataToSave)
+        const created = await createUser(dataToSave)
+        // A liberação é gravada depois do usuário existir: tool_access.user_id
+        // tem FK para auth.users, então antes disso o insert seria rejeitado.
+        if (created?.id && formData.licitacoes_access) {
+          await setToolAccess(created.id, 'licitacoes', true)
+        }
         toast({ title: 'Usuário criado com sucesso' })
       }
 
@@ -444,6 +465,14 @@ export default function AdminPage() {
                             className="border-blue-500/30 text-blue-400 bg-blue-500/10 gap-1"
                           >
                             <ShieldAlert className="h-3 w-3" /> Admin
+                          </Badge>
+                        )}
+                        {licitacaoUserIds.has(user.id) && (
+                          <Badge
+                            variant="outline"
+                            className="border-amber-500/30 text-amber-500 bg-amber-500/10 gap-1"
+                          >
+                            <Gavel className="h-3 w-3" /> Licitações
                           </Badge>
                         )}
                       </div>
@@ -623,6 +652,23 @@ export default function AdminPage() {
                 Privilégios de Administrador
               </Label>
             </div>
+
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="licitacoes_access"
+                checked={formData.licitacoes_access}
+                onCheckedChange={(checked) =>
+                  setFormData((prev) => ({ ...prev, licitacoes_access: checked as boolean }))
+                }
+              />
+              <Label htmlFor="licitacoes_access" className="font-medium">
+                Acesso ao Licitações
+              </Label>
+            </div>
+            <p className="-mt-1 text-xs text-muted-foreground">
+              Libera a ferramenta Licitações e cria a conta da pessoa lá no primeiro acesso. Não
+              depende de ser administrador.
+            </p>
 
             {!formData.is_admin && (
               <div className="pt-4 border-t border-border">
