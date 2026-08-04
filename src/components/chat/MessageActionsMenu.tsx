@@ -1,4 +1,4 @@
-import { MessageSquare, Copy, Pencil, Trash2, Forward, Reply } from 'lucide-react'
+import { MessageSquare, Copy, Pencil, Trash2, Forward, Reply, ListChecks } from 'lucide-react'
 import {
   DropdownMenuContent,
   DropdownMenuItem,
@@ -31,6 +31,11 @@ export interface MessageActionsMenuProps {
   onDelete: (msg: any) => void
   onForward: (msg: any) => void
   /**
+   * Entra no modo de seleção já com esta mensagem marcada — o caminho de
+   * teclado/mouse para o que no celular se faz segurando pressionado.
+   */
+  onSelecionar: (msg: any) => void
+  /**
    * Só aparece em grupo, e só para mensagem de OUTRA pessoa: responder no
    * privado a quem escreveu no grupo, sem nada acontecer no grupo.
    */
@@ -46,6 +51,7 @@ export function MessageActionsMenu({
   onEdit,
   onDelete,
   onForward,
+  onSelecionar,
   onReplyPrivately,
   podeResponderPrivadamente = false,
 }: MessageActionsMenuProps) {
@@ -92,6 +98,16 @@ export function MessageActionsMenu({
       >
         <Copy className="h-4 w-4 mr-2" />
         Copiar
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        className="cursor-pointer focus:bg-chat-hover"
+        onClick={(e) => {
+          e.stopPropagation()
+          onSelecionar(msg)
+        }}
+      >
+        <ListChecks className="h-4 w-4 mr-2" />
+        Selecionar mensagens
       </DropdownMenuItem>
       {isMe && !msg.deleted_at && (
         <DropdownMenuItem

@@ -7,6 +7,20 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.200',
+    date: '2026-08-04 13:30',
+    title: 'Selecionar várias mensagens de uma vez',
+    details: [
+      '☑️ Segure uma mensagem no celular — ou use "Selecionar mensagens" no menu dela — e marque quantas quiser. O topo da conversa vira uma barra com as ações',
+      '📤 Encaminhar várias de uma vez, para várias conversas: marque os destinos, confirme e acompanhe o progresso. Se um envio falhar, "Enviar" retoma de onde parou sem repetir o que já tinha chegado',
+      '📋 Copiar já sai com quem falou e a que horas ("[04/08 14:32] Maria: bom dia") — pronto para colar em prontuário, e-mail ou relatório, e em grupo dá para saber quem disse o quê',
+      '⬇️ Baixar de uma vez todas as fotos e documentos das mensagens marcadas',
+      '🗑️ Apagar várias mensagens suas de uma vez, para você ou para todos',
+      '⌨️ No computador: shift+clique marca tudo entre uma mensagem e outra, e Esc sai da seleção',
+      '🔢 Dá para marcar até 30 mensagens por vez, o mesmo limite do WhatsApp',
+    ],
+  },
+  {
     version: '0.0.199',
     date: '2026-07-30 23:00',
     title: 'Encaminhar deixa de parecer mensagem escrita na hora',

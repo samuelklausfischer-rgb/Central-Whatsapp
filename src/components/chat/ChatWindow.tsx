@@ -124,6 +124,19 @@ import { DocumentBubble } from '@/components/chat/DocumentBubble'
 import { ContactShareBubble } from '@/components/chat/ContactShareBubble'
 import { ListMessageBubble } from '@/components/chat/ListMessageBubble'
 import { MessageSearchBar } from '@/components/chat/MessageSearchBar'
+import { MessageSelectionBar } from '@/components/chat/MessageSelectionBar'
+import { useMessageSelection } from '@/hooks/use-message-selection'
+import {
+  MAX_SELECIONADAS,
+  separarEncaminhaveis,
+  montarTranscricao,
+  temTextoParaCopiar,
+  midiasBaixaveis,
+  apagaveis,
+} from '@/lib/selection-actions'
+import { Checkbox } from '@/components/ui/checkbox'
+import { isNativeAndroid } from '@/lib/app-info'
+import { registrarVoltar } from '@/lib/android-back'
 import { TOP_EMOJIS, getEmojiImageUrl } from '@/lib/emojis'
 import supabase from '@/lib/supabase/client'
 import { useToast } from '@/hooks/use-toast'
@@ -384,6 +397,10 @@ interface HighlightRange {
 }
 
 const EMPTY_RANGES: HighlightRange[] = []
+
+// Referência estável para o diálogo fechado. Um `[]` novo a cada render faria o
+// `useMemo` do ForwardDialog recalcular a separação de encaminháveis sem parar.
+const EMPTY_MSGS: any[] = []
 
 // Busca (Ctrl+F): ocorrências calculadas sobre o content BRUTO de cada
 // mensagem, via indexOf simples (nunca RegExp — evita qualquer risco de
@@ -763,7 +780,10 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const dismissedRef = useRef(false)
   const [mediaView, setMediaView] = useState<ViewerMedia | null>(null)
   const [galeriaAberta, setGaleriaAberta] = useState(false)
-  const [encaminhandoMsg, setEncaminhandoMsg] = useState<any>(null)
+  // Lista, e não uma mensagem: o mesmo diálogo atende o encaminhar do menu ⋮
+  // (lista de uma) e o da barra de seleção (lista de várias).
+  const [msgsParaEncaminhar, setMsgsParaEncaminhar] = useState<any[] | null>(null)
+  const [apagarSelecionadasAberto, setApagarSelecionadasAberto] = useState(false)
   const [membrosAbertos, setMembrosAbertos] = useState(false)
   const [seletorContatoAberto, setSeletorContatoAberto] = useState(false)
   const [compartilharEsteAberto, setCompartilharEsteAberto] = useState(false)
@@ -796,6 +816,34 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const lastScrolledMatchKeyRef = useRef<string | null>(null)
 
   const messages = conversation?.messages || []
+
+  /**
+   * Modo de seleção (marcar várias mensagens e agir sobre todas).
+   *
+   * A chave `${device.id}:${contact}` é o que zera a seleção ao trocar de
+   * conversa — o `ChatWindow` não desmonta nessa troca. Mesma chave já usada
+   * pelo controle de scroll logo abaixo, pelo mesmo motivo.
+   */
+  const {
+    modoSelecao,
+    selecionadas,
+    quantidade: qtdSelecionadas,
+    estaSelecionada,
+    iniciarCom: iniciarSelecaoCom,
+    alternar: alternarSelecao,
+    limpar: limparSelecao,
+    // Desestruturado, e não usado como `selecao.x`: o objeto devolvido é novo a
+    // cada render, e listá-lo nas dependências dos efeitos re-registraria o
+    // atalho de Escape e o botão VOLTAR a cada quadro. Os campos são estáveis.
+  } = useMessageSelection({
+    messages,
+    chaveConversa: device?.id && contact ? `${device.id}:${contact}` : null,
+    onTeto: () =>
+      toast({
+        title: `Você pode selecionar no máximo ${MAX_SELECIONADAS} mensagens`,
+        variant: 'destructive',
+      }),
+  })
 
   const occurrences = useMemo(
     () => computeOccurrences(messages, deferredFindQuery),
@@ -980,11 +1028,17 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     findInputRef.current?.blur()
   }, [])
 
-  // Atalhos da busca (Ctrl+F/Cmd+F, Escape, Enter/Shift+Enter). Registrado em
-  // fase de captura: ChatHub.tsx tem seu próprio handler de Escape (fecha a
-  // conversa) que checa `e.defaultPrevented` — capture garante que este
-  // handler roda primeiro e chama preventDefault antes daquele ser avaliado,
-  // independente da ordem em que os efeitos foram montados.
+  // Atalhos da busca (Ctrl+F/Cmd+F, Escape, Enter/Shift+Enter) e o Escape do modo
+  // de seleção. Registrado em fase de captura: ChatHub.tsx tem seu próprio
+  // handler de Escape (fecha a conversa) que checa `e.defaultPrevented` —
+  // capture garante que este handler roda primeiro e chama preventDefault antes
+  // daquele ser avaliado, independente da ordem em que os efeitos foram montados.
+  //
+  // O Escape da seleção mora AQUI, e não num efeito próprio, de propósito: dois
+  // listeners na mesma fase de captura teriam ordem definida pela ordem de
+  // montagem dos efeitos, e o Escape passaria a fechar a conversa ou sair da
+  // seleção conforme o dia. Com um handler só, a precedência fica escrita:
+  // busca aberta primeiro (ela tem o foco), seleção depois.
   useEffect(() => {
     if (!device || !contact) return
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -994,7 +1048,13 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         openFind()
         return
       }
-      if (!isFindOpen) return
+      if (!isFindOpen) {
+        if (e.key === 'Escape' && modoSelecao) {
+          e.preventDefault()
+          limparSelecao()
+        }
+        return
+      }
       if (e.key === 'Escape') {
         e.preventDefault()
         closeFind()
@@ -1007,7 +1067,23 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     }
     window.addEventListener('keydown', handleKeyDown, { capture: true })
     return () => window.removeEventListener('keydown', handleKeyDown, { capture: true })
-  }, [device, contact, isFindOpen, goToMatch, openFind, closeFind])
+  }, [device, contact, isFindOpen, goToMatch, openFind, closeFind, modoSelecao, limparSelecao])
+
+  /**
+   * Botão VOLTAR do Android sai da seleção antes de fechar a conversa.
+   *
+   * Registrado só enquanto o modo está ativo — e isso é o que garante a ordem
+   * certa. `consumirVoltarRegistrado` percorre a pilha do fim para o começo, e o
+   * ChatHub já registrou o "fechar conversa" quando a conversa abriu. Como este
+   * entra depois, ao ligar o modo, ele fica no topo e consome o voltar primeiro.
+   */
+  useEffect(() => {
+    if (!modoSelecao) return
+    return registrarVoltar(() => {
+      limparSelecao()
+      return true
+    })
+  }, [modoSelecao, limparSelecao])
 
   useEffect(() => {
     getTriggers()
@@ -1898,6 +1974,175 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     [contactIndex],
   )
 
+  /**
+   * Nome do autor de uma mensagem — a MESMA precedência já usada na bolha.
+   *
+   * Serve ao "Copiar" em lote, que grava `[dd/MM HH:mm] Autor: texto`. Escrever
+   * uma resolução própria lá dentro criaria uma segunda verdade sobre o nome da
+   * mesma pessoa: o texto colado no prontuário diria "5551999..." enquanto a
+   * tela mostra o apelido.
+   */
+  const resolverAutorDaMensagem = useCallback(
+    (msg: any) => {
+      const ehMinha = msg.direction === 'outbound' || msg.sender_id === user?.id
+      if (ehMinha) return msg.sender_name || 'Eu'
+      if (isGroupContact || msg.remote_sender?.includes('@g.us')) {
+        const participante = msg.group_participant
+          ? findContactByIdentifier(msg.group_participant, contactIndex)
+          : null
+        return (
+          msg.sender_name ||
+          participante?.nickname ||
+          participante?.name ||
+          (msg.group_participant ? normalizeToDigits(msg.group_participant) : '') ||
+          'Participante'
+        )
+      }
+      return resolveContactDisplayName(msg.remote_sender, contactIndex, {
+        sender_name: msg.sender_name,
+      })
+    },
+    [user?.id, isGroupContact, contactIndex],
+  )
+
+  // ——— Ações em lote da barra de seleção ———
+  // Cada uma pergunta antes ao `lib/selection-actions` o que da seleção serve
+  // para ela. O resultado também alimenta o estado desabilitado dos ícones, para
+  // o atendente ver que a ação não vale ANTES de clicar.
+  const podeEncaminharSelecao = useMemo(
+    () => separarEncaminhaveis(selecionadas).ok.length > 0,
+    [selecionadas],
+  )
+  const podeCopiarSelecao = useMemo(() => temTextoParaCopiar(selecionadas), [selecionadas])
+  const midiasDaSelecao = useMemo(() => midiasBaixaveis(selecionadas), [selecionadas])
+  const apagaveisDaSelecao = useMemo(() => apagaveis(selecionadas, user?.id), [selecionadas, user?.id])
+
+  /**
+   * No APK, cada arquivo abre a folha de compartilhamento do sistema (o atributo
+   * `download` do `<a>` é ignorado pelo WebView — ver `lib/download.ts`). Com
+   * vários arquivos as folhas empilham e a tela fica inutilizável, então ali a
+   * ação sai de alcance com o motivo escrito em vez de funcionar pela metade.
+   */
+  const baixarBloqueadoNoAndroid = midiasDaSelecao.length > 1 && isNativeAndroid()
+
+  const copiarSelecao = useCallback(async () => {
+    if (selecionadas.length === 0) return
+    try {
+      await navigator.clipboard.writeText(montarTranscricao(selecionadas, resolverAutorDaMensagem))
+      toast({
+        title:
+          selecionadas.length === 1
+            ? 'Mensagem copiada!'
+            : `${selecionadas.length} mensagens copiadas!`,
+      })
+      limparSelecao()
+    } catch {
+      toast({ title: 'Erro ao copiar', variant: 'destructive' })
+    }
+  }, [selecionadas, resolverAutorDaMensagem, toast, limparSelecao])
+
+  const baixarSelecao = useCallback(async () => {
+    if (midiasDaSelecao.length === 0) return
+    toast({
+      title:
+        midiasDaSelecao.length === 1
+          ? 'Baixando arquivo...'
+          : `Baixando ${midiasDaSelecao.length} arquivos...`,
+    })
+    // Um de cada vez. Em rajada o navegador bloqueia downloads múltiplos como se
+    // fossem pop-ups, e no Electron a janela de "salvar como" abriria por cima
+    // da anterior.
+    for (const midia of midiasDaSelecao) {
+      await downloadFile(midia.url, midia.name)
+    }
+    limparSelecao()
+  }, [midiasDaSelecao, toast, limparSelecao])
+
+  const apagarSelecao = useCallback(
+    async (paraTodos: boolean) => {
+      setApagarSelecionadasAberto(false)
+      const alvos = apagaveisDaSelecao
+      if (alvos.length === 0 || !device) return
+      let falhas = 0
+      // Sequencial e sem abortar no primeiro erro: "apagar para todos" tem prazo
+      // no WhatsApp, e numa seleção com mensagens antigas é normal algumas
+      // recusarem. Parar na primeira deixaria o resto por apagar sem explicação.
+      for (const msg of alvos) {
+        try {
+          await deleteMessage(msg.id, device.id, paraTodos)
+        } catch {
+          falhas++
+        }
+      }
+      limparSelecao()
+      if (falhas === 0) {
+        toast({
+          title:
+            alvos.length === 1
+              ? paraTodos
+                ? 'Mensagem apagada para todos'
+                : 'Mensagem apagada (apenas para você)'
+              : `${alvos.length} mensagens apagadas`,
+        })
+      } else {
+        toast({
+          title: `${falhas} de ${alvos.length} não puderam ser apagadas`,
+          variant: 'destructive',
+        })
+      }
+    },
+    [apagaveisDaSelecao, device, toast, limparSelecao],
+  )
+
+  /**
+   * Segurar pressionado entra no modo de seleção — o gesto do celular.
+   *
+   * SÓ PARA TOQUE (`pointerType === 'touch'`). No desktop, segurar o botão do
+   * mouse é como se seleciona texto: sequestrar esse gesto tiraria do atendente
+   * a forma mais usada de copiar um trecho solto de uma mensagem. Lá o caminho
+   * é o item "Selecionar mensagens" do menu ⋮.
+   */
+  const longPressRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; x: number; y: number }>({
+    timer: null,
+    x: 0,
+    y: 0,
+  })
+
+  const cancelarLongPress = useCallback(() => {
+    if (longPressRef.current.timer) {
+      clearTimeout(longPressRef.current.timer)
+      longPressRef.current.timer = null
+    }
+  }, [])
+
+  const iniciarLongPress = useCallback(
+    (e: React.PointerEvent, msg: any) => {
+      if (e.pointerType !== 'touch' || modoSelecao) return
+      cancelarLongPress()
+      longPressRef.current.x = e.clientX
+      longPressRef.current.y = e.clientY
+      longPressRef.current.timer = setTimeout(() => {
+        longPressRef.current.timer = null
+        iniciarSelecaoCom(msg)
+      }, 500)
+    },
+    [modoSelecao, iniciarSelecaoCom, cancelarLongPress],
+  )
+
+  const moverLongPress = useCallback(
+    (e: React.PointerEvent) => {
+      if (!longPressRef.current.timer) return
+      // Rolar a conversa começa com o dedo em cima de uma bolha. Sem esta
+      // tolerância, todo scroll um pouco mais lento viraria seleção acidental.
+      const dx = Math.abs(e.clientX - longPressRef.current.x)
+      const dy = Math.abs(e.clientY - longPressRef.current.y)
+      if (dx > 10 || dy > 10) cancelarLongPress()
+    },
+    [cancelarLongPress],
+  )
+
+  useEffect(() => cancelarLongPress, [cancelarLongPress])
+
   const displayName = resolveContactDisplayName(contact, contactIndex, {
     sender_name: conversation?.sender_name
   })
@@ -1963,6 +2208,28 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
 
   return (
     <div className="flex flex-col h-full bg-transparent flex-1 relative min-w-0">
+      {/* No modo de seleção a barra de ações OCUPA O LUGAR do cabeçalho, como no
+          WhatsApp. Empilhar as duas empurraria a conversa para baixo e a lista
+          saltaria a cada entrada e saída do modo. */}
+      {modoSelecao ? (
+        <MessageSelectionBar
+          quantidade={qtdSelecionadas}
+          onFechar={limparSelecao}
+          onEncaminhar={() => setMsgsParaEncaminhar(selecionadas)}
+          onCopiar={copiarSelecao}
+          onBaixar={baixarSelecao}
+          onApagar={() => setApagarSelecionadasAberto(true)}
+          podeEncaminhar={podeEncaminharSelecao}
+          podeCopiar={podeCopiarSelecao}
+          podeBaixar={midiasDaSelecao.length > 0 && !baixarBloqueadoNoAndroid}
+          podeApagar={apagaveisDaSelecao.length > 0}
+          motivoBaixar={
+            baixarBloqueadoNoAndroid
+              ? 'No celular só dá para baixar um arquivo por vez'
+              : undefined
+          }
+        />
+      ) : (
       <div className="h-[64px] border-b border-chat-border bg-chat-header shadow-chat flex items-center justify-between px-4 sm:px-5 sticky top-0 z-10 flex-shrink-0">
         <div className="flex items-center gap-3 min-w-0">
           {isMobile && (
@@ -2387,6 +2654,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           </Sheet>
         </div>
       </div>
+      )}
 
       <div
         className={`overflow-hidden flex-shrink-0 border-b border-chat-border bg-chat-header transition-all duration-300 ${
@@ -2486,6 +2754,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         ) : (
           messages.map((msg: any, index: number) => {
           const isMe = msg.direction === 'outbound' || msg.sender_id === user?.id
+          const estaMarcada = estaSelecionada(msg.id)
           const messageAttachments = Array.isArray(msg.attachments) ? msg.attachments : []
           const timestamp = timeFormatter.format(new Date(msg.created_at))
           const previousMsg = messages[index - 1]
@@ -2541,7 +2810,31 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                 if (el) messageRefs.current.set(msg.id, el)
                 else messageRefs.current.delete(msg.id)
               }}
-              className={`flex flex-col animate-in fade-in slide-in-from-bottom-2 duration-300 ${isMe ? 'items-end' : 'items-start'}`}
+              onPointerDown={(e) => iniciarLongPress(e, msg)}
+              onPointerMove={moverLongPress}
+              onPointerUp={cancelarLongPress}
+              onPointerCancel={cancelarLongPress}
+              onPointerLeave={cancelarLongPress}
+              onClickCapture={
+                modoSelecao
+                  ? (e) => {
+                      // FASE DE CAPTURA: intercepta antes dos controles de dentro
+                      // da bolha (abrir imagem, tocar áudio, baixar documento,
+                      // menu ⋮). No modo de seleção o clique tem um significado
+                      // só — marcar —, e sem isto tocar numa foto abriria o
+                      // visualizador em vez de selecioná-la.
+                      e.preventDefault()
+                      e.stopPropagation()
+                      alternarSelecao(msg, index, e.shiftKey)
+                    }
+                  : undefined
+              }
+              className={cn(
+                'flex flex-col animate-in fade-in slide-in-from-bottom-2 duration-300',
+                isMe ? 'items-end' : 'items-start',
+                modoSelecao && 'cursor-pointer select-none rounded-lg -mx-1 px-1 py-0.5 transition-colors',
+                estaMarcada && 'bg-chat-text/[0.07]',
+              )}
             >
               {shouldShowSenderLabel && (
                 <div
@@ -2554,6 +2847,17 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
               <div
                 className={`flex gap-2.5 items-end w-full ${isMe ? 'justify-end' : 'justify-start'}`}
               >
+              {/* `mr-auto` só nas próprias: a linha delas é `justify-end`, e sem
+                  isso a caixinha colaria na bolha em vez de ficar na margem —
+                  as marcações não formariam uma coluna para o olho seguir. */}
+              {modoSelecao && (
+                <Checkbox
+                  checked={estaMarcada}
+                  tabIndex={-1}
+                  aria-label={estaMarcada ? 'Desmarcar mensagem' : 'Marcar mensagem'}
+                  className={cn('shrink-0 self-center', isMe && 'mr-auto')}
+                />
+              )}
               {!isMe && (
                 shouldShowReceivedAvatar ? (
                   <SmartAvatar
@@ -2862,7 +3166,8 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                              onCopy={handleCopyMessage}
                              onEdit={handleEditMessage}
                              onDelete={setDeleteConfirmMsg}
-  onForward={setEncaminhandoMsg}
+  onForward={(m: any) => setMsgsParaEncaminhar([m])}
+  onSelecionar={iniciarSelecaoCom}
   onReplyPrivately={handleReplyPrivately}
   podeResponderPrivadamente={isGroupContact && !isMe && !!msg.group_participant}
                            />
@@ -2934,7 +3239,8 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                               onCopy={handleCopyMessage}
                               onEdit={handleEditMessage}
                               onDelete={setDeleteConfirmMsg}
-  onForward={setEncaminhandoMsg}
+  onForward={(m: any) => setMsgsParaEncaminhar([m])}
+  onSelecionar={iniciarSelecaoCom}
   onReplyPrivately={handleReplyPrivately}
   podeResponderPrivadamente={isGroupContact && !isMe && !!msg.group_participant}
                             />
@@ -3806,6 +4112,53 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {/* Apagar em lote. Diálogo próprio, e não o de cima com texto no plural:
+            aqui o número precisa aparecer no título — apagar 14 mensagens de uma
+            vez não tem desfazer, e o aviso genérico esconderia o tamanho do
+            estrago. Também avisa quando parte da seleção não é sua. */}
+        <AlertDialog
+          open={apagarSelecionadasAberto}
+          onOpenChange={(open) => { if (!open) setApagarSelecionadasAberto(false) }}
+        >
+          <AlertDialogContent className="bg-chat-panel border-chat-border">
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {apagaveisDaSelecao.length === 1
+                  ? 'Apagar 1 mensagem'
+                  : `Apagar ${apagaveisDaSelecao.length} mensagens`}
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-chat-muted">
+                {apagaveisDaSelecao.length < selecionadas.length && (
+                  <>
+                    Das {selecionadas.length} marcadas, só {apagaveisDaSelecao.length} podem ser
+                    apagadas — as demais foram enviadas pelo contato.{' '}
+                  </>
+                )}
+                A primeira opção remove apenas para você, a segunda remove para todos os
+                participantes.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="gap-2">
+              <AlertDialogCancel className="bg-transparent border-chat-border hover:bg-chat-hover text-chat-text">
+                Cancelar
+              </AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-red-500/10 hover:bg-red-500/20 text-red-400 border-chat-border"
+                onClick={() => apagarSelecao(false)}
+              >
+                Apagar para mim
+              </AlertDialogAction>
+              <AlertDialogAction
+                className="bg-red-600 hover:bg-red-500 text-white"
+                onClick={() => apagarSelecao(true)}
+              >
+                Apagar para todos
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
         <TeamAssignDialog
           open={teamAssignOpen}
           deviceId={device.id}
@@ -3868,14 +4221,15 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         />
 
         <ForwardDialog
-          aberto={!!encaminhandoMsg}
-          onFechar={() => setEncaminhandoMsg(null)}
-          msg={encaminhandoMsg}
+          aberto={!!msgsParaEncaminhar}
+          onFechar={() => setMsgsParaEncaminhar(null)}
+          msgs={msgsParaEncaminhar ?? EMPTY_MSGS}
           conversas={conversas}
           contacts={contacts}
           contactIndex={contactIndex}
           instanceKey={device?.instance_key}
           onEncaminhar={onForwardMessage}
+          onTudoEnviado={limparSelecao}
         />
       </div>
     </div>
