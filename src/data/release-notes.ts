@@ -7,6 +7,21 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.202',
+    date: '2026-08-07 13:00',
+    title: 'Cada um com a sua lista, e tarefas com dono',
+    details: [
+      '👥 A lista de conversas agora tem duas abas: "Geral", com tudo do aparelho, e "Minhas", só com o que está sob a sua responsabilidade — com um contador do quanto está com você',
+      '✋ Voltaram os botões no topo da conversa: Pegar, Designar, Não posso e Finalizar. Pegar uma conversa agora leva ela para a sua aba, e os outros passam a ver que é você quem está atendendo',
+      '➡️ Designar ficou mais direto: a conversa vai para a pessoa na hora, sem ela precisar aceitar antes',
+      '✅ As tarefas ganharam responsável e prazo, e podem ser criadas soltas, sem precisar estar ligadas a um contato. Em Ferramentas → Tarefas você vê as suas, as que você direcionou e, se for administrador, as de todo mundo',
+      '📅 Tarefa com prazo vencido aparece destacada no quadro',
+      '📋 Ao colar algo copiado do Excel, o Central Whats pergunta se você quer mandar como imagem ou como texto — antes ia sempre como print, sem escolha',
+      '❌ Um botão para sair da conversa, ao lado do menu. A tecla Esc continua funcionando igual',
+      '🎤 Quando um áudio não puder ser encaminhado, a mensagem agora diz o motivo em vez de um erro genérico — inclusive quando o áudio é antigo demais e não está mais guardado no servidor',
+    ],
+  },
+  {
     version: '0.0.201',
     date: '2026-08-04 18:00',
     title: 'Relatórios e Licitações agora abrem dentro do Central Whats',
