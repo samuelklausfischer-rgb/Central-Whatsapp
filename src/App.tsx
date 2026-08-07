@@ -27,6 +27,9 @@ import SettingsLayout from './pages/settings/SettingsLayout'
 import Login from './pages/Login'
 import { AuthProvider, useAuth } from './hooks/use-auth'
 import { ToolAccessProvider, useToolAccess } from './hooks/use-tool-access'
+// As ferramentas em si são carregadas pelo `ToolHost` (mesmo `import()`, então o
+// Vite não duplica o pedaço) — a rota abaixo só registra qual está ativa.
+import { FerramentaHospedada } from './components/tools/FerramentaHospedada'
 import { UpdateGate } from './components/UpdateGate'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { canAccessFinanceiroTools } from './lib/permissions'
@@ -45,12 +48,6 @@ const LabelsSettings = lazy(() => import('./pages/settings/LabelsSettings'))
 const AiAssistantSettings = lazy(() => import('./pages/settings/AiAssistantSettings'))
 const InstancesSettings = lazy(() => import('./pages/settings/InstancesSettings'))
 const AdminPage = lazy(() => import('./pages/admin/AdminPage'))
-const AnalisePrn = lazy(() => import('./pages/tools/AnalisePrn'))
-const RateioMobilemed = lazy(() => import('./pages/tools/RateioMobilemed'))
-const RelatorioApp = lazy(() => import('./pages/tools/RelatorioApp'))
-const Relatorios = lazy(() => import('./pages/tools/Relatorios'))
-const Licitacoes = lazy(() => import('./pages/tools/Licitacoes'))
-
 const ProtectedRoute = () => {
   const { isAuthenticated, loading } = useAuth()
   if (loading)
@@ -118,18 +115,28 @@ const App = () => {
                 <Route element={<AdminRoute />}>
                   <Route path="/admin" element={<AdminPage />} />
                 </Route>
+                {/*
+                  As ferramentas não são mais desenhadas pela rota: quem desenha é
+                  o `ToolHost`, dentro do Layout, que não desmonta ao trocar de
+                  tela. A rota virou registrador, então ir ao WhatsApp e voltar
+                  não recomeça o trabalho do zero — e nas duas embutidas por
+                  iframe, não pede login de novo.
+
+                  As guardas ficam onde estavam: quem não tem permissão nem chega
+                  a montar o registrador, logo a ferramenta nunca abre.
+                */}
                 <Route element={<FinanceiroToolRoute />}>
-                  <Route path="/ferramentas/analise-prn" element={<AnalisePrn />} />
-                  <Route path="/ferramentas/rateio-mobilemed" element={<RateioMobilemed />} />
+                  <Route path="/ferramentas/analise-prn" element={<FerramentaHospedada slug="analise-prn" />} />
+                  <Route path="/ferramentas/rateio-mobilemed" element={<FerramentaHospedada slug="rateio-mobilemed" />} />
                 </Route>
                 <Route element={<SuperAdminRoute />}>
-                  <Route path="/ferramentas/relatorio-app" element={<RelatorioApp />} />
+                  <Route path="/ferramentas/relatorio-app" element={<FerramentaHospedada slug="relatorio-app" />} />
                 </Route>
                 <Route element={<ExternalToolRoute tool="relatorios" />}>
-                  <Route path="/ferramentas/relatorios" element={<Relatorios />} />
+                  <Route path="/ferramentas/relatorios" element={<FerramentaHospedada slug="relatorios" />} />
                 </Route>
                 <Route element={<ExternalToolRoute tool="licitacoes" />}>
-                  <Route path="/ferramentas/licitacoes" element={<Licitacoes />} />
+                  <Route path="/ferramentas/licitacoes" element={<FerramentaHospedada slug="licitacoes" />} />
                 </Route>
                 <Route path="/settings" element={<SettingsLayout />}>
                   <Route path="general" element={<GeneralSettings />} />

@@ -6,6 +6,7 @@ import { MobileTabBar } from '@/components/mobile/MobileTabBar'
 import { MobileMoreSheet } from '@/components/mobile/MobileMoreSheet'
 import { GridBackground } from '@/components/ui/grid-background'
 import { BroadcastListener } from '@/components/BroadcastListener'
+import { ToolHost } from '@/components/tools/ToolHost'
 import { useAppHeartbeat } from '@/hooks/use-app-heartbeat'
 import { useAndroidBack } from '@/hooks/use-android-back'
 import { useAndroidShell } from '@/hooks/use-android-shell'
@@ -22,10 +23,15 @@ export default function Layout() {
   // ferramentas embutidas entram aqui porque o iframe herda a altura do pai:
   // dentro do container com padding e max-w-7xl o app filho ficaria espremido
   // e com barra de rolagem dupla.
+  //
+  // TODAS as ferramentas entram aqui, e não só as embutidas: o `ToolHost`
+  // precisa de uma altura definida para dar a cada ferramenta a sua PRÓPRIA área
+  // de rolagem. Sem isso a rolagem seria a do `<main>`, compartilhada, e voltar
+  // de outra tela cairia sempre no topo. O respiro e a largura máxima que o
+  // Layout dava passam a ser aplicados dentro do host, por ferramenta.
   const isFullBleed =
     location.pathname.startsWith('/chat') ||
-    location.pathname === '/ferramentas/relatorios' ||
-    location.pathname === '/ferramentas/licitacoes'
+    location.pathname.startsWith('/ferramentas/')
 
   /**
    * A casca é escolhida por LARGURA, não por "é o APK". Uma janela estreita no
@@ -77,6 +83,15 @@ export default function Layout() {
         <div className={`mx-auto w-full ${isFullBleed ? 'h-full max-w-none' : 'max-w-7xl'}`}>
           <Outlet />
         </div>
+        {/*
+          Filho DIRETO do `<main>`, e fora do container de largura máxima: o host
+          se posiciona por `absolute inset-0` e o `<main>` é o elemento `relative`
+          de referência. Estar fora da troca de rotas é o que faz as ferramentas
+          abertas sobreviverem a uma ida ao WhatsApp; estar fora do container de
+          largura é o que dá a elas a área inteira, sem depender do `max-w-7xl`
+          que só vale para as páginas comuns.
+        */}
+        <ToolHost />
       </main>
 
       {noCelular && !semCasca && <MobileTabBar onAbrirMais={() => setMaisAberto(true)} />}

@@ -3,6 +3,7 @@ import supabase from '@/lib/supabase/client'
 import { clearAllDrafts } from '@/stores/conversationDrafts'
 import { clearDeviceSnapshots } from '@/stores/conversationSummaries'
 import { limparConversas } from '@/stores/conversationMessages'
+import { limparFerramentas } from '@/stores/ferramentasVivas'
 import type { Profile, Device } from '@/lib/supabase/types'
 
 interface AuthContextType {
@@ -227,6 +228,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // desmontagem), então precisa ser limpo explicitamente.
     clearDeviceSnapshots()
     limparConversas()
+    // Ferramenta aberta fica montada de propósito ao trocar de tela — mas isso
+    // vale para a SESSÃO. Sem isto, o próximo a logar na mesma máquina herdaria
+    // a Análise PRN preenchida, e os iframes seguiriam autenticados como o
+    // atendente anterior.
+    limparFerramentas()
     supabase.auth.signOut()
   }, [])
 
