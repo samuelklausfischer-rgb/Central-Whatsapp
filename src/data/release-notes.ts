@@ -7,6 +7,23 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.203',
+    date: '2026-08-07 16:30',
+    title: 'Ferramentas não recomeçam do zero, e o painel fala de pessoas',
+    details: [
+      '🧰 Sair de uma ferramenta para o WhatsApp e voltar não perde mais o que você estava fazendo: formulário preenchido, arquivo escolhido, resultado na tela e o ponto da página continuam lá',
+      '🔐 Em Relatórios e Licitações isso vale também para o login — antes, voltar pedia para entrar de novo',
+      '🗂️ Ao abrir uma segunda ferramenta aparecem abas discretas no topo para alternar entre elas; ficam até três abertas ao mesmo tempo',
+      '👥 O painel agora conta PESSOAS, não mensagens: quantas procuraram a empresa, em quanto tempo foram respondidas (mediana) e qual a taxa de resposta. Dez mensagens podiam ser uma pessoa escrevendo dez linhas ou dez pessoas na fila — o número não distinguia',
+      '✅ Suas tarefas e suas anotações agora aparecem logo ao abrir o painel, sem precisar rolar. Anotação sem contato vinculado também aparece, o que antes não acontecia',
+      '⏰ "Não respondidas" passou a ser só do dia, e dá para clicar no card: abre a lista de quem está esperando, e clicar na pessoa leva direto para a conversa dela',
+      '🔎 Na conversa, busca e etiquetas foram para dentro do menu de três pontinhos, deixando o topo mais limpo. O Ctrl+F continua funcionando igual',
+      '◀️ Sair da conversa agora é uma seta única à esquerda; a tecla Esc continua valendo',
+      '🎨 Os botões de atendimento (Pegar, Designar, Não posso, Finalizar) estavam ilegíveis no tema claro — agora a ação esperada fica destacada e as demais discretas',
+      '🏷️ As etiquetas do contato aparecem ao lado do nome. Marcar e desmarcar passou a funcionar de verdade: havia uma falha antiga que impedia o visto de aparecer',
+    ],
+  },
+  {
     version: '0.0.202',
     date: '2026-08-07 13:00',
     title: 'Cada um com a sua lista, e tarefas com dono',
