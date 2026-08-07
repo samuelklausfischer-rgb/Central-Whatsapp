@@ -77,6 +77,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { createScheduledMessage, type CreateScheduledMessageInput } from '@/services/scheduled_messages'
 import { SmartAvatar } from '@/components/chat/SmartAvatar'
 import { MessageActionsMenu } from '@/components/chat/MessageActionsMenu'
@@ -114,6 +115,7 @@ import { useAuth } from '@/hooks/use-auth'
 import { sendMessage, reactToMessage, deleteMessage, editMessage } from '@/services/messages'
 import { updateContactByJid } from '@/services/contacts'
 import { createNote, getNotesByContact, deleteNote } from '@/services/notes'
+import { createTask, getTaskAssignees, type TaskAssignee } from '@/services/tasks'
 import type { Note, ConversationAssignment } from '@/lib/supabase/types'
 import { ContactNoteIcon } from '@/components/ui/ContactNoteIcon'
 import { TeamAssignDialog } from '@/components/chat/TeamAssignDialog'
@@ -142,14 +144,16 @@ import supabase from '@/lib/supabase/client'
 import { useToast } from '@/hooks/use-toast'
 import { format } from 'date-fns'
 
-// Barra de atendimento (Pegar / Designar / Não posso / Finalizar) escondida a
-// pedido do usuário em 28/07/2026 — ninguém estava usando e ela poluía o topo
-// da conversa. Escondida por flag, e não removida, porque o estado que ela
-// grava continua sendo LIDO em vários lugares (selos da lista, fixação
-// automática, supressão de notificação, filtro de pendente de resposta), e
-// porque a feature recebeu manutenção até 27/07 — se alguém sentir falta,
-// basta voltar para `true`.
-const BARRA_ATENDIMENTO_VISIVEL = false
+// Barra de atendimento (Pegar / Designar / Não posso / Finalizar). Ficou
+// escondida de 28/07 a 07/08/2026 porque ninguém usava e ela poluía o topo da
+// conversa — o estado continuou sendo LIDO nesse período (selos da lista,
+// fixação automática, supressão de notificação, filtro de pendente de resposta),
+// então nada foi removido, só ocultado.
+//
+// De volta em 07/08/2026 junto com as abas Geral/Minhas na lista de conversas:
+// sem uma lista "minhas", pegar uma conversa não levava a lugar nenhum, e era
+// isso que fazia a barra parecer inútil.
+const BARRA_ATENDIMENTO_VISIVEL = true
 
 const PHONE_REGEX = /(?:\+55\s?)?(?:\(?\d{2}\)?[\s-]?\d{4,5}[\s-]?\d{4}|\d{10,13})/g
 
@@ -631,7 +635,10 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false)
   const [taskTitle, setTaskTitle] = useState('')
   const [taskDescription, setTaskDescription] = useState('')
+  const [taskAssignedTo, setTaskAssignedTo] = useState('')
+  const [taskDueDate, setTaskDueDate] = useState('')
   const [isSavingTask, setIsSavingTask] = useState(false)
+  const [taskAssignees, setTaskAssignees] = useState<TaskAssignee[]>([])
   const [isNicknameOpen, setIsNicknameOpen] = useState(false)
   const [nicknameInput, setNicknameInput] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -658,6 +665,17 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const [isScheduleOpen, setIsScheduleOpen] = useState(false)
   const [scheduleDate, setScheduleDate] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
+
+  /**
+   * Colagem que veio com imagem E texto ao mesmo tempo — o caso do Excel, que
+   * põe no clipboard o TSV das células e um bitmap do recorte. Enquanto não
+   * for `null`, o diálogo de escolha está aberto segurando as duas versões.
+   */
+  const [colagemAmbigua, setColagemAmbigua] = useState<{
+    imagens: File[]
+    texto: string
+  } | null>(null)
+
   const fileInputRef = useRef<HTMLInputElement>(null)
   const mediaInputRef = useRef<HTMLInputElement>(null)
   const documentInputRef = useRef<HTMLInputElement>(null)
@@ -881,6 +899,16 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   // foi digitado.
 
   const convKey = conversationDraftKey(device?.id, contact)
+
+  // O ChatWindow NÃO desmonta ao trocar de conversa (é renderizado sem `key`),
+  // então a escolha de colagem pendente sobreviveria à troca e cairia na conversa
+  // errada. Zerado durante o render, no mesmo padrão do modo de seleção.
+  const [convKeyDaColagem, setConvKeyDaColagem] = useState(convKey)
+  if (convKey !== convKeyDaColagem) {
+    setConvKeyDaColagem(convKey)
+    if (colagemAmbigua) setColagemAmbigua(null)
+  }
+
   const convKeyRef = useRef<string | null>(convKey)
   const draftKeyRef = useRef<string | null>(convKey)
   const liveDraftRef = useRef<ConversationDraft>(EMPTY_DRAFT)
@@ -905,6 +933,8 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       noteCategory,
       taskTitle,
       taskDescription,
+      taskAssignedTo,
+      taskDueDate,
       nicknameInput,
     }
   })
@@ -938,6 +968,10 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     setNoteCategory(d.noteCategory)
     setTaskTitle(d.taskTitle)
     setTaskDescription(d.taskDescription)
+    // Draft vazio (conversa nova) não tem responsável salvo — cai para o
+    // próprio usuário, igual ao padrão do handleSaveTask.
+    setTaskAssignedTo(d.taskAssignedTo || user?.id || '')
+    setTaskDueDate(d.taskDueDate)
     setNicknameInput(d.nicknameInput)
 
     // `edit_whatsapp_message` é SECURITY DEFINER e não checa `deleted_at` nem o
@@ -1091,6 +1125,12 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       .catch(() => {})
     getLabels()
       .then(setLabels)
+      .catch(() => {})
+    // Fixo por sessão (não é por conversa): quem pode receber tarefa não muda
+    // ao trocar de contato, então uma busca só no mount evita repetir a RPC a
+    // cada abertura do modal.
+    getTaskAssignees()
+      .then(setTaskAssignees)
       .catch(() => {})
   }, [])
 
@@ -1842,6 +1882,45 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     setAttachments((prev) => prev.filter((_, i) => i !== index))
   }
 
+  /**
+   * Escreve no campo de mensagem na posição do cursor, como o navegador faria
+   * se a colagem não tivesse sido interceptada. Substitui o trecho selecionado,
+   * se houver, e deixa o cursor no fim do que foi colado.
+   */
+  const inserirTextoNoCursor = (texto: string) => {
+    const el = msgTextareaRef.current
+    if (!el) {
+      setMsgText((prev) => prev + texto)
+      return
+    }
+    const inicio = el.selectionStart ?? el.value.length
+    const fim = el.selectionEnd ?? inicio
+    const novo = el.value.slice(0, inicio) + texto + el.value.slice(fim)
+    setMsgText(novo)
+    const cursor = inicio + texto.length
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(cursor, cursor)
+    })
+  }
+
+  const resolverColagem = (como: 'imagem' | 'texto') => {
+    const pendente = colagemAmbigua
+    setColagemAmbigua(null)
+    if (!pendente) return
+    if (como === 'imagem') {
+      addFiles(pendente.imagens)
+      toast({
+        title:
+          pendente.imagens.length > 1
+            ? `${pendente.imagens.length} imagens adicionadas`
+            : 'Imagem adicionada',
+      })
+      return
+    }
+    inserirTextoNoCursor(pendente.texto)
+  }
+
   const handleAiAction = async (action: string, overrideText?: string) => {
     const textToUse = overrideText !== undefined ? overrideText : msgText.trim()
 
@@ -1906,17 +1985,20 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
 
     setIsSavingTask(true)
     try {
-      await supabase.from('tasks').insert({
+      await createTask({
         title: taskTitle.trim(),
-        description: taskDescription.trim(),
-        status: 'pending',
+        description: taskDescription.trim() || null,
         contact_id: contactRecord.id,
         user_id: user.id,
+        assigned_to: taskAssignedTo || user.id,
+        due_date: taskDueDate || null,
       })
       toast({ title: 'Tarefa guardada com sucesso!' })
       setIsTaskModalOpen(false)
       setTaskTitle('')
       setTaskDescription('')
+      setTaskAssignedTo(user.id)
+      setTaskDueDate('')
     } catch (err) {
       toast({ title: 'Erro ao guardar tarefa.', variant: 'destructive' })
     } finally {
@@ -2544,7 +2626,12 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                   <Button
                     className="w-full justify-start h-12 bg-chat-hover hover:bg-chat-hover border-chat-border text-chat-text transition-all"
                     variant="outline"
-                    onClick={() => setIsTaskModalOpen(true)}
+                    onClick={() => {
+                      // Só define um responsável padrão se o rascunho desta conversa
+                      // ainda não tinha um (evita sobrescrever uma escolha anterior).
+                      if (!taskAssignedTo && user) setTaskAssignedTo(user.id)
+                      setIsTaskModalOpen(true)
+                    }}
                   >
                     <ClipboardList className="mr-3 h-5 w-5 text-blue-400" /> Guardar tarefa
                   </Button>
@@ -2652,6 +2739,32 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
               </ScrollArea>
             </SheetContent>
           </Sheet>
+          {/*
+            Sair da conversa pelo mouse. No celular esse papel já é do ArrowLeft
+            no canto esquerdo do cabeçalho, então aqui é só desktop — os dois
+            chamam o MESMO `onBack` do ChatHub, que também é o que o Esc e o
+            voltar do Android disparam.
+
+            O clique fecha a conversa direto, sem passar pela cadeia de
+            precedência do Esc (seleção → busca → conversa): é um botão de sair,
+            e quem clica nele quer sair, não fechar a busca. O `blur` evita que
+            o botão fique realçado enquanto a lista reaparece atrás.
+          */}
+          {!isMobile && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={(e) => {
+                e.currentTarget.blur()
+                onBack?.()
+              }}
+              title="Sair da conversa (Esc)"
+              aria-label="Sair da conversa"
+              className="rounded-full text-chat-text/80 hover:text-chat-text hover:bg-chat-hover flex-shrink-0 ml-1 transition-all duration-300 hover:scale-105"
+            >
+              <X className="h-5 w-5" />
+            </Button>
+          )}
         </div>
       </div>
       )}
@@ -3347,6 +3460,34 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                 className="flex min-h-[80px] w-full rounded-md border border-chat-border bg-chat-panel px-3 py-2 text-sm text-chat-text placeholder:text-chat-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 disabled:cursor-not-allowed disabled:opacity-50 resize-none custom-scrollbar"
               />
             </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-2">
+                <Label>Responsável</Label>
+                <Select value={taskAssignedTo} onValueChange={setTaskAssignedTo}>
+                  <SelectTrigger className="bg-chat-panel border-chat-border text-chat-text">
+                    <SelectValue placeholder="Selecione" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {taskAssignees.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.name || 'Sem nome'}
+                        {a.id === user?.id ? ' (eu)' : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="taskDueDate">Prazo</Label>
+                <Input
+                  id="taskDueDate"
+                  type="date"
+                  value={taskDueDate}
+                  onChange={(e) => setTaskDueDate(e.target.value)}
+                  className="bg-chat-panel border-chat-border text-chat-text"
+                />
+              </div>
+            </div>
           </div>
           <DialogFooter>
             <Button
@@ -3765,6 +3906,15 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                       handleSend(e)
                     }
                   }}
+                  // Copiar do Excel enche o clipboard com DOIS formatos ao mesmo
+                  // tempo: o TSV das células e um bitmap do recorte. Antes a
+                  // imagem sempre vencia — o laço achava o arquivo e nem olhava
+                  // o texto —, então planilha colada virava print sem escolha.
+                  //
+                  // Agora só o caso ambíguo (tem imagem E tem texto) pergunta.
+                  // Print puro continua colando direto como imagem, e texto puro
+                  // nem chega aqui: sem imagem, o `return` deixa o navegador
+                  // fazer a colagem normal do textarea.
                   onPaste={(e) => {
                     const items = e.clipboardData?.items
                     if (!items) return
@@ -3776,11 +3926,19 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                         if (file) imageFiles.push(file)
                       }
                     }
-                    if (imageFiles.length > 0) {
-                      e.preventDefault()
-                      addFiles(imageFiles)
-                      toast({ title: imageFiles.length > 1 ? `${imageFiles.length} imagens adicionadas` : 'Imagem adicionada' })
+                    if (imageFiles.length === 0) return
+
+                    // `text/plain` e não `text/html`: o HTML do Excel vem com a
+                    // tabela inteira e estilos inline, que sujariam a mensagem.
+                    const texto = e.clipboardData?.getData('text/plain') ?? ''
+
+                    e.preventDefault()
+                    if (texto.trim()) {
+                      setColagemAmbigua({ imagens: imageFiles, texto })
+                      return
                     }
+                    addFiles(imageFiles)
+                    toast({ title: imageFiles.length > 1 ? `${imageFiles.length} imagens adicionadas` : 'Imagem adicionada' })
                   }}
                   rows={1}
                 />
@@ -4064,6 +4222,42 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
             </DialogContent>
           </Dialog>
         </form>
+
+        {/*
+          Só aparece quando a colagem trouxe imagem E texto (planilha, tabela de
+          site, e-mail formatado). Fechar sem escolher cancela a colagem inteira,
+          que é o mesmo que não ter colado nada.
+        */}
+        <AlertDialog
+          open={!!colagemAmbigua}
+          onOpenChange={(open) => { if (!open) setColagemAmbigua(null) }}
+        >
+          <AlertDialogContent className="bg-chat-panel border-chat-border">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Colar como imagem ou texto?</AlertDialogTitle>
+              <AlertDialogDescription className="text-chat-muted">
+                O que você copiou veio nos dois formatos. Como imagem vai um print
+                do recorte; como texto vão {colagemAmbigua?.texto.split('\n').length ?? 0} linha
+                {(colagemAmbigua?.texto.split('\n').length ?? 0) === 1 ? '' : 's'} direto no
+                campo de mensagem, onde ainda dá para editar antes de enviar.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="gap-2">
+              <AlertDialogCancel className="bg-transparent border-chat-border hover:bg-chat-hover text-chat-text">
+                Cancelar
+              </AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-transparent border border-chat-border hover:bg-chat-hover text-chat-text"
+                onClick={() => resolverColagem('imagem')}
+              >
+                Colar como imagem
+              </AlertDialogAction>
+              <AlertDialogAction onClick={() => resolverColagem('texto')}>
+                Colar como texto
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         <AlertDialog open={!!deleteConfirmMsg} onOpenChange={(open) => { if (!open) setDeleteConfirmMsg(null) }}>
           <AlertDialogContent className="bg-chat-panel border-chat-border">

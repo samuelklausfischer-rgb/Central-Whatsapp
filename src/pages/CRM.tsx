@@ -1,7 +1,6 @@
-import { useEffect, useState } from 'react'
-import { GripVertical, Trash2 } from 'lucide-react'
-import supabase from '@/lib/supabase/client'
-import type { Task, Contact } from '@/lib/supabase/types'
+import { useEffect, useMemo, useState } from 'react'
+import { GripVertical, Trash2, Plus, CalendarClock, Loader2 } from 'lucide-react'
+import type { Task } from '@/lib/supabase/types'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,61 +11,113 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAuth } from '@/hooks/use-auth'
 import { useRealtime } from '@/hooks/use-realtime'
 import { useToast } from '@/hooks/use-toast'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { cn } from '@/lib/utils'
+import {
+  getTasks,
+  createTask,
+  updateTaskStatus,
+  deleteTask,
+  getTaskAssignees,
+  type TaskWithRelations,
+  type TaskAssignee,
+} from '@/services/tasks'
 
-interface TaskWithContact extends Task {
-  contact?: Contact
+type TabKey = 'minhas' | 'direcionadas' | 'todas'
+
+/** Datas do banco são `date` (sem hora). Formatar sem passar por `Date` evita
+ * que o fuso local empurre "2026-08-07" para o dia anterior na tela. */
+function formatDueDate(iso: string): string {
+  const [y, m, d] = iso.split('-')
+  if (!y || !m || !d) return iso
+  return `${d}/${m}/${y}`
+}
+
+function todayIso(): string {
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = String(now.getMonth() + 1).padStart(2, '0')
+  const d = String(now.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function getInitials(name: string | null | undefined): string {
+  if (!name) return '?'
+  return name.split(' ').slice(0, 2).map((n) => n[0]).join('').toUpperCase()
 }
 
 export default function CRM() {
   const { user } = useAuth()
   const { toast } = useToast()
-  const [tasks, setTasks] = useState<TaskWithContact[]>([])
+  const isAdmin = !!user?.is_admin
+
+  const [tasks, setTasks] = useState<TaskWithRelations[]>([])
   const [loading, setLoading] = useState(true)
   const [taskToDelete, setTaskToDelete] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<TabKey>('minhas')
+
+  const [assignees, setAssignees] = useState<TaskAssignee[]>([])
+  const [loadingAssignees, setLoadingAssignees] = useState(true)
+
+  const [isNewTaskOpen, setIsNewTaskOpen] = useState(false)
+  const [newTitle, setNewTitle] = useState('')
+  const [newDescription, setNewDescription] = useState('')
+  const [newAssignee, setNewAssignee] = useState('')
+  const [newDueDate, setNewDueDate] = useState('')
+  const [isSavingNewTask, setIsSavingNewTask] = useState(false)
 
   const fetchTasks = async () => {
     try {
-      const { data: taskData } = await supabase
-        .from('tasks')
-        .select('*')
-        .order('created_at', { ascending: false })
+      const data = await getTasks()
+      setTasks(data)
+    } catch (err) {
+      console.error(err)
+      toast({ title: 'Erro ao carregar tarefas', variant: 'destructive' })
+    } finally {
+      setLoading(false)
+    }
+  }
 
-      if (!taskData) {
-        setTasks([])
-        return
-      }
-
-      // Fetch contacts separately
-      const contactIds = [...new Set(taskData.map((t: Task) => t.contact_id))]
-      const { data: contactsData } = await supabase
-        .from('contacts')
-        .select('*')
-        .in('id', contactIds)
-
-      const contactMap = new Map<string, Contact>()
-      if (contactsData) {
-        (contactsData as Contact[]).forEach((c) => contactMap.set(c.id, c))
-      }
-
-      const tasksWithContacts = (taskData as Task[]).map((t) => ({
-        ...t,
-        contact: contactMap.get(t.contact_id),
-      }))
-      setTasks(tasksWithContacts)
+  const fetchAssignees = async () => {
+    setLoadingAssignees(true)
+    try {
+      const data = await getTaskAssignees()
+      // Falha na RPC (ou lista vazia por perfil sem nome) não pode travar a
+      // criação de tarefa: cai para "só eu mesmo", que é o que a policy de
+      // INSERT sempre permite.
+      const list = data.length
+        ? data
+        : user
+          ? [{ id: user.id, name: user.name, avatar_url: user.avatar_url, department: user.department }]
+          : []
+      setAssignees(list)
     } catch (err) {
       console.error(err)
     } finally {
-      setLoading(false)
+      setLoadingAssignees(false)
     }
   }
 
   useEffect(() => {
     if (user) {
       fetchTasks()
+      fetchAssignees()
     }
   }, [user])
 
@@ -74,22 +125,52 @@ export default function CRM() {
     fetchTasks()
   })
 
+  const openNewTaskDialog = () => {
+    setNewTitle('')
+    setNewDescription('')
+    setNewDueDate('')
+    setNewAssignee(user?.id || '')
+    setIsNewTaskOpen(true)
+  }
+
+  const handleCreateTask = async () => {
+    if (!user || !newTitle.trim()) return
+    setIsSavingNewTask(true)
+    try {
+      await createTask({
+        title: newTitle.trim(),
+        description: newDescription.trim() || null,
+        user_id: user.id,
+        assigned_to: newAssignee || user.id,
+        due_date: newDueDate || null,
+        contact_id: null,
+      })
+      toast({ title: 'Tarefa criada com sucesso!' })
+      setIsNewTaskOpen(false)
+      fetchTasks()
+    } catch (err) {
+      toast({ title: 'Erro ao criar tarefa. Tente novamente.', variant: 'destructive' })
+    } finally {
+      setIsSavingNewTask(false)
+    }
+  }
+
   const confirmDeleteTask = async () => {
     if (!taskToDelete) return
     const id = taskToDelete
     setTaskToDelete(null)
     try {
-      await supabase.from('tasks').delete().eq('id', id)
+      await deleteTask(id)
       setTasks((prev) => prev.filter((t) => t.id !== id))
-      toast({ title: 'Task deleted successfully' })
+      toast({ title: 'Tarefa apagada com sucesso' })
     } catch (err) {
-      toast({ title: 'Failed to delete task. Please try again.', variant: 'destructive' })
+      toast({ title: 'Falha ao apagar tarefa. Tente novamente.', variant: 'destructive' })
     }
   }
 
-  const updateTaskStatus = async (taskId: string, newStatus: Task['status']) => {
+  const handleUpdateStatus = async (taskId: string, newStatus: Task['status']) => {
     try {
-      await supabase.from('tasks').update({ status: newStatus }).eq('id', taskId)
+      await updateTaskStatus(taskId, newStatus)
     } catch (err) {
       toast({ title: 'Erro ao mover tarefa', variant: 'destructive' })
       fetchTasks()
@@ -117,7 +198,7 @@ export default function CRM() {
     const task = tasks.find((t) => t.id === taskId)
     if (task && task.status !== status) {
       setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status } : t)))
-      updateTaskStatus(taskId, status)
+      handleUpdateStatus(taskId, status)
     }
   }
 
@@ -139,20 +220,49 @@ export default function CRM() {
     },
   ] as const
 
+  // "Direcionadas por mim" só faz sentido para quem já direcionou (na prática,
+  // admin — a policy só deixa outro dono em assigned_to se quem grava é admin).
+  // Mesmo assim a aba fica visível para todos: um dia um não-admin pode ganhar
+  // essa permissão e a tela já está pronta.
+  const visibleTasks = useMemo(() => {
+    if (!user) return []
+    if (activeTab === 'minhas') return tasks.filter((t) => t.assigned_to === user.id)
+    if (activeTab === 'direcionadas') return tasks.filter((t) => t.user_id === user.id && t.assigned_to !== user.id)
+    return tasks
+  }, [tasks, activeTab, user])
+
+  const today = todayIso()
+
   return (
     <div className="flex-1 h-full flex flex-col min-w-0 bg-card relative overflow-hidden">
-      <div className="p-6 pb-2">
-        <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-          Tarefas e Kanban
-        </h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          Arraste e solte as tarefas para alterar o status.
-        </p>
+      <div className="p-6 pb-2 flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
+            Tarefas e Kanban
+          </h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Arraste e solte as tarefas para alterar o status.
+          </p>
+        </div>
+        <Button onClick={openNewTaskDialog} className="gap-1.5">
+          <Plus className="h-4 w-4" />
+          Nova tarefa
+        </Button>
+      </div>
+
+      <div className="px-6">
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabKey)}>
+          <TabsList>
+            <TabsTrigger value="minhas">Minhas</TabsTrigger>
+            <TabsTrigger value="direcionadas">Direcionadas por mim</TabsTrigger>
+            {isAdmin && <TabsTrigger value="todas">Todas</TabsTrigger>}
+          </TabsList>
+        </Tabs>
       </div>
 
       <div className="flex-1 overflow-x-auto p-6 flex gap-6">
         {columns.map((col) => {
-          const columnTasks = tasks.filter((t) => t.status === col.id)
+          const columnTasks = visibleTasks.filter((t) => t.status === col.id)
           return (
             <div
               key={col.id}
@@ -170,11 +280,11 @@ export default function CRM() {
               </div>
               <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
                 {columnTasks.map((task) => {
-                  const contactName =
-                    task.contact?.nickname ||
-                    task.contact?.name ||
-                    `+${task.contact?.remote_jid}`
-                  const avatarUrl = task.contact?.avatar_url
+                  const contactName = task.contact
+                    ? task.contact.nickname || task.contact.name || `+${task.contact.remote_jid}`
+                    : null
+                  const assigneeName = task.assignee?.name || 'Sem responsável'
+                  const isOverdue = !!task.due_date && task.due_date < today && task.status !== 'completed'
                   return (
                     <div
                       key={task.id}
@@ -195,7 +305,7 @@ export default function CRM() {
                             }}
                             onPointerDown={(e) => e.stopPropagation()}
                             className="p-1 hover:bg-red-500/20 rounded text-red-400 hover:text-red-500 transition-colors"
-                            title="Delete task"
+                            title="Apagar tarefa"
                             type="button"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -208,27 +318,45 @@ export default function CRM() {
                           {task.description}
                         </p>
                       )}
-                      <div className="flex items-center justify-between mt-auto pt-3 border-t border-border">
-                        <div className="flex items-center gap-2 max-w-[70%]">
+                      {contactName && (
+                        <div className="flex items-center gap-2 mb-2 max-w-full">
                           <Avatar className="h-5 w-5 border border-border">
-                            <AvatarImage src={avatarUrl || ''} />
+                            <AvatarImage src={task.contact?.avatar_url || ''} />
                             <AvatarFallback className="text-[9px] bg-blue-500/20 text-blue-400">
-                              {contactName?.charAt(0)?.toUpperCase()}
+                              {contactName.charAt(0).toUpperCase()}
                             </AvatarFallback>
                           </Avatar>
-                          <span
-                            className="text-[11px] text-muted-foreground truncate"
-                            title={contactName}
-                          >
+                          <span className="text-[11px] text-muted-foreground truncate" title={contactName}>
                             {contactName}
                           </span>
                         </div>
-                        <span
-                          className="text-[10px] text-muted-foreground/60"
-                          title={new Date(task.created_at).toLocaleString()}
-                        >
-                          {new Date(task.created_at).toLocaleDateString()}
-                        </span>
+                      )}
+                      <div className="flex items-center justify-between gap-2 mt-auto pt-3 border-t border-border">
+                        <div className="flex items-center gap-2 min-w-0 max-w-[60%]">
+                          <Avatar className="h-5 w-5 border border-border">
+                            <AvatarImage src={task.assignee?.avatar_url || ''} />
+                            <AvatarFallback className="text-[9px] bg-purple-500/20 text-purple-400">
+                              {getInitials(task.assignee?.name)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span className="text-[11px] text-muted-foreground truncate" title={assigneeName}>
+                            {assigneeName}
+                          </span>
+                        </div>
+                        {task.due_date && (
+                          <span
+                            className={cn(
+                              'flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0',
+                              isOverdue
+                                ? 'bg-red-500/15 text-red-400 font-medium'
+                                : 'text-muted-foreground/70',
+                            )}
+                            title={isOverdue ? 'Prazo vencido' : 'Prazo'}
+                          >
+                            <CalendarClock className="h-3 w-3" />
+                            {formatDueDate(task.due_date)}
+                          </span>
+                        )}
                       </div>
                     </div>
                   )
@@ -236,6 +364,11 @@ export default function CRM() {
                 {columnTasks.length === 0 && !loading && (
                   <div className="h-24 flex items-center justify-center text-sm text-muted-foreground/50 border border-dashed border-border rounded-lg">
                     Vazio
+                  </div>
+                )}
+                {loading && columnTasks.length === 0 && (
+                  <div className="h-24 flex items-center justify-center text-sm text-muted-foreground/50">
+                    <Loader2 className="h-4 w-4 animate-spin" />
                   </div>
                 )}
               </div>
@@ -247,24 +380,91 @@ export default function CRM() {
       <AlertDialog open={!!taskToDelete} onOpenChange={(open) => !open && setTaskToDelete(null)}>
         <AlertDialogContent className="bg-card border-border text-foreground">
           <AlertDialogHeader>
-            <AlertDialogTitle>Are you sure you want to delete this task?</AlertDialogTitle>
+            <AlertDialogTitle>Tem certeza que deseja apagar esta tarefa?</AlertDialogTitle>
             <AlertDialogDescription className="text-muted-foreground">
-              This action cannot be undone. This will permanently delete the task.
+              Esta ação não pode ser desfeita. A tarefa será apagada permanentemente.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel className="bg-transparent border-border text-foreground hover:bg-accent hover:text-accent-foreground">
-              Cancel
+              Cancelar
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={confirmDeleteTask}
               className="bg-red-500 text-foreground hover:bg-red-600"
             >
-              Delete
+              Apagar
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={isNewTaskOpen} onOpenChange={setIsNewTaskOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Nova tarefa</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <Label htmlFor="newTaskTitle">Nome da tarefa</Label>
+              <Input
+                id="newTaskTitle"
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                placeholder="Ex: Organizar planilha de rateio..."
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="newTaskDesc">Descrição</Label>
+              <Textarea
+                id="newTaskDesc"
+                value={newDescription}
+                onChange={(e) => setNewDescription(e.target.value)}
+                placeholder="Detalhes da tarefa..."
+                className="resize-none"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Responsável</Label>
+              <Select value={newAssignee} onValueChange={setNewAssignee} disabled={loadingAssignees}>
+                <SelectTrigger>
+                  <SelectValue placeholder={loadingAssignees ? 'Carregando...' : 'Selecione'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {assignees.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.name || 'Sem nome'}
+                      {a.id === user?.id ? ' (eu)' : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="newTaskDueDate">Prazo</Label>
+              <Input
+                id="newTaskDueDate"
+                type="date"
+                value={newDueDate}
+                onChange={(e) => setNewDueDate(e.target.value)}
+                className="w-full"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsNewTaskOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button onClick={handleCreateTask} disabled={isSavingNewTask || !newTitle.trim()}>
+              {isSavingNewTask ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Criar tarefa
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

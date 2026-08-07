@@ -156,8 +156,12 @@ export interface Task {
   title: string
   description: string | null
   status: 'pending' | 'in_progress' | 'completed'
-  contact_id: string
+  /** Nula para tarefa avulsa — nem toda tarefa nasce de uma conversa. */
+  contact_id: string | null
+  /** Quem criou. Quem deve executar é `assigned_to`. */
   user_id: string
+  assigned_to: string | null
+  due_date: string | null
   created_at: string
   updated_at: string
 }

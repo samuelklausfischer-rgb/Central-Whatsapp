@@ -72,6 +72,7 @@ export function ForwardDialog({
   const [emAndamento, setEmAndamento] = useState<string | null>(null)
   const [enviando, setEnviando] = useState(false)
   const [destinosComFalha, setDestinosComFalha] = useState<string[]>([])
+  const [causaDaFalha, setCausaDaFalha] = useState('')
   /** Progresso da RODADA em curso (envios feitos / envios previstos). */
   const [progresso, setProgresso] = useState<{ feitos: number; total: number } | null>(null)
 
@@ -91,6 +92,7 @@ export function ForwardDialog({
     setMarcados(new Set())
     setParesEnviados(new Set())
     setDestinosComFalha([])
+    setCausaDaFalha('')
     setEmAndamento(null)
     setProgresso(null)
   }, [aberto, chaveMsgs])
@@ -123,6 +125,7 @@ export function ForwardDialog({
     if (marcados.size === 0 || ok.length === 0 || enviando) return
     setEnviando(true)
     setDestinosComFalha([])
+    setCausaDaFalha('')
 
     // Pares que ainda faltam. Depois de uma falha parcial, "Enviar" é a única
     // ação óbvia para tentar de novo — e refazer a lista inteira duplicaria
@@ -148,6 +151,10 @@ export function ForwardDialog({
     }
 
     const comFalha = new Set<string>()
+    // Último erro real do lote. Sem isto o atendente só via "não foi possível",
+    // e a causa (arquivo que a Evolution não converte, número inválido, tempo
+    // esgotado) morria no catch — inclusive para quem fosse investigar depois.
+    let ultimaCausa = ''
     let feitos = 0
 
     // Envio ESTRITAMENTE SEQUENCIAL: a função de envio no banco faz chamada HTTP
@@ -158,10 +165,12 @@ export function ForwardDialog({
       try {
         await onEncaminhar(destino, legendaParaEncaminhar(msg), anexo)
         setParesEnviados((anterior) => new Set(anterior).add(par(destino, msg.id)))
-      } catch {
+      } catch (err: any) {
         // Uma mensagem que falha não interrompe as demais — mas o destino fica
         // registrado, para o atendente não sair achando que tudo chegou.
         comFalha.add(destino)
+        ultimaCausa = String(err?.message ?? '').trim()
+        console.error('[encaminhar] falhou', { destino, msgId: msg.id, tipo: anexo?.type, err })
       }
       feitos++
       setProgresso({ feitos, total: pendentes.length })
@@ -171,6 +180,7 @@ export function ForwardDialog({
     setEnviando(false)
     setProgresso(null)
     setDestinosComFalha([...comFalha])
+    setCausaDaFalha(comFalha.size > 0 ? ultimaCausa : '')
     // Sobraram só as falhas na seleção: clicar em "Enviar" de novo retoma
     // exatamente os pares que faltam.
     if (comFalha.size === 0) concluir()
@@ -223,6 +233,12 @@ export function ForwardDialog({
                 {destinosComFalha.length === 1
                   ? 'Não foi possível encaminhar tudo para 1 conversa. Toque em Enviar para retomar de onde parou.'
                   : `Não foi possível encaminhar tudo para ${destinosComFalha.length} conversas. Toque em Enviar para retomar de onde parou.`}
+              </p>
+            )}
+
+            {causaDaFalha && (
+              <p className="text-[11px] text-chat-muted break-words">
+                Motivo relatado pelo servidor: {causaDaFalha}
               </p>
             )}
           </>

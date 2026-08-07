@@ -77,7 +77,13 @@ export function podeEncaminhar(msg: any): ResultadoEncaminhavel {
       }
     }
     if (!anexoEstaVivo(url)) {
-      return { pode: false, motivo: 'O arquivo não está mais disponível no servidor.' }
+      return {
+        pode: false,
+        motivo:
+          tipo === 'audio'
+            ? 'Este áudio ficou no servidor antigo e não pode mais ser encaminhado.'
+            : 'O arquivo não está mais disponível no servidor.',
+      }
     }
     return {
       pode: true,
@@ -87,6 +93,13 @@ export function podeEncaminhar(msg: any): ResultadoEncaminhavel {
 
   // Sem anexo: só encaminha se houver texto de verdade.
   if (ehMarcadorTecnico(msg.content)) {
+    // 781 áudios ficaram só com o marcador "[Áudio]" porque o download na
+    // Evolution falhou na hora de receber (parou de acontecer em 18/07). Sem
+    // este caso o atendente lê "não tem conteúdo" olhando para um áudio, e o
+    // recado parece um defeito da tela.
+    if (String(msg.content ?? '').trim() === '[Áudio]') {
+      return { pode: false, motivo: 'Este áudio não chegou a ser salvo no servidor.' }
+    }
     return { pode: false, motivo: 'Esta mensagem não tem conteúdo para encaminhar.' }
   }
   return { pode: true }

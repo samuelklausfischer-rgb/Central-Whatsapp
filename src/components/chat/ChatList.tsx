@@ -19,7 +19,7 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { format, startOfDay, differenceInCalendarDays } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { Check, CheckCheck, BadgeCheck, Smartphone, Search, X, MessageCircle, Pin, RefreshCw } from 'lucide-react'
+import { Check, CheckCheck, BadgeCheck, Smartphone, Search, X, MessageCircle, Pin, RefreshCw, UserCheck } from 'lucide-react'
 import { ContactNoteIcon } from '@/components/ui/ContactNoteIcon'
 import { toggleResponded } from '@/services/conversation_states'
 import { ConversationActionsMenu } from '@/components/chat/ConversationActionsMenu'
@@ -377,6 +377,15 @@ export function ChatList({
   const [activePeriodFilter, setActivePeriodFilter] = useState<'all' | 'today' | 'yesterday' | 'last3' | 'last7'>('all')
   const [activeStatusFilter, setActiveStatusFilter] = useState<'all' | 'unread' | 'pinned'>('all')
   const [showUnrespondedOnly, setShowUnrespondedOnly] = useState(false)
+
+  /**
+   * Geral = tudo do aparelho. Minhas = o que está sob minha responsabilidade.
+   *
+   * Deliberadamente FORA do `activeFilterCount` e do "Remover": o contador existe
+   * para avisar de filtro escondido dentro do popover, e a aba está sempre à
+   * vista. Entrar ali faria "Remover" pular de aba sem o usuário pedir.
+   */
+  const [escopoLista, setEscopoLista] = useState<'geral' | 'minhas'>('geral')
   const [resolvedLocally, setResolvedLocally] = useState<Set<string>>(new Set())
 
   // Conjunto de conversas com rascunho. A store só troca a referência do snapshot
@@ -419,8 +428,33 @@ export function ChatList({
     return map
   }, [conversationStates])
 
+  /**
+   * "Minha" é a conversa que eu peguei ou que me designaram, mais convite
+   * pendente para mim. O convite só nasce se alguém reativar o fluxo antigo de
+   * aceite — hoje Designar atribui direto —, mas continua contando aqui para
+   * não sumir da lista de quem tiver um convite antigo em aberto.
+   */
+  const ehMinha = useCallback(
+    (remoteSender: string) => {
+      if (!currentUserId) return false
+      const a = assignments?.get(remoteSender)
+      if (!a) return false
+      if (a.status === 'finished') return false
+      return a.assigned_to === currentUserId || a.invited_to === currentUserId
+    },
+    [assignments, currentUserId],
+  )
+
+  const totalMinhas = useMemo(
+    () => conversations.filter((conv) => ehMinha(conv.remote_sender)).length,
+    [conversations, ehMinha],
+  )
+
   const filteredConversations = useMemo(() => {
     let filtered = conversations
+    if (escopoLista === 'minhas') {
+      filtered = filtered.filter((conv) => ehMinha(conv.remote_sender))
+    }
     if (activePeriodFilter !== 'all') {
       filtered = filtered.filter((conv) => matchesPeriod(conv.lastMessage?.created_at, activePeriodFilter))
     }
@@ -449,7 +483,7 @@ export function ChatList({
       })
     }
     return filtered
-  }, [deferredSearch, showUnrespondedOnly, showArchived, conversations, contactIndex, statesByKey, selectedDeviceId, activePeriodFilter, activeStatusFilter])
+  }, [deferredSearch, showUnrespondedOnly, showArchived, conversations, contactIndex, statesByKey, selectedDeviceId, activePeriodFilter, activeStatusFilter, escopoLista, ehMinha])
 
   const handleResolve = useCallback((deviceId: string, remoteSender: string) => {
     const key = `${deviceId}:${remoteSender}`
@@ -514,6 +548,37 @@ export function ChatList({
             ))}
           </SelectContent>
         </Select>
+
+        {/*
+          Duas listas do mesmo aparelho. Fica ACIMA da busca porque troca o
+          conjunto sobre o qual a busca e os filtros trabalham — o inverso
+          confundiria quem procura alguém e não acha porque estava em "Minhas".
+        */}
+        <div className="flex items-center gap-1 p-1 rounded-lg bg-chat-panel border border-chat-border">
+          {([
+            { id: 'geral' as const, rotulo: 'Geral' },
+            { id: 'minhas' as const, rotulo: 'Minhas' },
+          ]).map((aba) => (
+            <button
+              key={aba.id}
+              onClick={() => setEscopoLista(aba.id)}
+              aria-pressed={escopoLista === aba.id}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
+                escopoLista === aba.id
+                  ? 'bg-chat-hover text-chat-text'
+                  : 'text-chat-muted hover:text-chat-text',
+              )}
+            >
+              {aba.rotulo}
+              {aba.id === 'minhas' && totalMinhas > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/15 text-blue-400">
+                  {totalMinhas}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
 
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-chat-muted" />
@@ -626,6 +691,20 @@ export function ChatList({
               </p>
               <p className="text-chat-muted/60 text-xs mt-1">
                 Tente buscar por nome, número ou mensagem.
+              </p>
+            </div>
+          )}
+          {/* "Minhas" vazia não é erro nem lista sem dados: é o estado normal de
+              quem ainda não pegou nenhuma conversa. Sem este recado a aba parece
+              quebrada no primeiro uso, quando ninguém pegou nada ainda. */}
+          {escopoLista === 'minhas' && filteredConversations.length === 0 && !deferredSearch && conversations.length > 0 && (
+            <div className="flex flex-col items-center justify-center py-12 text-center px-6">
+              <UserCheck className="h-8 w-8 text-chat-muted/30 mb-3" />
+              <p className="text-chat-muted text-sm leading-relaxed">
+                Nenhuma conversa sob sua responsabilidade.
+              </p>
+              <p className="text-chat-muted/60 text-xs mt-1">
+                Abra uma conversa na aba Geral e toque em Pegar para ela vir para cá.
               </p>
             </div>
           )}

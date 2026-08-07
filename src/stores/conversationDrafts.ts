@@ -58,6 +58,10 @@ export interface ConversationDraft {
   /** Diálogo de tarefa — grava em `tasks.contact_id`. */
   taskTitle: string
   taskDescription: string
+  /** Responsável e prazo do diálogo de tarefa. Vazio = ainda não escolhido
+   *  (ChatWindow cai para o próprio usuário ao abrir o modal). */
+  taskAssignedTo: string
+  taskDueDate: string
   /** Diálogo de apelido — grava em `contacts.nickname`. */
   nicknameInput: string
 }
@@ -75,6 +79,8 @@ export const EMPTY_DRAFT: ConversationDraft = {
   noteCategory: 'geral',
   taskTitle: '',
   taskDescription: '',
+  taskAssignedTo: '',
+  taskDueDate: '',
   nicknameInput: '',
 }
 
@@ -113,7 +119,12 @@ function isDraftEmpty(draft: ConversationDraft): boolean {
     draft.noteContent.trim() === '' &&
     draft.taskTitle.trim() === '' &&
     draft.taskDescription.trim() === '' &&
+    draft.taskDueDate === '' &&
     draft.nicknameInput.trim() === ''
+    // `taskAssignedTo` fica de fora de propósito: o ChatWindow pré-preenche com
+    // o próprio usuário só de abrir o modal, sem nenhuma ação consciente — se
+    // entrasse aqui, esse valor sozinho bastaria para o rascunho nunca ser
+    // considerado vazio e nunca ser limpo ao trocar de conversa.
   )
 }
 

@@ -138,7 +138,13 @@ export const sendMessage = async (data: {
   const parsed = typeof result === 'string' ? JSON.parse(result) : result
   if (parsed?.error) {
     const detail = parsed.status ? ` (status ${parsed.status})` : ''
-    throw new Error(parsed.error + detail)
+    // `body` é a resposta CRUA da Evolution e era descartada aqui. Sem ela todo
+    // erro de envio chegava ao atendente como "Evolution API error (status 400)",
+    // que não distingue número inválido de arquivo que a Evolution não conseguiu
+    // converter. Truncado porque a resposta às vezes traz um stack inteiro.
+    const corpo = typeof parsed.body === 'string' ? parsed.body : parsed.body ? JSON.stringify(parsed.body) : ''
+    const causa = corpo ? `: ${corpo.slice(0, 300)}` : ''
+    throw new Error(parsed.error + detail + causa)
   }
 
   return parsed
