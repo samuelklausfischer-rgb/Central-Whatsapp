@@ -255,3 +255,24 @@ export async function getDeviceAssignments(deviceId: string): Promise<Map<string
   }
   return map
 }
+
+/**
+ * Quando uma conversa conta como RESPONDIDA.
+ *
+ * São duas marcas diferentes: `conversation_user_states.responded_at`, individual
+ * de cada atendente, e `conversation_assignments.global_responded_at`, gravado
+ * quando alguém finaliza o atendimento e válido para todo mundo. Vale a mais
+ * recente das duas.
+ *
+ * Mora aqui, e não na tela, porque a lista de conversas e o painel precisam da
+ * MESMA regra — quando o painel usava só a individual, conversa finalizada por um
+ * colega sumia da lista e continuava contando como não respondida no painel.
+ */
+export function respondidaEm(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): string | null {
+  if (!a) return b ?? null
+  if (!b) return a
+  return new Date(a) > new Date(b) ? a : b
+}

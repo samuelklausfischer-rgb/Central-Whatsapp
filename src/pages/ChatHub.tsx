@@ -29,7 +29,7 @@ import {
   aplicarEventoDeMensagem,
   type EstadoDaConversa,
 } from '@/stores/conversationMessages'
-import { getMyStates, getDeviceAssignments, type ConversationUserState } from '@/services/conversation_states'
+import { getMyStates, getDeviceAssignments, respondidaEm, type ConversationUserState } from '@/services/conversation_states'
 import type { ConversationAssignment } from '@/lib/supabase/types'
 import { registrarVoltar } from '@/lib/android-back'
 import { definirConversaAberta } from '@/stores/mobileChrome'
@@ -48,14 +48,6 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-
-// Combina o "respondido" individual do usuário com o "respondido" compartilhado
-// (gravado quando alguém finaliza o atendimento) e retorna o mais recente dos dois.
-function latestDateString(a: string | null | undefined, b: string | null | undefined): string | null {
-  if (!a) return b ?? null
-  if (!b) return a
-  return new Date(a) > new Date(b) ? a : b
-}
 
 function debounce<A extends any[]>(fn: (...args: A) => void, ms: number): (...args: A) => void {
   let timer: ReturnType<typeof setTimeout>
@@ -140,6 +132,7 @@ export default function ChatHub() {
   const { user, allowedDevices } = useAuth()
   const [searchParams] = useSearchParams()
   const urlDeviceId = searchParams.get('device')
+  const urlJid = searchParams.get('jid')
 
   const [devices, setDevices] = useState<any[]>([])
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null)
@@ -279,6 +272,32 @@ export default function ChatHub() {
       return filteredDevices[0]?.id || null
     })
   }, [allowedDevices, urlDeviceId])
+
+  /**
+   * Abre a conversa pedida na URL (`/chat?device=...&jid=...`).
+   *
+   * O parâmetro `jid` já era ESCRITO em dois lugares (o painel de e-mail, e agora
+   * o card de não respondidos do Dashboard), mas nunca era LIDO aqui — só o
+   * `device`. Resultado: o botão "abrir conversa" do e-mail levava para o chat e
+   * parava na lista, sem nunca abrir ninguém.
+   *
+   * Espera o aparelho certo estar selecionado antes de escolher o contato: a
+   * mesma pessoa pode ter conversa em mais de um aparelho, e aplicar o `jid`
+   * antes da troca abriria a conversa no aparelho errado.
+   */
+  const jidAplicadoRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!urlJid) {
+      jidAplicadoRef.current = null
+      return
+    }
+    if (urlDeviceId && selectedDeviceId !== urlDeviceId) return
+
+    const chave = `${selectedDeviceId ?? ''}:${urlJid}`
+    if (jidAplicadoRef.current === chave) return
+    jidAplicadoRef.current = chave
+    setSelectedContact(urlJid)
+  }, [urlJid, urlDeviceId, selectedDeviceId])
 
   useRealtime('devices', (e) => {
     if (e.action === 'create') {
@@ -995,7 +1014,7 @@ export default function ChatHub() {
           }
         }
 
-        const respondedAt = latestDateString(state?.responded_at, assignment?.global_responded_at)
+        const respondedAt = respondidaEm(state?.responded_at, assignment?.global_responded_at)
 
         return {
           remote_sender: summary.remote_sender,
@@ -1072,7 +1091,7 @@ export default function ChatHub() {
         if (conv.lastMessage?.sender_name && conv.lastMessage.direction === 'inbound') {
           conv.sender_name = conv.lastMessage.sender_name
         }
-        const respondedAt = latestDateString(state?.responded_at, assignment?.global_responded_at)
+        const respondedAt = respondidaEm(state?.responded_at, assignment?.global_responded_at)
         conv.pendingReply = conv.lastMessage?.direction === 'inbound' && (!respondedAt || new Date(conv.lastMessage.created_at) > new Date(respondedAt))
         return conv
       })

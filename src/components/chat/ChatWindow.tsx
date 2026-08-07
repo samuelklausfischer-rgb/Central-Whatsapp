@@ -9,7 +9,7 @@ import {
 } from '@/stores/conversationDrafts'
 import logoUrl from '/logo.png'
 import {
-  ArrowLeft,
+  ChevronLeft,
   Plus,
   Send,
   Paperclip,
@@ -40,7 +40,6 @@ import {
   Clock,
   AlertCircle,
   Play,
-  Eye,
   UserCheck,
   Users,
   Share2,
@@ -119,7 +118,7 @@ import { createTask, getTaskAssignees, type TaskAssignee } from '@/services/task
 import type { Note, ConversationAssignment } from '@/lib/supabase/types'
 import { ContactNoteIcon } from '@/components/ui/ContactNoteIcon'
 import { TeamAssignDialog } from '@/components/chat/TeamAssignDialog'
-import { markConversationRead, markConversationReadGlobal, getConversationViewers, getConversationAssignment, getConversationRecentViewers, type ConversationViewer, type ConversationRecentViewer } from '@/services/conversation_states'
+import { markConversationRead, markConversationReadGlobal, getConversationViewers, getConversationAssignment, type ConversationViewer } from '@/services/conversation_states'
 import { buildContactIndex, resolveContactDisplayName, findContactByIdentifier, isGroupJid, normalizeToDigits } from '@/lib/contacts/normalize'
 import { isPdfFile, isExcelFile } from '@/lib/file-type'
 import { DocumentBubble } from '@/components/chat/DocumentBubble'
@@ -154,6 +153,59 @@ import { format } from 'date-fns'
 // sem uma lista "minhas", pegar uma conversa não levava a lugar nenhum, e era
 // isso que fazia a barra parecer inútil.
 const BARRA_ATENDIMENTO_VISIVEL = true
+
+/**
+ * Estilo dos botões da barra de atendimento.
+ *
+ * POR QUE VIRARAM CONSTANTE
+ * A barra existe em DOIS blocos (sem dono / minha), e Designar, Não posso e
+ * Finalizar aparecem nos dois — eram sete cópias da mesma string de classe para
+ * quatro ações. Copiado assim, um bloco muda e o outro fica para trás.
+ *
+ * POR QUE AS CORES SÃO ESTAS
+ * A versão anterior era `bg-{cor}-500/15` com `text-{cor}-300`, tons pensados só
+ * para fundo escuro. No tema claro o cabeçalho é quase branco (`#F1F2F4`), o
+ * fundo de 15% some nele e o texto claro por cima dava ~1,5:1 de contraste —
+ * texto de 11px precisa de 4,5:1. Era ilegível.
+ */
+
+/** Base comum. O tamanho é de propósito o mesmo de antes: só a cor mudou. */
+const BOTAO_ATENDIMENTO =
+  'flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md transition-colors disabled:opacity-50'
+
+/**
+ * Ação esperada no estado atual: preenchida, texto branco.
+ *
+ * O mesmo tom serve nos dois temas — um azul/verde médio-escuro destaca-se tanto
+ * do cabeçalho claro quanto do escuro, o que dispensa variante `dark:`.
+ *
+ * `blue-600` e não o `bg-primary` do tema: branco sobre `--primary` dá 3,7:1, e
+ * o rótulo de 11px exige 4,5:1. `blue-600` dá 5,2:1. Mesma razão para
+ * `green-700` em vez de `green-600` (que daria 3,1:1).
+ */
+const BOTAO_DESTAQUE_AZUL = `${BOTAO_ATENDIMENTO} bg-blue-600 hover:bg-blue-700 text-white`
+const BOTAO_DESTAQUE_VERDE = `${BOTAO_ATENDIMENTO} bg-green-700 hover:bg-green-800 text-white`
+
+/**
+ * Demais ações: neutras, para não competir com a principal.
+ *
+ * Preenchimento por transparência porque todo neutro do tema (`muted`,
+ * `secondary`, `chat-hover`) é praticamente a cor do próprio cabeçalho no tema
+ * claro — o botão deixaria de parecer botão. `text-chat-text` é o token que o
+ * resto do cabeçalho já usa e acompanha o tema sozinho (>12:1 nos dois).
+ */
+const BOTAO_SECUNDARIO = `${BOTAO_ATENDIMENTO} text-chat-text bg-black/5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/20`
+
+/**
+ * O id da etiqueta de um vínculo de `contact_tags`.
+ *
+ * A busca usa `select('*, label_id(*)')`, então `label_id` chega como objeto —
+ * mas o insert grava um uuid. Tolerar os dois evita depender do formato do
+ * select, que já mudou o comportamento sem ninguém perceber uma vez.
+ */
+function idDaEtiqueta(vinculo: any): string | undefined {
+  return typeof vinculo?.label_id === 'string' ? vinculo.label_id : vinculo?.label_id?.id
+}
 
 const PHONE_REGEX = /(?:\+55\s?)?(?:\(?\d{2}\)?[\s-]?\d{4,5}[\s-]?\d{4}|\d{10,13})/g
 
@@ -625,7 +677,7 @@ const getDateLabel = (value: string) => {
   return format(date, 'dd/MM/yyyy')
 }
 
-export function ChatWindow({ device, contact, conversation, assignment: assignmentProp, contacts, onBack, isMobile, sheetOpen, onSheetOpenChange, onStartConversation, onOpenConversationByJid, onOptimisticSend, onOptimisticConfirm, onOptimisticFail, estadoConversa = 'pronto', onRetryMessages, conversas = [], onForwardMessage }: any) {
+export function ChatWindow({ device, contact, conversation, assignment: assignmentProp, contacts, onBack, sheetOpen, onSheetOpenChange, onStartConversation, onOpenConversationByJid, onOptimisticSend, onOptimisticConfirm, onOptimisticFail, estadoConversa = 'pronto', onRetryMessages, conversas = [], onForwardMessage }: any) {
   const { user } = useAuth()
   const { toast } = useToast()
 
@@ -792,7 +844,6 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   )
   const [viewers, setViewers] = useState<ConversationViewer[]>([])
   const [assignment, setAssignment] = useState<ConversationAssignment | null>(null)
-  const [recentViewers, setRecentViewers] = useState<ConversationRecentViewer[]>([])
   const [teamAssignOpen, setTeamAssignOpen] = useState(false)
   const [loadingAction, setLoadingAction] = useState<'take' | 'waiting' | 'finish' | 'invite_accept' | 'invite_decline' | null>(null)
   const dismissedRef = useRef(false)
@@ -1316,7 +1367,6 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   useEffect(() => {
     if (!device || !contact) {
       setAssignment(null)
-      setRecentViewers([])
       dismissedRef.current = false
       return
     }
@@ -1329,13 +1379,12 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         markConversationReadGlobal(device.id, contact),
       ])
       if (cancelled) return
-      const [asgn, viewers] = await Promise.all([
-        getConversationAssignment(device.id, contact),
-        getConversationRecentViewers(device.id, contact),
-      ])
+      // `getConversationRecentViewers` saiu junto com o indicador de "quem mais
+      // está vendo": era o único consumidor, e mantê-lo seria uma consulta por
+      // conversa aberta sem nada para mostrar.
+      const asgn = await getConversationAssignment(device.id, contact)
       if (cancelled) return
       setAssignment(asgn)
-      setRecentViewers(viewers)
     }
     init()
 
@@ -2016,6 +2065,10 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     if (!device || !contact) return
     try {
       await toggleContactTag(device.id, contact, labelId)
+      // Relê depois de gravar. Sem isto o estado local não muda: o ✓ da lista já
+      // ficava para trás antes, e agora a pastilha no cabeçalho simplesmente não
+      // apareceria até a conversa ser reaberta.
+      await loadContactTags()
     } catch (err) {
       toast({ title: 'Erro ao alterar etiqueta', variant: 'destructive' })
     }
@@ -2229,6 +2282,20 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     sender_name: conversation?.sender_name
   })
 
+  /**
+   * Etiquetas aplicadas a este contato, para mostrar ao lado do nome.
+   *
+   * `getContactTags` busca com `select('*, label_id(*)')`, um embed de chave
+   * estrangeira — então `label_id` volta como OBJETO, não como texto. Comparar
+   * `t.label_id === l.id` dava sempre falso; era por isso que o ✓ da lista de
+   * etiquetas nunca marcava. Aceita as duas formas para não depender do formato
+   * do select.
+   */
+  const etiquetasDoContato = useMemo(
+    () => labels.filter((l: any) => contactTags.some((t: any) => idDaEtiqueta(t) === l.id)),
+    [labels, contactTags],
+  )
+
   // O mesmo diálogo de apelido serve para o contato da conversa e para um
   // participante do grupo — só muda o JID de destino. `null` significa "é o
   // contato da conversa", que é o comportamento antigo.
@@ -2314,16 +2381,25 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       ) : (
       <div className="h-[64px] border-b border-chat-border bg-chat-header shadow-chat flex items-center justify-between px-4 sm:px-5 sticky top-0 z-10 flex-shrink-0">
         <div className="flex items-center gap-3 min-w-0">
-          {isMobile && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onBack}
-              className="-ml-2 mr-1 text-chat-text/80 hover:text-chat-text flex-shrink-0"
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
-          )}
+          {/*
+            Sair da conversa. Um botão só, à esquerda, nas duas telas: antes havia
+            um voltar no celular aqui e um X no desktop do outro lado, dois lugares
+            para a mesma coisa. `Esc` e o voltar do Android disparam este mesmo
+            `onBack`.
+          */}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={(e) => {
+              e.currentTarget.blur()
+              onBack?.()
+            }}
+            title="Sair da conversa (Esc)"
+            aria-label="Sair da conversa"
+            className="-ml-2 mr-1 text-chat-text/80 hover:text-chat-text flex-shrink-0"
+          >
+            <ChevronLeft className="h-5 w-5" />
+          </Button>
           <SmartAvatar
             jid={contact}
             name={displayName}
@@ -2343,32 +2419,44 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
               >
                 <Pencil className="h-3 w-3" />
               </Button>
+              {/*
+                As etiquetas do contato, agora que o ícone delas saiu do topo. O
+                ponto azul de antes só dizia "tem etiqueta"; mostrar as próprias
+                pastilhas informa mais e ocupa o mesmo espaço. Gerenciar é no ⋮.
+              */}
+              {etiquetasDoContato.map((label) => (
+                <span
+                  key={label.id}
+                  title={label.name}
+                  className="text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 max-w-[7rem] truncate"
+                  style={{ backgroundColor: `${label.color}26`, color: label.color }}
+                >
+                  {label.name}
+                </span>
+              ))}
             </h3>
+            {/*
+              Só o status de atendimento. O canal saiu (continua no painel ⋮, e o
+              aparelho ativo já aparece no seletor da lista) e o "quem mais está
+              vendo" também. Os selos perderam o `·` que os separava do canal —
+              sem ele, a linha começaria com um ponto solto.
+            */}
             <div className="flex items-center gap-2 mt-0.5 truncate">
-              <span className="text-xs text-chat-muted font-medium truncate">
-                Canal {device.name}
-              </span>
               {(assignment?.status === 'taken' || assignment?.status === 'assigned') && assignment.assigned_to_name && (
                 <span className="text-xs text-blue-400 truncate shrink-0">
-                  · Com: {assignment.assigned_to_name}
+                  Com: {assignment.assigned_to_name}
                 </span>
               )}
               {assignment?.status === 'waiting' && (
-                <span className="text-xs text-amber-400 truncate shrink-0">· Aguardando atendimento</span>
+                <span className="text-xs text-amber-400 truncate shrink-0">Aguardando atendimento</span>
               )}
               {assignment?.status === 'invited' && (
                 <span className="text-xs text-blue-400 truncate shrink-0">
-                  · Convite {assignment.invited_to === user?.id ? 'para você' : `p/ ${assignment.invited_to_name?.split(' ')[0] ?? '—'}`}
+                  Convite {assignment.invited_to === user?.id ? 'para você' : `p/ ${assignment.invited_to_name?.split(' ')[0] ?? '—'}`}
                 </span>
               )}
               {assignment?.status === 'finished' && (
-                <span className="text-xs text-gray-400 truncate shrink-0">· Finalizado</span>
-              )}
-              {recentViewers.length > 0 && (
-                <span className="text-xs text-chat-muted/70 truncate shrink-0 flex items-center gap-0.5">
-                  <Eye className="h-3 w-3" />
-                  {recentViewers[0].user_name}
-                </span>
+                <span className="text-xs text-gray-400 truncate shrink-0">Finalizado</span>
               )}
             </div>
           </div>
@@ -2380,7 +2468,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
               <button
                 onClick={handleActionTake}
                 disabled={!!loadingAction}
-                className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-blue-500/15 text-blue-300 hover:bg-blue-500/25 disabled:opacity-50 transition-colors"
+                className={BOTAO_DESTAQUE_AZUL}
               >
                 {loadingAction === 'take' ? <Loader2 className="h-3 w-3 animate-spin" /> : <UserCheck className="h-3 w-3" />}
                 Pegar
@@ -2388,7 +2476,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
               <button
                 onClick={() => setTeamAssignOpen(true)}
                 disabled={!!loadingAction}
-                className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-gray-500/15 text-gray-300 hover:bg-gray-500/25 disabled:opacity-50 transition-colors"
+                className={BOTAO_SECUNDARIO}
               >
                 <Users className="h-3 w-3" />
                 Designar
@@ -2396,7 +2484,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
               <button
                 onClick={handleActionWaiting}
                 disabled={!!loadingAction}
-                className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 disabled:opacity-50 transition-colors"
+                className={BOTAO_SECUNDARIO}
               >
                 {loadingAction === 'waiting' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Clock className="h-3 w-3" />}
                 Não posso
@@ -2404,7 +2492,9 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
               <button
                 onClick={handleActionFinish}
                 disabled={!!loadingAction}
-                className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-green-500/15 text-green-300 hover:bg-green-500/25 disabled:opacity-50 transition-colors"
+                // Neutro aqui: com a conversa ainda sem dono, a ação esperada é
+                // Pegar. Finalizar segue disponível, só não disputa a atenção.
+                className={BOTAO_SECUNDARIO}
               >
                 {loadingAction === 'finish' ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3 w-3" />}
                 Finalizar
@@ -2416,7 +2506,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
               <button
                 onClick={() => setTeamAssignOpen(true)}
                 disabled={!!loadingAction}
-                className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-gray-500/15 text-gray-300 hover:bg-gray-500/25 disabled:opacity-50 transition-colors"
+                className={BOTAO_SECUNDARIO}
               >
                 <Users className="h-3 w-3" />
                 Designar
@@ -2424,7 +2514,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
               <button
                 onClick={handleActionWaiting}
                 disabled={!!loadingAction}
-                className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 disabled:opacity-50 transition-colors"
+                className={BOTAO_SECUNDARIO}
               >
                 {loadingAction === 'waiting' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Clock className="h-3 w-3" />}
                 Não posso
@@ -2432,73 +2522,21 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
               <button
                 onClick={handleActionFinish}
                 disabled={!!loadingAction}
-                className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-green-500/15 text-green-300 hover:bg-green-500/25 disabled:opacity-50 transition-colors"
+                // Em destaque aqui: a conversa já é minha, e encerrar é o que se
+                // espera ao terminar o atendimento.
+                className={BOTAO_DESTAQUE_VERDE}
               >
                 {loadingAction === 'finish' ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3 w-3" />}
                 Finalizar
               </button>
             </>
           )}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => (isFindOpen ? closeFind() : openFind())}
-            title="Buscar na conversa (Ctrl+F)"
-            className={`rounded-full flex-shrink-0 transition-all duration-300 hover:scale-105 ${
-              isFindOpen
-                ? 'text-chat-text bg-chat-hover'
-                : 'text-chat-text/80 hover:text-chat-text hover:bg-chat-hover'
-            }`}
-          >
-            <Search className="h-5 w-5" />
-          </Button>
-          <Popover open={isLabelsOpen} onOpenChange={setIsLabelsOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-chat-text/80 hover:text-chat-text hover:bg-chat-hover rounded-full flex-shrink-0 relative transition-all duration-300 hover:scale-105"
-              >
-                <Tags className="h-5 w-5" />
-                {contactTags.length > 0 && (
-                  <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-blue-500 rounded-full border border-background" />
-                )}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent
-              align="end"
-              className="w-56 p-2 bg-chat-panel border-chat-border"
-            >
-              <div className="mb-2 px-2 pb-2 pt-1 border-b border-chat-border text-xs font-semibold text-chat-muted">
-                Etiquetas do Contato
-              </div>
-              {labels.length === 0 ? (
-                <div className="text-xs text-center text-chat-muted p-2">
-                  Nenhuma etiqueta ainda.
-                </div>
-              ) : (
-                <div className="space-y-1">
-                  {labels.map((label) => {
-                    const isSelected = contactTags.some((t: any) => t.label_id === label.id)
-                    return (
-                      <button
-                        key={label.id}
-                        onClick={() => handleToggleLabel(label.id)}
-                        className="w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded hover:bg-chat-hover transition-colors"
-                      >
-                        <div
-                          className="w-3 h-3 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: label.color }}
-                        />
-                        <span className="flex-1 text-left truncate">{label.name}</span>
-                        {isSelected && <Check className="w-4 h-4 text-primary" />}
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-            </PopoverContent>
-          </Popover>
+          {/*
+            Busca e etiquetas saíram daqui para dentro do painel ⋮ — o topo
+            estava com atendimento, busca, etiquetas, menu e fechar disputando
+            espaço. O atalho Ctrl+F continua valendo: `openFind` é registrado no
+            keydown e nunca dependeu deste botão.
+          */}
           <Sheet open={sheetOpen} onOpenChange={onSheetOpenChange}>
             <SheetTrigger asChild>
               <Button
@@ -2553,6 +2591,73 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
 
               <ScrollArea className="flex-1 min-h-0">
                 <div className="px-6 py-5 space-y-3">
+                  {/*
+                    Buscar FECHA o painel antes de abrir a barra: a busca e os
+                    destaques ficam na conversa, atrás deste painel. Sem fechar, o
+                    clique pareceria não ter feito nada.
+                  */}
+                  <Button
+                    className="w-full justify-start h-12 bg-chat-hover hover:bg-chat-hover border-chat-border text-chat-text transition-all"
+                    variant="outline"
+                    onClick={() => {
+                      onSheetOpenChange?.(false)
+                      openFind()
+                    }}
+                  >
+                    <Search className="h-4 w-4 mr-3 text-chat-muted" />
+                    Buscar na conversa
+                    <span className="ml-auto text-xs text-chat-muted">Ctrl+F</span>
+                  </Button>
+
+                  <Button
+                    className="w-full justify-start h-12 bg-chat-hover hover:bg-chat-hover border-chat-border text-chat-text transition-all"
+                    variant="outline"
+                    onClick={() => setIsLabelsOpen((v) => !v)}
+                  >
+                    <Tags className="h-4 w-4 mr-3 text-chat-muted" />
+                    Etiquetas
+                    {etiquetasDoContato.length > 0 && (
+                      <span className="ml-2 text-xs text-chat-muted">
+                        {etiquetasDoContato.length}
+                      </span>
+                    )}
+                    <ChevronDown
+                      className={cn(
+                        'h-4 w-4 ml-auto text-chat-muted transition-transform',
+                        isLabelsOpen && 'rotate-180',
+                      )}
+                    />
+                  </Button>
+                  {isLabelsOpen && (
+                    <div className="rounded-md border border-chat-border bg-chat-hover/40 p-2">
+                      {labels.length === 0 ? (
+                        <div className="text-xs text-center text-chat-muted p-2">
+                          Nenhuma etiqueta ainda.
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          {labels.map((label: any) => {
+                            const isSelected = contactTags.some((t: any) => idDaEtiqueta(t) === label.id)
+                            return (
+                              <button
+                                key={label.id}
+                                onClick={() => handleToggleLabel(label.id)}
+                                className="w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded hover:bg-chat-hover transition-colors"
+                              >
+                                <div
+                                  className="w-3 h-3 rounded-full flex-shrink-0"
+                                  style={{ backgroundColor: label.color }}
+                                />
+                                <span className="flex-1 text-left truncate">{label.name}</span>
+                                {isSelected && <Check className="w-4 h-4 text-primary" />}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Galeria: mesma posição do WhatsApp — primeiro item dos dados
                       do contato. Só monta quando aberta, para não disparar as
                       três consultas toda vez que alguém abre o painel. */}
@@ -2739,32 +2844,6 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
               </ScrollArea>
             </SheetContent>
           </Sheet>
-          {/*
-            Sair da conversa pelo mouse. No celular esse papel já é do ArrowLeft
-            no canto esquerdo do cabeçalho, então aqui é só desktop — os dois
-            chamam o MESMO `onBack` do ChatHub, que também é o que o Esc e o
-            voltar do Android disparam.
-
-            O clique fecha a conversa direto, sem passar pela cadeia de
-            precedência do Esc (seleção → busca → conversa): é um botão de sair,
-            e quem clica nele quer sair, não fechar a busca. O `blur` evita que
-            o botão fique realçado enquanto a lista reaparece atrás.
-          */}
-          {!isMobile && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={(e) => {
-                e.currentTarget.blur()
-                onBack?.()
-              }}
-              title="Sair da conversa (Esc)"
-              aria-label="Sair da conversa"
-              className="rounded-full text-chat-text/80 hover:text-chat-text hover:bg-chat-hover flex-shrink-0 ml-1 transition-all duration-300 hover:scale-105"
-            >
-              <X className="h-5 w-5" />
-            </Button>
-          )}
         </div>
       </div>
       )}

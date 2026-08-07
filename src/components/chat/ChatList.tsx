@@ -19,9 +19,8 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { format, startOfDay, differenceInCalendarDays } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { Check, CheckCheck, BadgeCheck, Smartphone, Search, X, MessageCircle, Pin, RefreshCw, UserCheck } from 'lucide-react'
+import { Check, CheckCheck, Smartphone, Search, X, MessageCircle, Pin, RefreshCw, UserCheck } from 'lucide-react'
 import { ContactNoteIcon } from '@/components/ui/ContactNoteIcon'
-import { toggleResponded } from '@/services/conversation_states'
 import { ConversationActionsMenu } from '@/components/chat/ConversationActionsMenu'
 import { ConversationActionsContent } from '@/components/chat/ConversationActionsContent'
 import ConversationFilters from '@/components/chat/ConversationFilters'
@@ -125,8 +124,6 @@ const ChatRow = memo(function ChatRow({
   isSelected,
   selectedDevice,
   selectedDeviceId,
-  resolvedLocally,
-  handleResolve,
   onSelectContact,
   onOpenInfo,
   isMobile,
@@ -144,8 +141,6 @@ const ChatRow = memo(function ChatRow({
   isSelected: boolean
   selectedDevice: any
   selectedDeviceId: string | null
-  resolvedLocally: Set<string>
-  handleResolve: (deviceId: string, remoteSender: string) => void
   onSelectContact: (id: string) => void
   onOpenInfo: (deviceId: string, remoteSender: string) => void
   isMobile: boolean
@@ -161,7 +156,9 @@ const ChatRow = memo(function ChatRow({
     sender_name: conv.sender_name
   })
   const conversationDeviceId = selectedDeviceId || conv.lastMessage?.device_id
-  const isPendingReply = conv.pendingReply && !resolvedLocally.has(`${conversationDeviceId || ''}:${conv.remote_sender}`)
+  // Sem supressão local: ela existia para o botão verde sumir na hora do clique.
+  // O menu ⋮ já chama `onStateChange`, que rebusca e atualiza sozinho.
+  const isPendingReply = conv.pendingReply
   const isUnread = conv.unread_count > 0
   const unreadBadgeCount = Math.max(1, conv.unread_count)
 
@@ -271,19 +268,13 @@ const ChatRow = memo(function ChatRow({
                 {unreadBadgeCount}
               </span>
             </div>
-          ) : isPendingReply ? (
-            <div
-              onClick={(e) => {
-                e.stopPropagation()
-                handleResolve(conversationDeviceId || '', conv.remote_sender)
-              }}
-              className="relative h-7 w-7 rounded-full bg-emerald-500 flex items-center justify-center hover:bg-emerald-600 shrink-0 cursor-pointer transition-all shadow-sm"
-              title="Finalizar conversa"
-            >
-              <span className="absolute inset-0 rounded-full bg-emerald-400 animate-ping opacity-25 pointer-events-none" />
-              <BadgeCheck className="h-4 w-4 text-white relative z-10" />
-            </div>
           ) : null}
+          {/*
+            A bolinha verde pulsante saiu daqui. Ela dizia "Finalizar conversa" no
+            title mas chamava `toggleResponded` — marcar como respondida, que é
+            outra coisa. A função continua a um clique de distância, no menu ⋮ ao
+            lado ("Marcar como respondido").
+          */}
           {conversationDeviceId && (
             <ConversationActionsMenu
               deviceId={conversationDeviceId}
@@ -386,7 +377,6 @@ export function ChatList({
    * vista. Entrar ali faria "Remover" pular de aba sem o usuário pedir.
    */
   const [escopoLista, setEscopoLista] = useState<'geral' | 'minhas'>('geral')
-  const [resolvedLocally, setResolvedLocally] = useState<Set<string>>(new Set())
 
   // Conjunto de conversas com rascunho. A store só troca a referência do snapshot
   // quando o CONJUNTO muda — digitar dentro de uma conversa que já tem rascunho
@@ -484,17 +474,6 @@ export function ChatList({
     }
     return filtered
   }, [deferredSearch, showUnrespondedOnly, showArchived, conversations, contactIndex, statesByKey, selectedDeviceId, activePeriodFilter, activeStatusFilter, escopoLista, ehMinha])
-
-  const handleResolve = useCallback((deviceId: string, remoteSender: string) => {
-    const key = `${deviceId}:${remoteSender}`
-    setResolvedLocally((prev) => {
-      const next = new Set(prev)
-      next.add(key)
-      return next
-    })
-    toggleResponded(deviceId, remoteSender)
-    onStateChange?.()
-  }, [onStateChange])
 
   const isSearching = deferredSearch !== searchQuery
 
@@ -668,8 +647,6 @@ export function ChatList({
                 isSelected={isSelected}
                 selectedDevice={selectedDevice}
                 selectedDeviceId={selectedDeviceId}
-                resolvedLocally={resolvedLocally}
-                handleResolve={handleResolve}
                 onSelectContact={onSelectContact}
                 onOpenInfo={onOpenInfo}
                 isMobile={isMobile}

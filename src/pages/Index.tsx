@@ -11,8 +11,8 @@ import {
 import {
   Smartphone,
   MessageSquareText,
-  ArrowDownLeft,
   ArrowUpRight,
+  Users,
   Bell,
   Wifi,
   WifiOff,
@@ -24,17 +24,29 @@ import {
   TrendingDown,
   Minus,
   Clock,
+  ListTodo,
+  AlertTriangle,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { useNavigate, Link } from 'react-router-dom'
 import { getDevices } from '@/services/devices'
 import { getNotes } from '@/services/notes'
+import { getTasks, type TaskWithRelations } from '@/services/tasks'
 import { getScheduledMessages } from '@/services/scheduled_messages'
 import {
   getDashboardStats,
   getChartData,
   getTopConversations,
   getConversationMetrics,
+  getContactMetrics,
+  type ContactMetrics,
   type DashboardFilters,
   type PeriodStats,
   type ChartPoint,
@@ -83,22 +95,34 @@ function getDateRange(period: Period): { from: Date; to: Date } {
 // ─── KPI Card ─────────────────────────────────────────────────────────────────
 
 function KpiCard({
-  label, value, sub, icon, accentBg, accentText, trend,
+  label, value, valueText, sub, icon, accentBg, accentText, trend, onClick,
 }: {
   label: string; value: number; sub?: string; icon: React.ReactNode
   accentBg: string; accentText: string
   trend?: 'up' | 'down' | 'neutral'
+  /** Texto no lugar do número — para valores que não são contagem, como duração. */
+  valueText?: string
+  /** Quando presente, o card vira botão — usado por "Não respondidas hoje". */
+  onClick?: () => void
 }) {
   const TrendIcon = trend === 'up' ? TrendingUp : trend === 'down' ? TrendingDown : Minus
   const trendColor = trend === 'up' ? 'text-emerald-500' : trend === 'down' ? 'text-rose-500' : 'text-muted-foreground'
   return (
-    <Card className="relative overflow-hidden border-border bg-card">
+    <Card
+      className={`relative overflow-hidden border-border bg-card ${onClick ? 'cursor-pointer hover:bg-accent/40 transition-colors' : ''}`}
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } : undefined}
+    >
       <div className={`absolute top-0 left-0 w-1 h-full ${accentBg}`} />
       <CardContent className="pt-5 pb-4 pl-5">
         <div className="flex items-start justify-between">
           <div>
             <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">{label}</p>
-            <p className="text-3xl font-bold text-foreground tabular-nums">{value.toLocaleString('pt-BR')}</p>
+            <p className="text-3xl font-bold text-foreground tabular-nums">
+              {valueText ?? value.toLocaleString('pt-BR')}
+            </p>
             {sub && (
               <p className={`text-xs mt-1 flex items-center gap-1 ${trendColor}`}>
                 {trend && <TrendIcon className="h-3 w-3" />}
@@ -111,6 +135,69 @@ function KpiCard({
       </CardContent>
     </Card>
   )
+}
+
+/**
+ * Duração curta e legível. Em minutos e segundos até uma hora, porque é essa a
+ * ordem de grandeza real do atendimento (a mediana medida em produção é de
+ * pouco mais de quatro minutos) — mostrar "0,07 h" esconderia a informação.
+ */
+function formatarDuracao(segundos: number | null): string {
+  if (segundos === null || Number.isNaN(segundos)) return '—'
+  if (segundos < 60) return `${Math.round(segundos)}s`
+  if (segundos < 3600) {
+    const m = Math.floor(segundos / 60)
+    const s = Math.round(segundos % 60)
+    return s ? `${m}min ${s}s` : `${m}min`
+  }
+  const h = Math.floor(segundos / 3600)
+  const m = Math.round((segundos % 3600) / 60)
+  return m ? `${h}h ${m}min` : `${h}h`
+}
+
+// ─── Estado dos painéis de trabalho ───────────────────────────────────────────
+
+/**
+ * Carregando, erro e vazio são TRÊS coisas diferentes e cada uma tem a sua
+ * mensagem. O Dashboard antigo tratava as três como vazio, então uma queda de
+ * rede virava "nada pendente" — a leitura oposta à realidade, justamente num
+ * painel cuja função é avisar do que falta fazer.
+ */
+function EstadoPainel({
+  carregando, erro, vazio, mensagemVazio, aoTentarDeNovo,
+}: {
+  carregando: boolean; erro: boolean; vazio: boolean
+  mensagemVazio: string; aoTentarDeNovo?: () => void
+}) {
+  if (carregando) {
+    return (
+      <div className="space-y-2" aria-busy="true">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="h-11 rounded-lg bg-muted/40 animate-pulse" />
+        ))}
+      </div>
+    )
+  }
+  if (erro) {
+    return (
+      <div className="flex flex-col items-center justify-center py-6 text-center gap-2">
+        <AlertTriangle className="h-6 w-6 text-amber-500" />
+        <p className="text-xs text-muted-foreground">Não deu para carregar agora.</p>
+        {aoTentarDeNovo && (
+          <button
+            onClick={aoTentarDeNovo}
+            className="text-xs font-medium text-foreground underline underline-offset-2 hover:opacity-80"
+          >
+            Tentar de novo
+          </button>
+        )}
+      </div>
+    )
+  }
+  if (vazio) {
+    return <p className="text-xs text-muted-foreground text-center py-6">{mensagemVazio}</p>
+  }
+  return null
 }
 
 // ─── Tooltip ──────────────────────────────────────────────────────────────────
@@ -211,12 +298,23 @@ export default function Index() {
 
   const [devices, setDevices] = useState<any[]>([])
   const [notes, setNotes] = useState<Note[]>([])
+  const [tasks, setTasks] = useState<TaskWithRelations[]>([])
   const [scheduled, setScheduled] = useState<ScheduledMessageWithContact[]>([])
+
+  // Erro e carregamento SEPARADOS de "lista vazia". O Dashboard engolia toda
+  // falha com `.catch(() => [])`, e um card vazio por queda de rede se lê como
+  // "não tenho nada pendente" — a mensagem exatamente oposta à verdade.
+  const [trabalhoCarregando, setTrabalhoCarregando] = useState(true)
+  const [erroTarefas, setErroTarefas] = useState(false)
+  const [erroNotas, setErroNotas] = useState(false)
   const [stats, setStats] = useState<PeriodStats>({ total: 0, inbound: 0, outbound: 0, sentByMe: 0, byDevice: {} })
   const [chart, setChart] = useState<ChartPoint[]>([])
   const [topConvos, setTopConvos] = useState<ConversationActivity[]>([])
   const [loadingStats, setLoadingStats] = useState(true)
-  const [convMetrics, setConvMetrics] = useState<ConversationMetrics>({ unread: 0, pendingReplies: 0 })
+  const [convMetrics, setConvMetrics] = useState<ConversationMetrics>({ unread: 0, pendingReplies: 0, pendingList: [] })
+  const [painelPendentes, setPainelPendentes] = useState(false)
+  const [contatos, setContatos] = useState<ContactMetrics>({ pessoas: 0, perguntas: 0, respondidas: 0, medianaSegundos: null })
+  const [carregandoContatos, setCarregandoContatos] = useState(true)
   const [metricsRev, setMetricsRev] = useState(0)
 
   const deviceNameMap = useMemo(
@@ -237,14 +335,26 @@ export default function Index() {
 
   // Load static data once
   useEffect(() => {
-    Promise.all([
+    setTrabalhoCarregando(true)
+    // `allSettled` e não `all`: tarefas e anotações são painéis independentes —
+    // uma falhar não pode apagar a outra da tela.
+    Promise.allSettled([
       getDevices(),
       getNotes(),
-      getScheduledMessages().catch(() => []),
-    ]).then(([devs, nts, sched]) => {
-      setDevices(devs)
-      setNotes(nts)
-      setScheduled(sched as ScheduledMessageWithContact[])
+      getScheduledMessages(),
+      getTasks(),
+    ]).then(([devs, nts, sched, tks]) => {
+      if (devs.status === 'fulfilled') setDevices(devs.value)
+
+      setErroNotas(nts.status === 'rejected')
+      if (nts.status === 'fulfilled') setNotes(nts.value)
+
+      if (sched.status === 'fulfilled') setScheduled(sched.value as ScheduledMessageWithContact[])
+
+      setErroTarefas(tks.status === 'rejected')
+      if (tks.status === 'fulfilled') setTasks(tks.value)
+
+      setTrabalhoCarregando(false)
     })
   }, [])
 
@@ -262,6 +372,19 @@ export default function Index() {
       setLoadingStats(false)
     })
   }, [buildFilters])
+
+  // Pessoas atendidas e tempo de resposta — uma RPC agregada, em vez de baixar
+  // o período inteiro de mensagens para somar aqui.
+  useEffect(() => {
+    const deviceIds = selectedDeviceId ? [selectedDeviceId] : devices.map((d) => d.id)
+    if (!deviceIds.length) return
+    const { from, to } = getDateRange(period)
+    setCarregandoContatos(true)
+    getContactMetrics(deviceIds, from, to)
+      .then(setContatos)
+      .catch(() => setContatos({ pessoas: 0, perguntas: 0, respondidas: 0, medianaSegundos: null }))
+      .finally(() => setCarregandoContatos(false))
+  }, [devices, selectedDeviceId, period])
 
   // Load real unread + pending replies metrics
   useEffect(() => {
@@ -288,6 +411,16 @@ export default function Index() {
     if (e.action === 'create') setNotes((p) => [e.record as Note, ...p])
     else if (e.action === 'update') setNotes((p) => p.map((n) => n.id === e.record.id ? e.record as Note : n))
     else if (e.action === 'delete') setNotes((p) => p.filter((n) => n.id !== e.record.id))
+  })
+
+  // Tarefa muda de dono/status em outra tela (ou outra pessoa direciona uma para
+  // mim) — o card precisa refletir sem F5. Recarrega a lista inteira: `tasks`
+  // traz responsável/criador/contato juntos, e remontar isso a partir do payload
+  // cru do Realtime daria uma linha pela metade.
+  useRealtime('tasks', () => {
+    getTasks()
+      .then((t) => { setTasks(t); setErroTarefas(false) })
+      .catch(() => setErroTarefas(true))
   })
 
   useRealtime('conversation_user_states', () => setMetricsRev((v) => v + 1))
@@ -340,7 +473,28 @@ export default function Index() {
     .filter((s) => s.status === 'pending')
     .filter((s) => !selectedDeviceId || s.device_id === selectedDeviceId)
 
-  const recentNotes = notes.filter((n) => n.contact_jid).slice(0, 4)
+  // SEM filtro de `contact_jid`: anotação solta, sem contato vinculado, nunca
+  // aparecia no Dashboard — e é justamente onde ficam os lembretes gerais.
+  const recentNotes = notes.slice(0, 4)
+
+  /** O que está na minha mão: atribuídas a mim e ainda não concluídas. */
+  const minhasTarefas = useMemo(() => {
+    if (!user?.id) return []
+    return tasks
+      .filter((t) => t.assigned_to === user.id && t.status !== 'completed')
+      .sort((a, b) => {
+        // Sem prazo vai para o fim: quem tem data marcada é que corre risco.
+        if (!a.due_date && !b.due_date) return 0
+        if (!a.due_date) return 1
+        if (!b.due_date) return -1
+        return a.due_date.localeCompare(b.due_date)
+      })
+  }, [tasks, user?.id])
+
+  // Comparação por string `YYYY-MM-DD`. Passar por `new Date()` num campo `date`
+  // puro traz o fuso junto e faz a tarefa de hoje aparecer como atrasada.
+  const hojeISO = new Date().toLocaleDateString('sv-SE')
+  const tarefasAtrasadas = minhasTarefas.filter((t) => t.due_date && t.due_date < hojeISO).length
 
   const visibleDevices = selectedDeviceId
     ? devices.filter((d) => d.id === selectedDeviceId)
@@ -396,32 +550,58 @@ export default function Index() {
 
       {/* ── KPIs ── */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        {/*
+          Pessoa, não mensagem. Contagem de mensagem não distinguia uma pessoa
+          mandando dez linhas de dez pessoas esperando atendimento — era o número
+          grande que não respondia a pergunta que importa.
+        */}
         <KpiCard
-          label={`Mensagens — ${periodLabel}`}
-          value={stats.total}
-          sub={loadingStats ? 'carregando...' : `${stats.inbound} recebidas · ${stats.outbound} enviadas`}
-          icon={<MessageSquareText className="h-5 w-5 text-blue-500" />}
+          label={`Pessoas atendidas — ${periodLabel}`}
+          value={contatos.pessoas}
+          sub={
+            carregandoContatos
+              ? 'carregando...'
+              : selectedDeviceId ? 'neste aparelho' : `em ${connectedCount} aparelhos`
+          }
+          icon={<Users className="h-5 w-5 text-blue-500" />}
           accentBg="bg-blue-500"
           accentText="text-blue-500"
           trend="neutral"
         />
         <KpiCard
-          label={`Recebidas — ${periodLabel}`}
-          value={stats.inbound}
-          sub={selectedDeviceId ? 'neste aparelho' : `de ${connectedCount} aparelhos`}
-          icon={<ArrowDownLeft className="h-5 w-5 text-emerald-500" />}
+          label={`Tempo de resposta — ${periodLabel}`}
+          value={0}
+          valueText={carregandoContatos ? '—' : formatarDuracao(contatos.medianaSegundos)}
+          // Mediana, não média: medido em produção, a média dá ~3h47 contra 4min
+          // de mediana. Meia dúzia de conversas esquecidas de madrugada desloca a
+          // média inteira e faz o número parar de descrever o atendimento.
+          sub="mediana até a primeira resposta"
+          icon={<Clock className="h-5 w-5 text-emerald-500" />}
           accentBg="bg-emerald-500"
           accentText="text-emerald-500"
-          trend={stats.inbound > 0 ? 'up' : 'neutral'}
+          trend="neutral"
         />
         <KpiCard
-          label={`Enviadas por mim — ${periodLabel}`}
-          value={stats.sentByMe}
-          sub={`${stats.outbound} enviadas no total pela equipe`}
+          label={`Taxa de resposta — ${periodLabel}`}
+          value={0}
+          valueText={
+            carregandoContatos || contatos.perguntas === 0
+              ? '—'
+              : `${Math.round((contatos.respondidas / contatos.perguntas) * 100)}%`
+          }
+          sub={
+            contatos.perguntas === 0
+              ? 'ninguém procurou no período'
+              : `${contatos.respondidas} de ${contatos.perguntas} conversas`
+          }
           icon={<ArrowUpRight className="h-5 w-5 text-violet-500" />}
           accentBg="bg-violet-500"
           accentText="text-violet-500"
-          trend="neutral"
+          trend={
+            contatos.perguntas === 0
+              ? 'neutral'
+              : contatos.respondidas / contatos.perguntas >= 0.9 ? 'up' : 'down'
+          }
         />
         <KpiCard
           label="Não lidas agora"
@@ -433,14 +613,137 @@ export default function Index() {
           trend={convMetrics.unread === 0 ? 'up' : convMetrics.unread > 20 ? 'down' : 'neutral'}
         />
         <KpiCard
-          label="Não respondidas"
+          label="Não respondidas hoje"
           value={convMetrics.pendingReplies}
-          sub={convMetrics.pendingReplies === 0 ? 'Todas respondidas' : 'aguardando resposta'}
+          sub={convMetrics.pendingReplies === 0 ? 'Todas respondidas' : 'clique para ver quem'}
           icon={<Clock className="h-5 w-5 text-rose-500" />}
           accentBg="bg-rose-500"
           accentText="text-rose-500"
           trend={convMetrics.pendingReplies === 0 ? 'up' : convMetrics.pendingReplies > 10 ? 'down' : 'neutral'}
+          onClick={convMetrics.pendingReplies > 0 ? () => setPainelPendentes(true) : undefined}
         />
+      </div>
+
+      {/*
+        ── O que está na minha mão ──
+        Fica logo abaixo dos KPIs, na primeira dobra. Antes, tarefa não aparecia
+        no Dashboard em lugar nenhum e anotação só aparecia lá no fim da página,
+        e ainda assim só se tivesse contato vinculado.
+      */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card className="border-border">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <ListTodo className="h-4 w-4 text-muted-foreground" />
+                Minhas tarefas
+                {tarefasAtrasadas > 0 && (
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-rose-500/15 text-rose-500">
+                    {tarefasAtrasadas} atrasada{tarefasAtrasadas > 1 ? 's' : ''}
+                  </span>
+                )}
+              </CardTitle>
+              <Link to="/crm" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-0.5">
+                Ver todas <ChevronRight className="h-3 w-3" />
+              </Link>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <EstadoPainel
+              carregando={trabalhoCarregando}
+              erro={erroTarefas}
+              vazio={minhasTarefas.length === 0}
+              mensagemVazio="Nenhuma tarefa aberta para você."
+              aoTentarDeNovo={() => {
+                setErroTarefas(false)
+                getTasks().then(setTasks).catch(() => setErroTarefas(true))
+              }}
+            />
+            {!trabalhoCarregando && !erroTarefas && minhasTarefas.length > 0 && (
+              <div className="space-y-2">
+                {minhasTarefas.slice(0, 4).map((t) => {
+                  const atrasada = !!t.due_date && t.due_date < hojeISO
+                  return (
+                    <div
+                      key={t.id}
+                      onClick={() => navigate('/crm')}
+                      className="p-2.5 rounded-lg border border-border bg-muted/20 hover:bg-accent cursor-pointer transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-xs font-medium text-foreground line-clamp-1 flex-1">{t.title}</p>
+                        {t.due_date && (
+                          <span className={`text-[10px] font-medium flex-shrink-0 ${atrasada ? 'text-rose-500' : 'text-muted-foreground'}`}>
+                            {t.due_date.split('-').reverse().slice(0, 2).join('/')}
+                          </span>
+                        )}
+                      </div>
+                      {t.contact?.name && (
+                        <p className="text-[11px] text-muted-foreground truncate mt-0.5">{t.contact.name}</p>
+                      )}
+                    </div>
+                  )
+                })}
+                {minhasTarefas.length > 4 && (
+                  <p className="text-[11px] text-muted-foreground text-center pt-0.5">
+                    e mais {minhasTarefas.length - 4}
+                  </p>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-border">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <StickyNote className="h-4 w-4 text-muted-foreground" />
+                Anotações
+              </CardTitle>
+              <Link to="/notes" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-0.5">
+                Ver todas <ChevronRight className="h-3 w-3" />
+              </Link>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <EstadoPainel
+              carregando={trabalhoCarregando}
+              erro={erroNotas}
+              vazio={recentNotes.length === 0}
+              mensagemVazio="Nenhuma anotação ainda."
+              aoTentarDeNovo={() => {
+                setErroNotas(false)
+                getNotes().then(setNotes).catch(() => setErroNotas(true))
+              }}
+            />
+            {!trabalhoCarregando && !erroNotas && recentNotes.length > 0 && (
+              <div className="space-y-2">
+                {recentNotes.map((note) => (
+                  <div
+                    key={note.id}
+                    onClick={() => navigate('/notes')}
+                    className="p-2.5 rounded-lg border border-border bg-muted/20 hover:bg-accent cursor-pointer transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs font-medium text-foreground truncate flex-1">
+                        {note.contact_name || note.title}
+                      </p>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${
+                        note.category === 'financeiro' ? 'bg-emerald-500/15 text-emerald-500' :
+                        note.category === 'rh' ? 'bg-blue-500/15 text-blue-500' :
+                        note.category === 'administrativo' ? 'bg-amber-500/15 text-amber-500' :
+                        'bg-muted text-muted-foreground'
+                      }`}>
+                        {note.category === 'financeiro' ? 'Fin' : note.category === 'rh' ? 'RH' : note.category === 'administrativo' ? 'Adm' : 'Ger'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">{note.content}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* ── Chart + Devices ── */}
@@ -729,51 +1032,58 @@ export default function Index() {
         </div>
       </div>
 
-      {/* ── Contact Notes ── */}
-      {recentNotes.length > 0 && (
-        <Card className="border-border">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
-                <StickyNote className="h-4 w-4 text-muted-foreground" />
-                Anotações de contatos
-              </CardTitle>
-              <Link to="/notes" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-0.5">
-                Ver todas <ChevronRight className="h-3 w-3" />
-              </Link>
-            </div>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-              {recentNotes.map((note) => (
-                <div
-                  key={note.id}
-                  onClick={() => navigate('/notes')}
-                  className="p-3 rounded-lg border border-border bg-muted/20 hover:bg-accent cursor-pointer transition-colors"
-                >
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <div className="w-6 h-6 rounded-full bg-accent flex items-center justify-center text-[10px] font-bold text-foreground">
-                      {(note.contact_name || note.title).charAt(0).toUpperCase()}
-                    </div>
-                    <p className="text-xs font-medium text-foreground truncate flex-1">
-                      {note.contact_name || note.title}
-                    </p>
-                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${
-                      note.category === 'financeiro' ? 'bg-emerald-500/15 text-emerald-500' :
-                      note.category === 'rh' ? 'bg-blue-500/15 text-blue-500' :
-                      note.category === 'administrativo' ? 'bg-amber-500/15 text-amber-500' :
-                      'bg-muted text-muted-foreground'
-                    }`}>
-                      {note.category === 'financeiro' ? 'Fin' : note.category === 'rh' ? 'RH' : note.category === 'administrativo' ? 'Adm' : 'Ger'}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-muted-foreground line-clamp-2">{note.content}</p>
+      {/*
+        Quem está esperando resposta hoje. O número sozinho dizia que havia fila,
+        mas não quem estava nela — e chegar até a pessoa exigia procurar na mão,
+        conversa por conversa.
+      */}
+      <Dialog open={painelPendentes} onOpenChange={setPainelPendentes}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>Aguardando resposta hoje</DialogTitle>
+            <DialogDescription>
+              {convMetrics.pendingReplies === 1
+                ? '1 pessoa escreveu hoje e ainda não teve resposta.'
+                : `${convMetrics.pendingReplies} pessoas escreveram hoje e ainda não tiveram resposta.`}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-[55vh] overflow-y-auto space-y-1.5 -mx-1 px-1">
+            {convMetrics.pendingList.map((p) => (
+              <button
+                key={`${p.device_id}:${p.remote_sender}`}
+                onClick={() => {
+                  // `device` junto do `jid`: sem ele o chat abriria a conversa no
+                  // aparelho que estivesse selecionado, que pode não ser o desta
+                  // mensagem.
+                  navigate(`/chat?device=${p.device_id}&jid=${encodeURIComponent(p.remote_sender)}`)
+                }}
+                className="w-full text-left p-2.5 rounded-lg border border-border bg-muted/20 hover:bg-accent transition-colors"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium text-foreground truncate">
+                    {p.sender_name || p.remote_sender}
+                  </p>
+                  <span className="text-[11px] text-muted-foreground flex-shrink-0 tabular-nums">
+                    {new Date(p.last_message_created_at).toLocaleTimeString('pt-BR', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+                <div className="flex items-center justify-between gap-2 mt-0.5">
+                  <p className="text-xs text-muted-foreground truncate flex-1">
+                    {p.last_message_content || 'sem prévia'}
+                  </p>
+                  <span className="text-[10px] text-muted-foreground/70 flex-shrink-0">
+                    {deviceNameMap[p.device_id] ?? ''}
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

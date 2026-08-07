@@ -23,10 +23,11 @@ export async function getTasks(): Promise<TaskWithRelations[]> {
     .select('*')
     .order('created_at', { ascending: false })
 
-  if (error) {
-    console.error('Error fetching tasks:', error)
-    return []
-  }
+  // Propaga em vez de devolver lista vazia: falha de rede que vira `[]` aparece
+  // na tela como "você não tem tarefas", que é a mensagem errada e some com o
+  // problema. Quem chama já tem try/catch (CRM e Dashboard) e sabe distinguir
+  // vazio de erro.
+  if (error) throw new Error(error.message)
 
   const rows = (tasks as Task[]) || []
   if (rows.length === 0) return []

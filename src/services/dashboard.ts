@@ -1,6 +1,6 @@
 import supabase from '@/lib/supabase/client'
 import { getConversationSummaries } from '@/services/messages'
-import { getMyStates } from '@/services/conversation_states'
+import { getMyStates, getDeviceAssignments, respondidaEm } from '@/services/conversation_states'
 
 export interface DashboardFilters {
   userId: string
@@ -173,15 +173,79 @@ export async function getTopConversations(
 
 // ─── Métricas de conversas (não lidas + não respondidas) ───────────────────────
 
+export interface ContactMetrics {
+  /** Pessoas distintas que escreveram no período. Grupo não conta. */
+  pessoas: number
+  /** Rajadas de mensagem que pediam resposta. */
+  perguntas: number
+  respondidas: number
+  /** Mediana em segundos; `null` quando ninguém foi respondido no período. */
+  medianaSegundos: number | null
+}
+
+/**
+ * Pessoas atendidas e tempo de resposta, agregados no banco.
+ *
+ * Substitui a contagem de mensagens: dez mensagens tanto podem ser uma pessoa
+ * escrevendo dez linhas quanto dez pessoas na fila, e o número não distinguia.
+ */
+export async function getContactMetrics(
+  deviceIds: string[],
+  from: Date,
+  to: Date,
+): Promise<ContactMetrics> {
+  if (!deviceIds.length) return { pessoas: 0, perguntas: 0, respondidas: 0, medianaSegundos: null }
+
+  const { data, error } = await supabase.rpc('get_dashboard_contact_metrics', {
+    p_device_ids: deviceIds,
+    p_from: from.toISOString(),
+    p_to: to.toISOString(),
+  })
+  if (error) throw new Error(error.message)
+
+  const linha = Array.isArray(data) ? data[0] : data
+  return {
+    pessoas: linha?.pessoas ?? 0,
+    perguntas: linha?.perguntas ?? 0,
+    respondidas: linha?.respondidas ?? 0,
+    medianaSegundos: linha?.mediana_segundos ?? null,
+  }
+}
+
+/** Uma conversa que chegou hoje e ainda não teve resposta. */
+export interface PendingReply {
+  device_id: string
+  remote_sender: string
+  sender_name: string | null
+  last_message_content: string | null
+  last_message_created_at: string
+}
+
 export interface ConversationMetrics {
   unread: number
   pendingReplies: number
+  /**
+   * A lista por trás do número. Vem junto porque é a mesma varredura — pedir de
+   * novo ao abrir o painel repetiria uma RPC por aparelho sem necessidade.
+   */
+  pendingList: PendingReply[]
 }
 
 export async function getConversationMetrics(deviceIds: string[]): Promise<ConversationMetrics> {
-  if (!deviceIds.length) return { unread: 0, pendingReplies: 0 }
+  if (!deviceIds.length) return { unread: 0, pendingReplies: 0, pendingList: [] }
 
-  const [allSummaries, states] = await Promise.all([
+  // Recorte de HOJE. Antes não havia filtro nenhum: conversa parada há semanas
+  // pesava igual a uma que chegou agora, e o número servia mais como acúmulo
+  // histórico do que como fila do dia.
+  const inicioDeHoje = new Date()
+  inicioDeHoje.setHours(0, 0, 0, 0)
+
+  // `conversation_assignments` entra junto porque "respondida" tem DUAS marcas:
+  // a individual (`responded_at`) e a compartilhada (`global_responded_at`,
+  // gravada quando alguém finaliza o atendimento). A lista de conversas sempre
+  // usou as duas; este card usava só a individual, então conversa finalizada por
+  // um colega sumia da lista e continuava contando aqui.
+  const [allSummaries, states, assignmentsPorAparelho] = await Promise.all([
     Promise.all(
       deviceIds.map(async (id) => {
         const summaries = await getConversationSummaries(id)
@@ -189,17 +253,48 @@ export async function getConversationMetrics(deviceIds: string[]): Promise<Conve
       })
     ).then((r) => r.flat()),
     getMyStates(),
+    Promise.all(
+      deviceIds.map(async (id) => [id, await getDeviceAssignments(id)] as const),
+    ),
   ])
 
   const statesMap = new Map(states.map((s) => [`${s.device_id}|${s.remote_sender}`, s]))
+  const assignmentsMap = new Map(
+    assignmentsPorAparelho.flatMap(([id, mapa]) =>
+      [...mapa.entries()].map(([remoteSender, a]) => [`${id}|${remoteSender}`, a] as const),
+    ),
+  )
+
+  const pendentes = allSummaries
+    .filter((s) => {
+      if (s.last_message_direction !== 'inbound') return false
+      if (new Date(s.last_message_created_at) < inicioDeHoje) return false
+      // `as const` porque `assignmentsMap` foi montado com chaves de literal de
+      // template: sem isto o TypeScript alarga para `string` e recusa a busca.
+      const chave = `${s.device_id}|${s.remote_sender}` as const
+      const respondidoEm = respondidaEm(
+        statesMap.get(chave)?.responded_at,
+        assignmentsMap.get(chave)?.global_responded_at,
+      )
+      if (!respondidoEm) return true
+      return new Date(s.last_message_created_at) > new Date(respondidoEm)
+    })
+    // Mais recente primeiro: quem acabou de escrever é quem está esperando na linha.
+    .sort((a, b) => new Date(b.last_message_created_at).getTime() - new Date(a.last_message_created_at).getTime())
+    .map((s) => ({
+      // `device_id` viaja junto do `remote_sender` de propósito: a mesma pessoa
+      // pode ter conversa em mais de um aparelho, e abrir só pelo JID levaria
+      // para a conversa errada.
+      device_id: s.device_id,
+      remote_sender: s.remote_sender,
+      sender_name: s.sender_name ?? null,
+      last_message_content: s.last_message_content ?? null,
+      last_message_created_at: s.last_message_created_at,
+    }))
 
   return {
     unread: allSummaries.reduce((sum, s) => sum + (s.unread_count || 0), 0),
-    pendingReplies: allSummaries.filter((s) => {
-      if (s.last_message_direction !== 'inbound') return false
-      const state = statesMap.get(`${s.device_id}|${s.remote_sender}`)
-      if (!state?.responded_at) return true
-      return new Date(s.last_message_created_at) > new Date(state.responded_at)
-    }).length,
+    pendingReplies: pendentes.length,
+    pendingList: pendentes,
   }
 }
