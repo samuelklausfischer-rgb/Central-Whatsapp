@@ -1,4 +1,4 @@
-import { MessageSquare, Copy, Pencil, Trash2, Forward, Reply, ListChecks } from 'lucide-react'
+import { MessageSquare, Copy, Pencil, Trash2, Forward, Reply, ListChecks, Info } from 'lucide-react'
 import {
   DropdownMenuContent,
   DropdownMenuItem,
@@ -41,6 +41,11 @@ export interface MessageActionsMenuProps {
    */
   onReplyPrivately?: (msg: any) => void
   podeResponderPrivadamente?: boolean
+  /**
+   * Abre o painel de recibos ("quem viu esta mensagem e quando"). Vale para
+   * QUALQUER mensagem, própria ou não — diferente de Editar/Apagar.
+   */
+  onInfo: (msg: any) => void
 }
 
 export function MessageActionsMenu({
@@ -54,6 +59,7 @@ export function MessageActionsMenu({
   onSelecionar,
   onReplyPrivately,
   podeResponderPrivadamente = false,
+  onInfo,
 }: MessageActionsMenuProps) {
   return (
     <DropdownMenuContent align="end" className="bg-chat-panel border-chat-border shadow-chat min-w-[170px]">
@@ -108,6 +114,16 @@ export function MessageActionsMenu({
       >
         <ListChecks className="h-4 w-4 mr-2" />
         Selecionar mensagens
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        className="cursor-pointer focus:bg-chat-hover"
+        onClick={(e) => {
+          e.stopPropagation()
+          onInfo(msg)
+        }}
+      >
+        <Info className="h-4 w-4 mr-2" />
+        Informações da mensagem
       </DropdownMenuItem>
       {isMe && !msg.deleted_at && (
         <DropdownMenuItem

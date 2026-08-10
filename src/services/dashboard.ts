@@ -221,18 +221,46 @@ export interface PendingReply {
   last_message_created_at: string
 }
 
+/** Uma conversa com mensagens ainda não lidas. */
+export interface UnreadConversation extends PendingReply {
+  unread_count: number
+}
+
 export interface ConversationMetrics {
+  /** Soma de MENSAGENS não lidas — não é o número de conversas. */
   unread: number
+  /**
+   * Quantas CONVERSAS têm mensagem não lida. Existe separado de `unread` porque
+   * o card abre uma lista de conversas: mostrar a soma de mensagens ao lado de
+   * uma lista de conversas faria o número não bater com o que se vê.
+   */
+  unreadConversations: number
   pendingReplies: number
   /**
    * A lista por trás do número. Vem junto porque é a mesma varredura — pedir de
    * novo ao abrir o painel repetiria uma RPC por aparelho sem necessidade.
    */
   pendingList: PendingReply[]
+  /** Idem, para o card de não lidas. */
+  unreadList: UnreadConversation[]
+  /** Conversas atribuídas a mim e ainda não finalizadas. */
+  myOpen: number
+  /** Conversas que passaram para mim hoje, mesmo que já finalizadas. */
+  myToday: number
+}
+
+const METRICAS_VAZIAS: ConversationMetrics = {
+  unread: 0,
+  unreadConversations: 0,
+  pendingReplies: 0,
+  pendingList: [],
+  unreadList: [],
+  myOpen: 0,
+  myToday: 0,
 }
 
 export async function getConversationMetrics(deviceIds: string[]): Promise<ConversationMetrics> {
-  if (!deviceIds.length) return { unread: 0, pendingReplies: 0, pendingList: [] }
+  if (!deviceIds.length) return { ...METRICAS_VAZIAS }
 
   // Recorte de HOJE. Antes não havia filtro nenhum: conversa parada há semanas
   // pesava igual a uma que chegou agora, e o número servia mais como acúmulo
@@ -245,7 +273,7 @@ export async function getConversationMetrics(deviceIds: string[]): Promise<Conve
   // gravada quando alguém finaliza o atendimento). A lista de conversas sempre
   // usou as duas; este card usava só a individual, então conversa finalizada por
   // um colega sumia da lista e continuava contando aqui.
-  const [allSummaries, states, assignmentsPorAparelho] = await Promise.all([
+  const [allSummaries, states, assignmentsPorAparelho, userId] = await Promise.all([
     Promise.all(
       deviceIds.map(async (id) => {
         const summaries = await getConversationSummaries(id)
@@ -256,6 +284,7 @@ export async function getConversationMetrics(deviceIds: string[]): Promise<Conve
     Promise.all(
       deviceIds.map(async (id) => [id, await getDeviceAssignments(id)] as const),
     ),
+    supabase.auth.getSession().then((r) => r.data.session?.user?.id ?? ''),
   ])
 
   const statesMap = new Map(states.map((s) => [`${s.device_id}|${s.remote_sender}`, s]))
@@ -292,9 +321,49 @@ export async function getConversationMetrics(deviceIds: string[]): Promise<Conve
       last_message_created_at: s.last_message_created_at,
     }))
 
+  // Não lidas: sem recorte de data, ao contrário de `pendentes`. O card se chama
+  // "agora" justamente porque mensagem não lida de ontem continua não lida hoje —
+  // aplicar o corte de hoje aqui esconderia conversa esquecida, que é o oposto do
+  // que o card serve para mostrar.
+  const naoLidas: UnreadConversation[] = allSummaries
+    .filter((s) => (s.unread_count || 0) > 0)
+    .sort(
+      (a, b) =>
+        new Date(b.last_message_created_at).getTime() -
+        new Date(a.last_message_created_at).getTime(),
+    )
+    .map((s) => ({
+      device_id: s.device_id,
+      remote_sender: s.remote_sender,
+      sender_name: s.sender_name ?? null,
+      last_message_content: s.last_message_content ?? null,
+      last_message_created_at: s.last_message_created_at,
+      unread_count: s.unread_count || 0,
+    }))
+
+  // Meus atendimentos. `assignmentsMap` já foi montado acima para o cálculo de
+  // pendentes — este bloco não custa consulta nenhuma.
+  //
+  // 'open' fica de fora do que está "na minha mão": é o estado inicial de toda
+  // conversa, sem dono. Só 'taken' (peguei), 'assigned' (designaram para mim) e
+  // 'waiting' representam atendimento em curso.
+  let myOpen = 0
+  let myToday = 0
+  if (userId) {
+    for (const a of assignmentsMap.values()) {
+      if (a.assigned_to !== userId) continue
+      if (a.status === 'taken' || a.status === 'assigned' || a.status === 'waiting') myOpen++
+      if (a.assigned_at && new Date(a.assigned_at) >= inicioDeHoje) myToday++
+    }
+  }
+
   return {
     unread: allSummaries.reduce((sum, s) => sum + (s.unread_count || 0), 0),
+    unreadConversations: naoLidas.length,
     pendingReplies: pendentes.length,
     pendingList: pendentes,
+    unreadList: naoLidas,
+    myOpen,
+    myToday,
   }
 }

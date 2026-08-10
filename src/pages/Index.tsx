@@ -11,7 +11,7 @@ import {
 import {
   Smartphone,
   MessageSquareText,
-  ArrowUpRight,
+  Inbox,
   Users,
   Bell,
   Wifi,
@@ -311,8 +311,17 @@ export default function Index() {
   const [chart, setChart] = useState<ChartPoint[]>([])
   const [topConvos, setTopConvos] = useState<ConversationActivity[]>([])
   const [loadingStats, setLoadingStats] = useState(true)
-  const [convMetrics, setConvMetrics] = useState<ConversationMetrics>({ unread: 0, pendingReplies: 0, pendingList: [] })
+  const [convMetrics, setConvMetrics] = useState<ConversationMetrics>({
+    unread: 0,
+    unreadConversations: 0,
+    pendingReplies: 0,
+    pendingList: [],
+    unreadList: [],
+    myOpen: 0,
+    myToday: 0,
+  })
   const [painelPendentes, setPainelPendentes] = useState(false)
+  const [painelNaoLidas, setPainelNaoLidas] = useState(false)
   const [contatos, setContatos] = useState<ContactMetrics>({ pessoas: 0, perguntas: 0, respondidas: 0, medianaSegundos: null })
   const [carregandoContatos, setCarregandoContatos] = useState(true)
   const [metricsRev, setMetricsRev] = useState(0)
@@ -582,35 +591,29 @@ export default function Index() {
           trend="neutral"
         />
         <KpiCard
-          label={`Taxa de resposta — ${periodLabel}`}
-          value={0}
-          valueText={
-            carregandoContatos || contatos.perguntas === 0
-              ? '—'
-              : `${Math.round((contatos.respondidas / contatos.perguntas) * 100)}%`
-          }
+          label="Meus atendimentos"
+          value={convMetrics.myOpen}
           sub={
-            contatos.perguntas === 0
-              ? 'ninguém procurou no período'
-              : `${contatos.respondidas} de ${contatos.perguntas} conversas`
+            convMetrics.myOpen === 0
+              ? 'nada na sua mão'
+              : convMetrics.myToday > 0
+                ? `${convMetrics.myToday} chegaram hoje`
+                : 'nada novo hoje'
           }
-          icon={<ArrowUpRight className="h-5 w-5 text-violet-500" />}
+          icon={<Inbox className="h-5 w-5 text-violet-500" />}
           accentBg="bg-violet-500"
           accentText="text-violet-500"
-          trend={
-            contatos.perguntas === 0
-              ? 'neutral'
-              : contatos.respondidas / contatos.perguntas >= 0.9 ? 'up' : 'down'
-          }
+          trend={convMetrics.myOpen === 0 ? 'up' : convMetrics.myOpen > 10 ? 'down' : 'neutral'}
         />
         <KpiCard
           label="Não lidas agora"
-          value={convMetrics.unread}
-          sub={convMetrics.unread === 0 ? 'Tudo em dia' : 'conversas com mensagens novas'}
+          value={convMetrics.unreadConversations}
+          sub={convMetrics.unreadConversations === 0 ? 'Tudo em dia' : 'clique para ver quem'}
           icon={<Bell className="h-5 w-5 text-amber-500" />}
           accentBg="bg-amber-500"
           accentText="text-amber-500"
-          trend={convMetrics.unread === 0 ? 'up' : convMetrics.unread > 20 ? 'down' : 'neutral'}
+          trend={convMetrics.unreadConversations === 0 ? 'up' : convMetrics.unreadConversations > 20 ? 'down' : 'neutral'}
+          onClick={convMetrics.unreadConversations > 0 ? () => setPainelNaoLidas(true) : undefined}
         />
         <KpiCard
           label="Não respondidas hoje"
@@ -1078,6 +1081,61 @@ export default function Index() {
                   <span className="text-[10px] text-muted-foreground/70 flex-shrink-0">
                     {deviceNameMap[p.device_id] ?? ''}
                   </span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/*
+        Clone do painel de pendentes, mas sem recorte de hoje — segue a mesma
+        regra do card: mensagem não lida de ontem continua aparecendo aqui.
+      */}
+      <Dialog open={painelNaoLidas} onOpenChange={setPainelNaoLidas}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>Conversas com mensagens não lidas</DialogTitle>
+            <DialogDescription>
+              {convMetrics.unreadConversations === 1
+                ? '1 conversa tem mensagem não lida.'
+                : `${convMetrics.unreadConversations} conversas têm mensagens não lidas.`}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-[55vh] overflow-y-auto space-y-1.5 -mx-1 px-1">
+            {convMetrics.unreadList.map((p) => (
+              <button
+                key={`${p.device_id}:${p.remote_sender}`}
+                onClick={() => {
+                  navigate(`/chat?device=${p.device_id}&jid=${encodeURIComponent(p.remote_sender)}`)
+                }}
+                className="w-full text-left p-2.5 rounded-lg border border-border bg-muted/20 hover:bg-accent transition-colors"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium text-foreground truncate">
+                    {p.sender_name || p.remote_sender}
+                  </p>
+                  <span className="text-[11px] text-muted-foreground flex-shrink-0 tabular-nums">
+                    {new Date(p.last_message_created_at).toLocaleTimeString('pt-BR', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2 mt-0.5">
+                  <p className="text-xs text-muted-foreground truncate flex-1">
+                    {p.last_message_content || 'sem prévia'}
+                  </p>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    {/* Contagem por conversa — o dado extra que esta lista tem em relação à de pendentes. */}
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-500">
+                      {p.unread_count}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground/70">
+                      {deviceNameMap[p.device_id] ?? ''}
+                    </span>
+                  </div>
                 </div>
               </button>
             ))}

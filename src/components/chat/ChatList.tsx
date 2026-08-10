@@ -207,12 +207,22 @@ const ChatRow = memo(function ChatRow({
           </span>
         )}
         {assignment && (assignment.status === 'taken' || assignment.status === 'assigned') && (
+          // `assignment` aqui vem de getDeviceAssignments (colunas cruas da tabela),
+          // não da RPC get_conversation_assignment — então `assigned_by` é UUID, sem
+          // nome, e não dá pra resolver por linha sem uma consulta por item da lista.
+          // Por isso o tooltip só traz a data/hora; quem atribuiu fica pendente.
           assignment.assigned_to === currentUserId ? (
-            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400 self-start mt-0.5">
+            <span
+              className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400 self-start mt-0.5"
+              title={assignment.assigned_at ? `Atribuída em ${format(new Date(assignment.assigned_at), 'dd/MM HH:mm')}` : undefined}
+            >
               Atribuída a você
             </span>
           ) : (
-            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-600 dark:bg-purple-950 dark:text-purple-400 self-start mt-0.5">
+            <span
+              className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-600 dark:bg-purple-950 dark:text-purple-400 self-start mt-0.5"
+              title={assignment.assigned_at ? `Atribuída em ${format(new Date(assignment.assigned_at), 'dd/MM HH:mm')}` : undefined}
+            >
               Atendido: {assignment.assigned_to_name?.split(' ')[0] ?? '—'}
             </span>
           )

@@ -81,6 +81,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { createScheduledMessage, type CreateScheduledMessageInput } from '@/services/scheduled_messages'
 import { SmartAvatar } from '@/components/chat/SmartAvatar'
 import { MessageActionsMenu } from '@/components/chat/MessageActionsMenu'
+import { MessageInfoDialog } from '@/components/chat/MessageInfoDialog'
 import { ConversationGallery } from '@/components/chat/ConversationGallery'
 import { ForwardDialog } from '@/components/chat/ForwardDialog'
 import { GroupMembersPanel } from '@/components/chat/GroupMembersPanel'
@@ -120,7 +121,7 @@ import { createTask, getTaskAssignees, type TaskAssignee } from '@/services/task
 import type { Note, ConversationAssignment } from '@/lib/supabase/types'
 import { ContactNoteIcon } from '@/components/ui/ContactNoteIcon'
 import { TeamAssignDialog } from '@/components/chat/TeamAssignDialog'
-import { markConversationRead, markConversationReadGlobal, getConversationViewers, getConversationAssignment, type ConversationViewer } from '@/services/conversation_states'
+import { markConversationRead, markConversationReadGlobal, getConversationViewers, getConversationAssignment, registrarProgressoDeLeitura, type ConversationViewer } from '@/services/conversation_states'
 import { buildContactIndex, resolveContactDisplayName, findContactByIdentifier, isGroupJid, normalizeToDigits } from '@/lib/contacts/normalize'
 import { isPdfFile, isExcelFile } from '@/lib/file-type'
 import { DocumentBubble } from '@/components/chat/DocumentBubble'
@@ -858,6 +859,9 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   // Lista, e não uma mensagem: o mesmo diálogo atende o encaminhar do menu ⋮
   // (lista de uma) e o da barra de seleção (lista de várias).
   const [msgsParaEncaminhar, setMsgsParaEncaminhar] = useState<any[] | null>(null)
+  // Mensagem cujos recibos de leitura ("Informações da mensagem") estão
+  // abertos no momento. `null` fecha o painel.
+  const [msgInfoAberta, setMsgInfoAberta] = useState<any | null>(null)
   const [apagarSelecionadasAberto, setApagarSelecionadasAberto] = useState(false)
   const [membrosAbertos, setMembrosAbertos] = useState(false)
   const [seletorContatoAberto, setSeletorContatoAberto] = useState(false)
@@ -891,6 +895,37 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const lastScrolledMatchKeyRef = useRef<string | null>(null)
 
   const messages = conversation?.messages || []
+
+  /**
+   * Registra o progresso de leitura POR MENSAGEM (recibo "Informações da
+   * mensagem"), usando como mensagem vista a última do array `messages`.
+   *
+   * CRITÉRIO DE "MENSAGEM EFETIVAMENTE VISÍVEL": só registramos se
+   * `isNearBottomRef.current` for true, ou seja, se a rolagem estiver grudada
+   * no fim da conversa (mesmo sinal que já guia o auto-scroll-pro-fundo
+   * acima). Esta tela não tem observação por mensagem (nenhum
+   * IntersectionObserver por balão) — o único jeito confiável de saber que a
+   * ÚLTIMA mensagem carregada está de fato na tela é saber que o atendente
+   * está no fim. Se ele abriu a conversa e rolou para cima antes deste efeito
+   * rodar, não sabemos qual é a última visível de verdade, e marcar tudo como
+   * visto seria mentira — então simplesmente não registramos nada nesta
+   * passada (critério mais conservador possível). Como toda troca de conversa
+   * força `isNearBottomRef.current = true` (ver efeito de scroll acima), o
+   * caso comum — abrir e ver a mensagem mais recente — é coberto.
+   *
+   * `ChatWindow` não desmonta ao trocar de conversa (ver comentário logo
+   * abaixo, sobre o modo de seleção), então o array `messages` em memória pode
+   * por um instante ainda ser o da conversa ANTERIOR enquanto `device`/
+   * `contact` já mudaram. Conferir `remote_sender`/`device_id` da própria
+   * mensagem evita gravar progresso de leitura na conversa errada.
+   */
+  const registrarProgressoDaUltimaVisivel = (deviceId: string, remoteSender: string) => {
+    if (!isNearBottomRef.current) return
+    const ultima = messages[messages.length - 1]
+    if (!ultima) return
+    if (ultima.remote_sender !== remoteSender || ultima.device_id !== deviceId) return
+    registrarProgressoDeLeitura(deviceId, remoteSender, ultima.id, ultima.created_at)
+  }
 
   /**
    * Modo de seleção (marcar várias mensagens e agir sobre todas).
@@ -1369,6 +1404,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     if (conversation && conversation.unread_count > 0 && device && contact) {
       markConversationRead(device.id, contact)
       markConversationReadGlobal(device.id, contact)
+      registrarProgressoDaUltimaVisivel(device.id, contact)
     }
   }, [contact, conversation?.unread_count, device])
 
@@ -1393,6 +1429,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         markConversationReadGlobal(device.id, contact),
       ])
       if (cancelled) return
+      registrarProgressoDaUltimaVisivel(device.id, contact)
       // `getConversationRecentViewers` saiu junto com o indicador de "quem mais
       // está vendo": era o único consumidor, e mantê-lo seria uma consulta por
       // conversa aberta sem nada para mostrar.
@@ -2457,7 +2494,17 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
             */}
             <div className="flex items-center gap-2 mt-0.5 truncate">
               {(assignment?.status === 'taken' || assignment?.status === 'assigned') && assignment.assigned_to_name && (
-                <span className="text-xs text-blue-400 truncate shrink-0">
+                // O cabeçalho é apertado demais pra caber autor + data junto do nome;
+                // isso mora no `title` nativo (mesmo padrão do resto do arquivo) e
+                // por completo no painel "Dados da conversa".
+                <span
+                  className="text-xs text-blue-400 truncate shrink-0"
+                  title={
+                    assignment.assigned_by_name && assignment.assigned_at && !isNaN(new Date(assignment.assigned_at).getTime())
+                      ? `Atribuído por ${assignment.assigned_by_name} em ${format(new Date(assignment.assigned_at), 'dd/MM HH:mm')}`
+                      : undefined
+                  }
+                >
                   Com: {assignment.assigned_to_name}
                 </span>
               )}
@@ -2896,6 +2943,38 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                               </span>
                             </div>
                           ))}
+                        </div>
+                      )}
+                      {/*
+                        Espaço sobra aqui — ao contrário do cabeçalho — então a
+                        atribuição completa (quem tem, quem designou, quando) mora
+                        só neste painel. Cada linha some sozinha se o dado faltar.
+                      */}
+                      {assignment && (assignment.assigned_to_name || assignment.assigned_by_name || assignment.assigned_at) && (
+                        <div className="mt-4 pt-4 border-t border-chat-border">
+                          <h4 className="text-sm font-semibold text-chat-text mb-3 flex items-center gap-2">
+                            <UserCheck className="h-4 w-4 text-chat-muted" /> Atribuição
+                          </h4>
+                          <div className="space-y-2">
+                            {assignment.assigned_to_name && (
+                              <div className="flex items-center justify-between px-3 py-2 rounded-md bg-chat-hover border border-chat-border">
+                                <span className="text-xs text-chat-muted">Atribuída a</span>
+                                <span className="text-sm text-chat-text truncate ml-2">{assignment.assigned_to_name}</span>
+                              </div>
+                            )}
+                            {assignment.assigned_by_name && (
+                              <div className="flex items-center justify-between px-3 py-2 rounded-md bg-chat-hover border border-chat-border">
+                                <span className="text-xs text-chat-muted">Atribuída por</span>
+                                <span className="text-sm text-chat-text truncate ml-2">{assignment.assigned_by_name}</span>
+                              </div>
+                            )}
+                            {assignment.assigned_at && !isNaN(new Date(assignment.assigned_at).getTime()) && (
+                              <div className="flex items-center justify-between px-3 py-2 rounded-md bg-chat-hover border border-chat-border">
+                                <span className="text-xs text-chat-muted">Quando</span>
+                                <span className="text-sm text-chat-text">{format(new Date(assignment.assigned_at), 'dd/MM HH:mm')}</span>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -3422,6 +3501,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   onSelecionar={iniciarSelecaoCom}
   onReplyPrivately={handleReplyPrivately}
   podeResponderPrivadamente={isGroupContact && !isMe && !!msg.group_participant}
+  onInfo={setMsgInfoAberta}
                            />
                          </DropdownMenu>
                        </span>
@@ -3495,6 +3575,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   onSelecionar={iniciarSelecaoCom}
   onReplyPrivately={handleReplyPrivately}
   podeResponderPrivadamente={isGroupContact && !isMe && !!msg.group_participant}
+  onInfo={setMsgInfoAberta}
                             />
                           </DropdownMenu>
                         )}
@@ -4501,6 +4582,15 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
             getConversationAssignment(device.id, contact).then(setAssignment)
           }}
         />
+        {device && contact && (
+          <MessageInfoDialog
+            open={!!msgInfoAberta}
+            deviceId={device.id}
+            remoteSender={contact}
+            message={msgInfoAberta ? { id: msgInfoAberta.id, created_at: msgInfoAberta.created_at } : null}
+            onClose={() => setMsgInfoAberta(null)}
+          />
+        )}
         <MediaViewer media={mediaView} onClose={() => setMediaView(null)} />
         {/* Porta 1: "+" → escolher contato(s) → envia na conversa ABERTA. */}
         <ContactPickerDialog

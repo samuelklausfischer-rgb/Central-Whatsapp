@@ -236,7 +236,9 @@ export async function getDeviceAssignments(deviceId: string): Promise<Map<string
       (tamanho, cursor) => {
         let q = supabase
           .from('conversation_assignments')
-          .select('id, remote_sender, status, assigned_to, invited_to, global_responded_at')
+          .select(
+            'id, remote_sender, status, assigned_to, assigned_by, assigned_at, finished_at, invited_to, global_responded_at',
+          )
           .eq('device_id', deviceId)
           .order('id', { ascending: true })
           .limit(tamanho)
@@ -254,6 +256,119 @@ export async function getDeviceAssignments(deviceId: string): Promise<Map<string
     map.set(row.remote_sender, row as ConversationAssignment)
   }
   return map
+}
+
+export interface MessageReadReceipt {
+  user_id: string
+  name: string | null
+  avatar_url: string | null
+  /** `null` = ainda não viu esta mensagem. */
+  seen_at: string | null
+}
+
+/**
+ * Registra que o usuário logado viu esta conversa até a mensagem de horário
+ * `upToMessageAt`. É INSERT puro — a tabela `conversation_read_progress` não
+ * aceita UPDATE nem DELETE (RLS), então "progresso" é reconstruído lendo o
+ * maior `up_to_message_at` entre todas as linhas do usuário na conversa.
+ *
+ * Por que checar antes de inserir: sem isso, toda vez que a conversa é aberta
+ * (ou o efeito de marcar-como-lida roda de novo por qualquer motivo — poll,
+ * realtime, StrictMode) nasce uma linha nova, e a tabela cresce pelo NÚMERO DE
+ * ABERTURAS, não pela leitura de fato. Só grava quando o horário novo é
+ * estritamente maior que o que este usuário já tinha registrado nesta
+ * conversa — retroceder (ex.: reabrir depois de rolar pra cima) não conta como
+ * progresso e não gera linha.
+ */
+export async function registrarProgressoDeLeitura(
+  deviceId: string,
+  remoteSender: string,
+  upToMessageId: string | null,
+  upToMessageAt: string,
+): Promise<void> {
+  const userId = (await supabase.auth.getSession()).data.session?.user?.id
+  if (!userId) return
+
+  const { data: maiorAtual, error: errBusca } = await supabase
+    .from('conversation_read_progress')
+    .select('up_to_message_at')
+    .eq('device_id', deviceId)
+    .eq('remote_sender', remoteSender)
+    .eq('user_id', userId)
+    .order('up_to_message_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (errBusca) {
+    console.error('Error checking read progress:', errBusca)
+    return
+  }
+  if (maiorAtual && new Date((maiorAtual as any).up_to_message_at) >= new Date(upToMessageAt)) {
+    return // não avançou — não insere
+  }
+
+  const { error } = await supabase.from('conversation_read_progress').insert({
+    device_id: deviceId,
+    remote_sender: remoteSender,
+    user_id: userId,
+    up_to_message_id: upToMessageId,
+    up_to_message_at: upToMessageAt,
+  } as any)
+  if (error) console.error('Error registering read progress:', error)
+}
+
+/**
+ * Recibos de leitura de UMA mensagem: para cada membro da equipe do aparelho,
+ * se viu e quando. "Viu" = existe linha do usuário com
+ * `up_to_message_at >= messageCreatedAt`; "quando viu" = a MENOR `read_at`
+ * entre essas linhas (a primeira vez que a mensagem entrou no campo de visão
+ * dele, não a mais recente).
+ *
+ * Lança em vez de engolir o erro, ao contrário da maioria das funções deste
+ * arquivo: quem chama precisa distinguir "ninguém viu ainda" (lista vazia,
+ * resultado legítimo) de "não deu pra saber quem viu" (falha de rede/RLS) — um
+ * painel de recibo que mostra todo mundo como "Não visto" por causa de um erro
+ * de rede é pior do que mostrar a tela de erro.
+ *
+ * SEM paginação por `buscarTodasAsPaginas` aqui, de propósito: o filtro não é
+ * só por conversa (que cresce sem limite com o histórico, como
+ * `conversation_user_states`/`conversation_assignments`), mas por conversa E
+ * `up_to_message_at >= messageCreatedAt`. O teto de linhas é o tamanho da
+ * equipe do aparelho — hoje algumas dezenas —, várias ordens de grandeza
+ * abaixo dos 1.000 do PostgREST. Paginar aqui seria complexidade sem risco
+ * correspondente.
+ */
+export async function getRecibosDaMensagem(
+  deviceId: string,
+  remoteSender: string,
+  messageCreatedAt: string,
+): Promise<MessageReadReceipt[]> {
+  const membros = await getDeviceTeamMembers(deviceId)
+
+  const { data, error } = await supabase
+    .from('conversation_read_progress')
+    .select('user_id, read_at')
+    .eq('device_id', deviceId)
+    .eq('remote_sender', remoteSender)
+    .gte('up_to_message_at', messageCreatedAt)
+  if (error) {
+    console.error('Error fetching message receipts:', error)
+    throw error
+  }
+
+  const menorReadAtPorUsuario = new Map<string, string>()
+  for (const linha of (data ?? []) as { user_id: string; read_at: string }[]) {
+    const atual = menorReadAtPorUsuario.get(linha.user_id)
+    if (!atual || new Date(linha.read_at) < new Date(atual)) {
+      menorReadAtPorUsuario.set(linha.user_id, linha.read_at)
+    }
+  }
+
+  return membros.map((m) => ({
+    user_id: m.user_id,
+    name: m.name,
+    avatar_url: m.avatar_url,
+    seen_at: menorReadAtPorUsuario.get(m.user_id) ?? null,
+  }))
 }
 
 /**
