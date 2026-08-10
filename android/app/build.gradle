@@ -1,4 +1,86 @@
+import groovy.json.JsonSlurper
+
 apply plugin: 'com.android.application'
+
+/**
+ * Versão do app derivada do package.json (fonte única de verdade).
+ *
+ * Antes `versionCode`/`versionName` ficavam fixos em 1/"1.0" e nunca
+ * acompanhavam a versão real do app (hoje em package.json, ex.: 0.0.204).
+ * `versionCode` é o número que a Play Store/instalador usa para decidir se
+ * um APK é "mais novo" — ele NÃO PODE regredir. Por isso o esquema abaixo
+ * reserva 1000 "slots" para patch e 1000 para minor:
+ *
+ *   versionCode = major * 1_000_000 + minor * 1_000 + patch
+ *
+ * Exemplos: 0.0.204 -> 204 | 0.1.0 -> 1_000 | 1.0.0 -> 1_000_000
+ *
+ * Se o parse falhar (arquivo sumiu, versão fora do formato X.Y.Z), o build
+ * FALHA aqui em vez de cair silenciosamente para versionCode 1 — isso já
+ * causaria "APK mais antigo" na hora de atualizar em um aparelho.
+ */
+def packageJsonFile = file('../../package.json')
+def appVersionName
+def appVersionCode
+try {
+    def packageJson = new JsonSlurper().parse(packageJsonFile)
+    appVersionName = packageJson.version as String
+    def parts = appVersionName.split('\\.')
+    if (parts.length != 3) {
+        throw new Exception("versão \"${appVersionName}\" não está no formato major.minor.patch")
+    }
+    def major = parts[0] as int
+    def minor = parts[1] as int
+    def patch = parts[2] as int
+    appVersionCode = major * 1000000 + minor * 1000 + patch
+} catch (Exception e) {
+    throw new GradleException(
+        "Não foi possível derivar versionCode/versionName de ${packageJsonFile.path}. " +
+        "Confira se o arquivo existe e se \"version\" está no formato X.Y.Z. Erro original: ${e.message}"
+    )
+}
+
+/**
+ * Assinatura do APK de release.
+ *
+ * Até aqui `buildTypes.release` não tinha `signingConfig` nenhum: o
+ * `assembleRelease` gerava um APK sem assinatura, que o Android recusa
+ * instalar — por isso todo APK distribuído até hoje era `debug`/"teste".
+ *
+ * O keystore é a IDENTIDADE do app: perdê-lo (ou esquecer a senha) impede
+ * publicar qualquer atualização para sempre, o único caminho depois disso é
+ * lançar como um app novo. Por isso ele não mora no repo — vive em
+ * `android/keystore.properties` (ignorado pelo Git, ver .gitignore), lido
+ * aqui em tempo de build.
+ *
+ * O build de `debug` NÃO depende disso: continua assinado com a chave de
+ * debug automática do Android SDK, então `npm run build:mobile` e o fluxo
+ * normal de desenvolvimento seguem funcionando sem keystore nenhum. Só
+ * `assembleRelease`/`bundleRelease` exige o arquivo — e falha com uma
+ * mensagem explicando o que falta, em vez de gerar um APK inválido calado.
+ */
+def keystorePropertiesFile = file('../keystore.properties')
+def keystoreProperties = null
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties = new Properties()
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
+/**
+ * O build pedido é de release?
+ *
+ * NÃO É DETALHE: o corpo de `buildTypes.release { }` é avaliado na CONFIGURAÇÃO
+ * do projeto, que roda em TODA invocação do Gradle — inclusive `assembleDebug`
+ * e o `cap sync` do `npm run build:mobile`. Um `throw` solto lá dentro derruba
+ * o build de debug também, que é justamente o que esta configuração promete
+ * não fazer.
+ *
+ * Por isso a exigência do keystore é condicionada à tarefa realmente pedida na
+ * linha de comando. Sem keystore: debug funciona, release falha explicando.
+ */
+def isReleaseBuild = gradle.startParameter.taskNames.any {
+    it.toLowerCase().contains('release')
+}
 
 android {
     namespace = "com.centralwhats.app"
@@ -7,8 +89,8 @@ android {
         applicationId "com.centralwhats.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode appVersionCode
+        versionName appVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,10 +98,41 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            // Só preenche se o keystore.properties existir — se não existir,
+            // o build de release falha explicitamente lá embaixo, em
+            // buildTypes.release, antes de tentar usar esse signingConfig vazio.
+            if (keystoreProperties != null) {
+                // Caminho do .jks é relativo à pasta onde mora o keystore.properties
+                // (android/), não à pasta deste build.gradle (android/app/).
+                storeFile file("${keystorePropertiesFile.parentFile}/${keystoreProperties['storeFile']}")
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (keystoreProperties == null) {
+                // Só aborta se o build pedido for de release (ver `isReleaseBuild`
+                // acima). Em debug, seguir sem `signingConfig` é o correto: o
+                // Android SDK assina com a chave de debug automática.
+                if (isReleaseBuild) {
+                    throw new GradleException(
+                        "Falta android/keystore.properties — o build de release exige um keystore assinado.\n" +
+                        "1. Gere o keystore (uma vez só, guarde em local seguro e com backup):\n" +
+                        "   keytool -genkeypair -v -keystore central-whats.jks -alias central-whats -keyalg RSA -keysize 2048 -validity 10000\n" +
+                        "2. Copie android/keystore.properties.example para android/keystore.properties e preencha com os dados reais.\n" +
+                        "Perder esse keystore ou a senha impede atualizar o app por cima para sempre."
+                    )
+                }
+            } else {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }
