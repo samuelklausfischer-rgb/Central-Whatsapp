@@ -7,6 +7,20 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.204',
+    date: '2026-08-10 18:00',
+    title: 'Designar volta a funcionar, e o app para de trocar de aparelho sozinho',
+    details: [
+      '➡️ Designar uma conversa para um colega voltou a funcionar. Estava falhando para todo mundo, em qualquer conversa, desde que Designar passou a atribuir direto',
+      '📱 O app não troca mais de aparelho sozinho: deixar o Central Whats aberto, sair para fazer outra coisa e voltar podia mudar a instância por conta própria e fechar a conversa que estava aberta',
+      '🔗 Trocar de aparelho pela lista agora atualiza o endereço da janela, então o aparelho escolhido é o que continua valendo ao voltar',
+      '👥 Grupos ganharam ações: mudar a foto, o nome e a descrição, e promover ou rebaixar administradores',
+      '🔒 Criar grupo, sair de um grupo e remover participante ficam com quem é administrador do Central Whats, sempre pedindo confirmação antes',
+      '🔄 Relatórios e Licitações avisam quando existe versão nova, com uma faixa discreta no topo. A atualização só acontece quando você clicar — nada recarrega no meio do seu trabalho',
+      '💬 Os erros ao designar deixaram de aparecer em inglês',
+    ],
+  },
+  {
     version: '0.0.203',
     date: '2026-08-07 16:30',
     title: 'Ferramentas não recomeçam do zero, e o painel fala de pessoas',
