@@ -43,6 +43,14 @@ screenshot.png
 *.pvk
 *.snk
 
+# Keystore do Android: e a identidade permanente do app. Vazar permite assinar
+# um APK falso como se fosse o Central Whats; perder impede publicar atualizacao
+# para sempre. O template do android/.gitignore traz estas linhas comentadas.
+*.jks
+*.keystore
+android/keystore.properties
+!android/keystore.properties.example
+
 # Local agent/MCP configuration may contain private API keys.
 opencode.json
 Whats/
