@@ -62,8 +62,12 @@ CREATE INDEX IF NOT EXISTS conversation_read_progress_ultimo_do_usuario
 ALTER TABLE public.conversation_read_progress ENABLE ROW LEVEL SECURITY;
 
 -- Leitura: qualquer atendente com acesso ao aparelho enxerga os recibos daquele
--- aparelho — é o que torna possível mostrar "não visto por fulano". Mesmo
--- critério de `conversation_assignments`.
+-- aparelho — é o que torna possível mostrar "não visto por fulano".
+--
+-- O `OR is_admin` não é zelo: administradores NÃO estão em `user_allowed_devices`.
+-- Checar só aquela tabela é uma armadilha já documentada neste projeto (01/07/2026),
+-- que bloqueou admins nas RPCs de atendimento. Sem esta segunda condição, gerente
+-- abriria "Informações da mensagem" e veria a equipe inteira como "não visto".
 CREATE POLICY "conv_read_progress_select"
   ON public.conversation_read_progress
   FOR SELECT
@@ -73,6 +77,10 @@ CREATE POLICY "conv_read_progress_select"
       SELECT 1 FROM public.user_allowed_devices uad
       WHERE uad.device_id = conversation_read_progress.device_id
         AND uad.user_id = auth.uid()
+    )
+    OR EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.is_admin = true
     )
   );
 
@@ -85,10 +93,16 @@ CREATE POLICY "conv_read_progress_insert"
   TO authenticated
   WITH CHECK (
     user_id = auth.uid()
-    AND EXISTS (
-      SELECT 1 FROM public.user_allowed_devices uad
-      WHERE uad.device_id = conversation_read_progress.device_id
-        AND uad.user_id = auth.uid()
+    AND (
+      EXISTS (
+        SELECT 1 FROM public.user_allowed_devices uad
+        WHERE uad.device_id = conversation_read_progress.device_id
+          AND uad.user_id = auth.uid()
+      )
+      OR EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid() AND p.is_admin = true
+      )
     )
   );
 
