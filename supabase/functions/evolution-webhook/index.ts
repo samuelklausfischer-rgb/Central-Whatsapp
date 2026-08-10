@@ -164,6 +164,12 @@ function revokeWarn(stage: string, data: Record<string, unknown>) {
   console.warn(JSON.stringify({ scope: 'revoke', stage, build: BUILD_MARKER, ...data }))
 }
 
+// Instrumentação de EDIÇÃO de mensagem — só observa, não age. Ver `detectEditSignal`
+// logo abaixo e o ponto de chamada em Deno.serve (procurar 'possible_edit_detected').
+function editProbeLog(stage: string, data: Record<string, unknown>) {
+  console.log(JSON.stringify({ scope: 'edit_probe', stage, build: BUILD_MARKER, ...data }))
+}
+
 function summarizeObject(value: unknown, depth = 0): unknown {
   if (depth > 2 || value == null) return value == null ? value : '[depth_limit]'
   if (typeof value === 'string') {
@@ -292,6 +298,59 @@ function getRevokeCandidates(
 
   return null
 }
+
+// ---- Instrumentação de EDIÇÃO de mensagem (só captura, NÃO implementa) ----
+// Não há, até hoje, nenhuma evidência de que a Evolution API (Baileys por baixo)
+// repasse um evento de "mensagem editada" — o mesmo tipo de incerteza que já
+// existiu com "encaminhada" (Evolution nunca chegou a mandar contextInfo pronto
+// pra isso; ver comentário de `isForwarded` mais abaixo) e que só foi resolvida
+// olhando payload real em produção. Por isso esta função apenas RECONHECE
+// possíveis sinais de edição e devolve dados pra log — quem chama decide logar,
+// nada aqui grava no banco nem seta `edited_at`.
+//
+// Três sinais cobertos, em ordem de confiança:
+//   (1) protocolMessage com type de edição — no Baileys é MESSAGE_EDIT (valor 14).
+//       Mesmo formato de envelope que o revoke usa pra type REVOKE/0.
+//   (2) `editedMessage` no objeto de mensagem cru — é o wrapper que carregaria o
+//       conteúdo novo; `unwrapMessage` já sabe descer por ele (linha ~231), então
+//       aqui olhamos o objeto ANTES do unwrap só pra registrar que a chave existe.
+//   (3) messages.update / MESSAGES_UPDATE cujo `update.message` venha preenchido
+//       (não nulo) — o caso "nulled message" já é tratado como revoke em
+//       `getRevokeCandidates`; um `update.message` com conteúdo de verdade é outra
+//       coisa (ack de status normalmente não traz `message` nenhum).
+function detectEditSignal(
+  entry: Record<string, any>,
+  isUpdate: boolean,
+  event: string,
+): Record<string, unknown> | null {
+  if (!entry || typeof entry !== 'object') return null
+
+  const rawMessage: Record<string, any> | null = entry.message || entry.update?.message || null
+  if (!rawMessage) return null
+
+  const unwrapped = unwrapMessage(rawMessage)
+  const protocolMsg = unwrapped?.protocolMessage
+  const isProtocolEdit = Boolean(protocolMsg && (protocolMsg.type === 'MESSAGE_EDIT' || protocolMsg.type === 14))
+  const hasEditedMessageWrapper = Boolean(rawMessage.editedMessage)
+  const isUpdateWithContent = isUpdate && entry.update?.message != null
+
+  if (!isProtocolEdit && !hasEditedMessageWrapper && !isUpdateWithContent) return null
+
+  return {
+    event,
+    keyId: entry.key?.id ?? entry.keyId ?? entry.update?.key?.id ?? null,
+    remoteJid: entry.key?.remoteJid ?? entry.remoteJid ?? entry.update?.key?.remoteJid ?? null,
+    isProtocolEdit,
+    protocolMessageType: protocolMsg?.type ?? null,
+    hasEditedMessageWrapper,
+    isUpdateWithContent,
+    rawMessageKeys: Object.keys(rawMessage),
+    unwrappedMessageKeys: unwrapped ? Object.keys(unwrapped) : [],
+    // Payload completo (resumido) — sem isso não dá pra implementar depois.
+    entry: summarizeObject(entry),
+  }
+}
+// ---- Fim da instrumentação de edição ----
 
 function getMediaInfo(msgObj: Record<string, unknown>): MediaInfo | null {
   const m = msgObj as Record<string, any>
@@ -681,6 +740,17 @@ Deno.serve(async (req: Request) => {
   const revokeCandidates = [
     ...new Set(rawEntries.flatMap((entry) => getRevokeCandidates(entry, isUpdate, isDelete) || [])),
   ]
+
+  // Instrumentação de edição — roda pra TODA entrada, independente de virar revoke
+  // ou não, e independente do resto do fluxo. Só loga quando `detectEditSignal`
+  // reconhece um dos três sinais (ver comentário na função); mensagem normal não
+  // gera log nenhum aqui, então não tem risco de poluir por volume.
+  for (const entry of rawEntries) {
+    const editSignal = detectEditSignal(entry, isUpdate, event)
+    if (editSignal) {
+      editProbeLog('possible_edit_detected', editSignal)
+    }
+  }
 
   if (revokeCandidates.length > 0) {
     const patched: string[] = []
