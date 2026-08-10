@@ -36,6 +36,13 @@ screenshot.png
 .env*
 !.env.example
 
+# Certificado de assinatura de codigo: a chave privada nunca vai para o repositorio.
+# Quem tem o .pfx assina qualquer binario como se fosse o Central Whats.
+*.pfx
+*.p12
+*.pvk
+*.snk
+
 # Local agent/MCP configuration may contain private API keys.
 opencode.json
 Whats/

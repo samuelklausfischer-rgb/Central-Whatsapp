@@ -1,6 +1,7 @@
 {
   "name": "central-whats",
   "description": "Central de atendimento WhatsApp com React, Supabase e Evolution API",
+  "author": "Central Whats",
   "private": true,
   "version": "0.0.204",
   "main": "central-whats-app/main.cjs",
