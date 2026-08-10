@@ -45,20 +45,36 @@ export function TeamAssignDialog({
 
   async function handleAssign(member: TeamMember) {
     if (isAssigning) return
-    setAssigningId(member.id)
+    // Guarda contra a classe de bug do PGRST202: se o id do membro vier
+    // falsy (ex.: cast cego perdendo a coluna certa), nunca deixar o
+    // parâmetro sumir da chamada RPC — melhor barrar aqui com um aviso claro.
+    if (!member.user_id) {
+      toast({ title: 'Não foi possível designar a conversa', description: 'Este membro está sem identificador válido. Atualize a página e tente novamente.', variant: 'destructive' })
+      return
+    }
+    setAssigningId(member.user_id)
     try {
       const { error } = await supabase.rpc('assign_conversation', {
         p_device_id: deviceId,
         p_remote_sender: remoteSender,
-        p_target_user_id: member.id,
+        p_target_user_id: member.user_id,
       })
       if (error) throw error
-      toast({ title: `Convite enviado para ${member.name ?? 'o usuário'}`, description: 'A conversa fica reservada até a pessoa confirmar.' })
+      toast({ title: `Conversa designada para ${member.name ?? 'o usuário'}`, description: 'A pessoa já é a responsável por esta conversa.' })
       onAssigned()
       onClose()
     } catch (err: any) {
       console.error('Error assigning conversation:', err)
-      toast({ title: 'Não foi possível designar a conversa', description: err?.message, variant: 'destructive' })
+      // A RPC responde em inglês; traduzimos os casos conhecidos para não
+      // vazar mensagem técnica para o atendente. Erros não mapeados mantêm
+      // o texto original do PostgREST como fallback.
+      const rawMessage: string = err?.message ?? ''
+      const mensagensConhecidas: Record<string, string> = {
+        'Access denied': 'Você não tem acesso a este aparelho',
+        'Target user does not have access to this device': 'Essa pessoa não tem acesso a este aparelho',
+      }
+      const description = mensagensConhecidas[rawMessage] ?? rawMessage
+      toast({ title: 'Não foi possível designar a conversa', description, variant: 'destructive' })
     } finally {
       setAssigningId(null)
     }
@@ -76,7 +92,7 @@ export function TeamAssignDialog({
             Designar para membro da equipe
           </DialogTitle>
           <DialogDescription className="sr-only">
-            Selecione um membro da equipe para enviar um convite de atendimento desta conversa. A pessoa precisa confirmar antes de assumir.
+            Selecione um membro da equipe para designar esta conversa diretamente a ele. A pessoa já passa a ser a responsável, sem precisar confirmar.
           </DialogDescription>
         </DialogHeader>
 
@@ -100,10 +116,10 @@ export function TeamAssignDialog({
           <ScrollArea className="max-h-72">
             <div className="flex flex-col gap-1 py-1">
               {members.map((member) => {
-                const isThisMember = assigningId === member.id
+                const isThisMember = assigningId === member.user_id
                 return (
                   <button
-                    key={member.id}
+                    key={member.user_id}
                     type="button"
                     className="flex items-center gap-3 rounded-md px-2 py-2 text-left transition-colors hover:bg-chat-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-60"
                     onClick={() => handleAssign(member)}

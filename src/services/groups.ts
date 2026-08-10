@@ -1,4 +1,5 @@
 import supabase from '@/lib/supabase/client'
+import { EvolutionApiError } from './evolution_instances'
 
 /**
  * Participantes de um grupo.
@@ -194,4 +195,156 @@ export async function escolherConversaDoParticipante(
 
 export function limparCacheDeGrupos(): void {
   cache.clear()
+}
+
+/**
+ * Chama uma action de ESCRITA de grupo na edge function `evolution-instances`.
+ *
+ * Diferente de `getParticipantesDoGrupo` — que é leitura e degrada em silêncio
+ * para o banco quando a Evolution falha —, escrita NUNCA pode fingir sucesso:
+ * todo erro sobe como `EvolutionApiError`. `details` carrega o corpo de erro
+ * INTEIRO devolvido pela edge function (não só o campo `details` dela), porque
+ * as duas categorias de erro que a UI precisa distinguir (`group_unavailable`:
+ * a instância saiu do grupo; `not_group_admin`: o número conectado não é admin)
+ * vêm como `code` no nível raiz da resposta, ao lado — não dentro — do payload
+ * bruto da Evolution. Leia `err.details?.code` para diferenciar.
+ */
+async function invokeGroupWrite<T>(body: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabase.functions.invoke<any>('evolution-instances', {
+    method: 'POST',
+    body,
+  })
+  if (error) {
+    const ctx = (error as any).context
+    const ctxData = typeof ctx === 'object' && ctx ? ctx : {}
+    const message = (ctxData as any).error || error.message
+    throw new EvolutionApiError(message, ctxData, (ctxData as any).diagnostics)
+  }
+  return data as T
+}
+
+export interface AtualizarFotoResultado {
+  groupJid: string
+  updated: boolean
+}
+
+/**
+ * Troca a foto do grupo.
+ *
+ * `image` é repassado EXATAMENTE como o chamador mandar (URL pública ou base64
+ * data URL). O formato aceito pela Evolution varia por versão da API e não foi
+ * confirmado contra a instância real nesta tarefa — ver PENDÊNCIAS.
+ */
+export async function atualizarFotoDoGrupo(
+  deviceId: string,
+  groupJid: string,
+  image: string,
+): Promise<AtualizarFotoResultado> {
+  return invokeGroupWrite<AtualizarFotoResultado>({
+    action: 'group_update_picture', deviceId, groupJid, image,
+  })
+}
+
+export interface AtualizarAssuntoResultado {
+  groupJid: string
+  subject: string
+  updated: boolean
+}
+
+/** Muda o nome (assunto) do grupo. */
+export async function atualizarAssuntoDoGrupo(
+  deviceId: string,
+  groupJid: string,
+  subject: string,
+): Promise<AtualizarAssuntoResultado> {
+  return invokeGroupWrite<AtualizarAssuntoResultado>({
+    action: 'group_update_subject', deviceId, groupJid, subject,
+  })
+}
+
+export interface AtualizarDescricaoResultado {
+  groupJid: string
+  description: string
+  updated: boolean
+}
+
+/** Muda a descrição do grupo. Descrição vazia é válida (limpa a descrição). */
+export async function atualizarDescricaoDoGrupo(
+  deviceId: string,
+  groupJid: string,
+  description: string,
+): Promise<AtualizarDescricaoResultado> {
+  return invokeGroupWrite<AtualizarDescricaoResultado>({
+    action: 'group_update_description', deviceId, groupJid, description,
+  })
+}
+
+export interface AlterarParticipanteResultado {
+  groupJid: string
+  participant: string
+  action: 'promote' | 'demote' | 'remove'
+  updated: boolean
+}
+
+/**
+ * Promove/rebaixa/remove um participante e invalida o cache DAQUELE grupo (não
+ * o cache inteiro) — senão o painel de participantes mostra o estado antigo até
+ * o TTL de 10 minutos vencer.
+ */
+async function alterarParticipante(
+  action: 'group_promote_participant' | 'group_demote_participant' | 'group_remove_participant',
+  atributoAcao: 'promote' | 'demote' | 'remove',
+  deviceId: string,
+  groupJid: string,
+  participant: string,
+): Promise<AlterarParticipanteResultado> {
+  const resultado = await invokeGroupWrite<AlterarParticipanteResultado>({
+    action, deviceId, groupJid, participant,
+  })
+  cache.delete(chave(deviceId, groupJid))
+  return resultado ?? { groupJid, participant, action: atributoAcao, updated: true }
+}
+
+/** Promove participante a admin do grupo. */
+export const promoverParticipante = (deviceId: string, groupJid: string, participant: string) =>
+  alterarParticipante('group_promote_participant', 'promote', deviceId, groupJid, participant)
+
+/** Rebaixa um admin do grupo (tira o cargo de admin). */
+export const rebaixarParticipante = (deviceId: string, groupJid: string, participant: string) =>
+  alterarParticipante('group_demote_participant', 'demote', deviceId, groupJid, participant)
+
+/** Remove o participante do grupo. Destrutivo/irreversível — gate `requireAdmin` no backend. */
+export const removerParticipante = (deviceId: string, groupJid: string, participant: string) =>
+  alterarParticipante('group_remove_participant', 'remove', deviceId, groupJid, participant)
+
+export interface CriarGrupoResultado {
+  created: boolean
+  groupJid: string | null
+  raw: unknown
+}
+
+/** Cria um grupo novo. Destrutivo/irreversível — gate `requireAdmin` no backend. */
+export async function criarGrupo(
+  deviceId: string,
+  subject: string,
+  participants: string[],
+  description?: string,
+): Promise<CriarGrupoResultado> {
+  return invokeGroupWrite<CriarGrupoResultado>({
+    action: 'group_create', deviceId, subject, participants, description,
+  })
+}
+
+export interface SairDoGrupoResultado {
+  groupJid: string
+  left: boolean
+}
+
+/** Sai do grupo. Destrutivo/irreversível — gate `requireAdmin` no backend. */
+export async function sairDoGrupo(deviceId: string, groupJid: string): Promise<SairDoGrupoResultado> {
+  const resultado = await invokeGroupWrite<SairDoGrupoResultado>({
+    action: 'group_leave', deviceId, groupJid,
+  })
+  cache.delete(chave(deviceId, groupJid))
+  return resultado
 }

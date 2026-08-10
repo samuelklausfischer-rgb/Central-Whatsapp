@@ -203,7 +203,10 @@ export interface ConversationActionLog {
 }
 
 export interface TeamMember {
-  id: string
+  // O nome espelha o retorno real da RPC get_device_team_members em produção
+  // (RETURNS TABLE(user_id uuid, ...)). Renomear para `id` faz o cast em
+  // conversation_states.ts virar `undefined` em silêncio e quebra a designação.
+  user_id: string
   name: string | null
   email: string | null
   avatar_url: string | null

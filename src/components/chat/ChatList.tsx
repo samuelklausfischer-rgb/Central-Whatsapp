@@ -19,16 +19,18 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { format, startOfDay, differenceInCalendarDays } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { Check, CheckCheck, Smartphone, Search, X, MessageCircle, Pin, RefreshCw, UserCheck } from 'lucide-react'
+import { Check, CheckCheck, Smartphone, Search, X, MessageCircle, Pin, RefreshCw, UserCheck, UsersRound } from 'lucide-react'
 import { ContactNoteIcon } from '@/components/ui/ContactNoteIcon'
 import { ConversationActionsMenu } from '@/components/chat/ConversationActionsMenu'
 import { ConversationActionsContent } from '@/components/chat/ConversationActionsContent'
 import ConversationFilters from '@/components/chat/ConversationFilters'
+import { CreateGroupDialog } from '@/components/chat/CreateGroupDialog'
 import {
   ContextMenu,
   ContextMenuTrigger,
   ContextMenuContent,
 } from '@/components/ui/context-menu'
+import { useAuth } from '@/hooks/use-auth'
 import type { ConversationUserState } from '@/services/conversation_states'
 import type { ConversationAssignment } from '@/lib/supabase/types'
 import { buildContactIndex, findContactByIdentifier, resolveContactDisplayName } from '@/lib/contacts/normalize'
@@ -363,11 +365,16 @@ export function ChatList({
   isRefreshingAll,
   carregandoConversas = false,
 }: ChatListProps) {
+  const { user } = useAuth()
   const [searchQuery, setSearchQuery] = useState('')
   const deferredSearch = useDeferredValue(searchQuery)
   const [activePeriodFilter, setActivePeriodFilter] = useState<'all' | 'today' | 'yesterday' | 'last3' | 'last7'>('all')
   const [activeStatusFilter, setActiveStatusFilter] = useState<'all' | 'unread' | 'pinned'>('all')
   const [showUnrespondedOnly, setShowUnrespondedOnly] = useState(false)
+  // Criar grupo é ação restrita — decisão do usuário: para quem não é admin o
+  // ponto de entrada fica OCULTO (não desabilitado), então nem o estado do
+  // diálogo precisa existir para o não-admin ver botão nenhum.
+  const [criarGrupoAberto, setCriarGrupoAberto] = useState(false)
 
   /**
    * Geral = tudo do aparelho. Minhas = o que está sob minha responsabilidade.
@@ -487,16 +494,27 @@ export function ChatList({
       <div className="px-3.5 py-3 border-b border-chat-border flex flex-col gap-3 shrink-0">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-semibold text-chat-text">Mensagens</h2>
-          {onRefreshAll && (
-            <button
-              onClick={onRefreshAll}
-              disabled={isRefreshingAll}
-              className="text-chat-muted hover:text-chat-text transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              title="Atualizar conversas"
-            >
-              <RefreshCw className={cn('h-4 w-4', isRefreshingAll && 'animate-spin')} />
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            {user?.is_admin && (
+              <button
+                onClick={() => setCriarGrupoAberto(true)}
+                className="text-chat-muted hover:text-chat-text transition-colors"
+                title="Criar grupo"
+              >
+                <UsersRound className="h-4 w-4" />
+              </button>
+            )}
+            {onRefreshAll && (
+              <button
+                onClick={onRefreshAll}
+                disabled={isRefreshingAll}
+                className="text-chat-muted hover:text-chat-text transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Atualizar conversas"
+              >
+                <RefreshCw className={cn('h-4 w-4', isRefreshingAll && 'animate-spin')} />
+              </button>
+            )}
+          </div>
         </div>
         <Select value={selectedDeviceId ?? ''} onValueChange={onSelectDevice}>
           <SelectTrigger className="w-full bg-chat-sidebar border-chat-border h-12">
@@ -727,6 +745,17 @@ export function ChatList({
           )}
         </div>
       </ScrollArea>
+
+      {user?.is_admin && (
+        <CreateGroupDialog
+          aberto={criarGrupoAberto}
+          onFechar={() => setCriarGrupoAberto(false)}
+          deviceId={selectedDeviceId}
+          contacts={contacts}
+          instanceKey={selectedDevice?.instance_key}
+          onCriado={() => onRefreshAll?.()}
+        />
+      )}
     </div>
   )
 }

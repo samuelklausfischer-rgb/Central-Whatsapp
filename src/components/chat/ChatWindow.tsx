@@ -47,6 +47,7 @@ import {
   CheckCircle,
   Search,
   Forward,
+  Settings,
 } from 'lucide-react'
 import {
   Dialog,
@@ -83,6 +84,7 @@ import { MessageActionsMenu } from '@/components/chat/MessageActionsMenu'
 import { ConversationGallery } from '@/components/chat/ConversationGallery'
 import { ForwardDialog } from '@/components/chat/ForwardDialog'
 import { GroupMembersPanel } from '@/components/chat/GroupMembersPanel'
+import { GroupActionsDialog } from '@/components/chat/GroupActionsDialog'
 import { ContactPickerDialog } from '@/components/chat/ContactPickerDialog'
 import { ShareThisContactDialog } from '@/components/chat/ShareThisContactDialog'
 import { MentionAutocomplete } from '@/components/chat/MentionAutocomplete'
@@ -693,6 +695,10 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const [taskAssignees, setTaskAssignees] = useState<TaskAssignee[]>([])
   const [isNicknameOpen, setIsNicknameOpen] = useState(false)
   const [nicknameInput, setNicknameInput] = useState('')
+  // Diálogo de ações do grupo (foto/nome/descrição/sair). Reset por conversa
+  // acontece durante o render, junto com `convKeyDaColagem` logo abaixo — ver
+  // o comentário lá para o porquê.
+  const [isGroupActionsOpen, setIsGroupActionsOpen] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   /** Conteúdo da conversa. É a altura DELE que cresce quando a mídia carrega. */
   const conteudoRef = useRef<HTMLDivElement>(null)
@@ -954,10 +960,18 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   // O ChatWindow NÃO desmonta ao trocar de conversa (é renderizado sem `key`),
   // então a escolha de colagem pendente sobreviveria à troca e cairia na conversa
   // errada. Zerado durante o render, no mesmo padrão do modo de seleção.
+  //
+  // O diálogo de Ações do grupo entra no MESMO reset: sem isto, trocar de
+  // conversa com o diálogo aberto (foto/nome/descrição/sair) deixava ele
+  // "grudado" na tela, agora mexendo no grupo ERRADO — exatamente a classe de
+  // bug que este arquivo já cometeu três vezes. `GroupActionsDialog` em si
+  // ganha `key={contact}` no JSX (mais abaixo), que zera o texto digitado nos
+  // campos internos dele ao trocar de grupo; aqui só fecha o diálogo.
   const [convKeyDaColagem, setConvKeyDaColagem] = useState(convKey)
   if (convKey !== convKeyDaColagem) {
     setConvKeyDaColagem(convKey)
     if (colagemAmbigua) setColagemAmbigua(null)
+    if (isGroupActionsOpen) setIsGroupActionsOpen(false)
   }
 
   const convKeyRef = useRef<string | null>(convKey)
@@ -2715,10 +2729,23 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                       </Button>
                       {membrosAbertos && (
                         <GroupMembersPanel
+                          // Força remontagem ao trocar de grupo: o painel não
+                          // desmonta sozinho (fica pendurado no ChatWindow, que
+                          // também não desmonta), e sem isto a confirmação de
+                          // "remover participante" podia ficar apontando pra
+                          // pessoa do grupo ANTERIOR enquanto o `groupJid`
+                          // efetivo já era o do grupo novo.
+                          //
+                          // `convKey` e não `contact`: a chave por conversa
+                          // neste arquivo inclui o aparelho de propósito. O
+                          // mesmo grupo pode estar em dois aparelhos, e o que
+                          // identifica a conversa é o par, nunca o JID sozinho.
+                          key={convKey}
                           deviceId={device.id}
                           instanceName={device.instance_key}
                           groupJid={contact}
                           contactIndex={contactIndex}
+                          isAdmin={!!user?.is_admin}
                           onEditarApelido={handleEditNicknameParticipante}
                           onAbrirConversa={(jid) => {
                             onSheetOpenChange?.(false)
@@ -2726,6 +2753,39 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                           }}
                         />
                       )}
+
+                      <Button
+                        className="w-full justify-start h-12 bg-chat-hover hover:bg-chat-hover border-chat-border text-chat-text transition-all"
+                        variant="outline"
+                        onClick={() => setIsGroupActionsOpen(true)}
+                      >
+                        <Settings className="h-4 w-4 mr-3 text-chat-muted" />
+                        Ações do grupo
+                      </Button>
+                      <GroupActionsDialog
+                        // Mesma razão do `key` do painel de participantes: zera
+                        // nome/descrição digitados e qualquer loading pendente
+                        // ao trocar de grupo, já que o diálogo em si não
+                        // desmonta sozinho. Mesma chave por conversa (aparelho
+                        // + contato), pelo mesmo motivo.
+                        key={convKey}
+                        open={isGroupActionsOpen}
+                        onOpenChange={setIsGroupActionsOpen}
+                        deviceId={device.id}
+                        groupJid={contact}
+                        groupNome={displayName}
+                        isAdmin={!!user?.is_admin}
+                        onSaiuDoGrupo={() => {
+                          // Saiu do grupo: não faz sentido continuar com o
+                          // painel de participantes aberto pra ele. Fechar o
+                          // Sheet inteiro é a reação mais segura daqui — este
+                          // componente não tem acesso à lista de conversas
+                          // (ChatList.tsx está fora do escopo desta tarefa)
+                          // pra remover o grupo de lá.
+                          setMembrosAbertos(false)
+                          onSheetOpenChange?.(false)
+                        }}
+                      />
                     </>
                   )}
                   <Button

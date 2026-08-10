@@ -26,6 +26,35 @@ export const useAuth = () => {
   return context
 }
 
+/**
+ * Compara duas listas de dispositivos pelos `id`, na ordem — não pelo conteúdo
+ * completo do objeto.
+ *
+ * `loadUserData` roda de novo a cada TOKEN_REFRESHED (o Supabase renova o token
+ * em segundo plano ao recuperar foco/visibilidade) e SEMPRE devolve um array
+ * novo, mesmo quando os dispositivos permitidos não mudaram nada. Sem este
+ * guard, `setAllowedDevices`/`setAllowedDeviceIds` trocavam de referência a
+ * cada renovação — e todo consumidor de `allowedDevices` (o efeito de seleção
+ * de aparelho do ChatHub, por exemplo) reexecutava achando que havia uma
+ * mudança real para reagir. Devolver a MESMA referência quando o conteúdo é
+ * idêntico corta esse churn na fonte, para todos os consumidores de uma vez.
+ */
+function mesmosDispositivos(a: Device[], b: Device[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].id !== b[i].id) return false
+  }
+  return true
+}
+
+function mesmosIds(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
 async function fetchProfile(userId: string): Promise<(Profile & { email: string }) | null> {
   const { data, error } = await supabase
     .from('profiles')
@@ -131,8 +160,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             if (!result || !mounted) return
             setUser(result.user)
             setIsAuthenticated(true)
-            setAllowedDevices(result.devices)
-            setAllowedDeviceIds(result.deviceIds)
+            // Forma funcional + comparação rasa: preserva a referência antiga
+            // quando o conteúdo é igual, para não disparar de novo todo efeito
+            // que depende de `allowedDevices` a cada renovação de token
+            // (ver `mesmosDispositivos` acima).
+            setAllowedDevices((prev) => (mesmosDispositivos(prev, result.devices) ? prev : result.devices))
+            setAllowedDeviceIds((prev) => (mesmosIds(prev, result.deviceIds) ? prev : result.deviceIds))
           } catch {
             if (!mounted) return
             setUser(null)
@@ -182,8 +215,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (!result || !mounted) return
       setUser(result.user)
       setIsAuthenticated(true)
-      setAllowedDevices(result.devices)
-      setAllowedDeviceIds(result.deviceIds)
+      // Mesmo guard do onAuthStateChange acima — ver `mesmosDispositivos`.
+      setAllowedDevices((prev) => (mesmosDispositivos(prev, result.devices) ? prev : result.devices))
+      setAllowedDeviceIds((prev) => (mesmosIds(prev, result.deviceIds) ? prev : result.deviceIds))
     } catch {
       if (!mounted) return
       setUser(null)

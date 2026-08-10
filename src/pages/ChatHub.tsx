@@ -130,7 +130,7 @@ function playNotificationSound() {
 export default function ChatHub() {
   const isMobile = useIsMobile()
   const { user, allowedDevices } = useAuth()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const urlDeviceId = searchParams.get('device')
   const urlJid = searchParams.get('jid')
 
@@ -244,6 +244,36 @@ export default function ChatHub() {
     })
   })
 
+  /**
+   * Ref do último `urlDeviceId` que este efeito de fato APLICOU (achou na lista
+   * e usou como aparelho selecionado) — mesmo padrão do `jidAplicadoRef` logo
+   * abaixo, reaproveitado aqui de propósito.
+   *
+   * Por que precisa disto: o Supabase renova o token em segundo plano ao
+   * recuperar foco/visibilidade (`autoRefreshToken`, `src/lib/supabase/client.ts`).
+   * Cada renovação dispara `onAuthStateChange`, que recarrega `allowedDevices`
+   * — e ANTES da correção em `use-auth.tsx`, esse array vinha SEMPRE com
+   * referência nova, mesmo com o mesmo conteúdo, fazendo este efeito reexecutar
+   * a cada renovação. Sem o ref, a prioridade `urlDeviceId || prev || savedId`
+   * fazia o `?device=` da URL vencer TODA vez — inclusive numa reexecução
+   * espúria muito depois da navegação real.
+   *
+   * Cenário real que isso causava: atendente abre `/chat?device=<ADM>` por um
+   * card do Dashboard, troca para o aparelho RH pela sidebar (a URL ficava
+   * presa em ADM porque `onSelectDevice` só gravava estado, nunca
+   * `setSearchParams` — corrigido abaixo em `handleSelectDevice`), deixa o app
+   * ocioso. Ao voltar o foco, o token renova, este efeito reexecuta, e
+   * `urlDeviceId` (ainda ADM) vencia a escolha viva — o app trocava de
+   * aparelho sozinho e, como consequência (ver efeito mais abaixo que fecha
+   * `selectedContact` quando o aparelho muda), a conversa aberta era fechada
+   * junto.
+   *
+   * A troca: `urlDeviceId` só tem prioridade quando ainda NÃO foi aplicado
+   * (navegação nova de verdade — inclusive o clique manual, que agora atualiza
+   * a URL). Fora isso, a escolha viva do usuário (`prev`) manda, depois o
+   * `sessionStorage`.
+   */
+  const urlDeviceIdAplicadoRef = useRef<string | null>(null)
   useEffect(() => {
     const uniqueDevicesMap = new Map()
 
@@ -262,9 +292,23 @@ export default function ChatHub() {
     const filteredDevices = Array.from(uniqueDevicesMap.values())
     setDevices(filteredDevices)
 
+    // "Novo" = ainda não foi aplicado por este ref. Só marca como aplicado se o
+    // aparelho realmente existir na lista atual — senão (por exemplo a lista de
+    // devices ainda não carregou) o efeito precisa tentar de novo na próxima
+    // vez que `allowedDevices` mudar de verdade, e não desistir silenciosamente.
+    const urlDeviceIdEhNovo = !!urlDeviceId && urlDeviceIdAplicadoRef.current !== urlDeviceId
+    const urlDeviceIdValido = urlDeviceIdEhNovo && filteredDevices.some((d) => d.id === urlDeviceId)
+    if (urlDeviceIdValido) {
+      urlDeviceIdAplicadoRef.current = urlDeviceId
+    }
+
+    // A mutação do ref fica FORA do updater de propósito: `setState((prev) =>
+    // ...)` pode rodar 2x no StrictMode, e um ref mexido lá dentro duplicaria o
+    // efeito colateral (mesma cautela já usada para `pendingTempsRef` mais
+    // abaixo, no handler de realtime de mensagens).
     setSelectedDeviceId((prev) => {
       const savedId = sessionStorage.getItem('activeDeviceId')
-      const targetId = urlDeviceId || prev || savedId
+      const targetId = urlDeviceIdValido ? urlDeviceId : (prev || savedId)
 
       if (targetId && filteredDevices.some((d) => d.id === targetId)) {
         return targetId
@@ -272,6 +316,40 @@ export default function ChatHub() {
       return filteredDevices[0]?.id || null
     })
   }, [allowedDevices, urlDeviceId])
+
+  /**
+   * Handler de troca manual de aparelho pela sidebar. Além de gravar o estado,
+   * sincroniza o `?device=` da URL — sem isto o link ficava para sempre preso
+   * no aparelho de origem (ver o comentário grande acima), e qualquer
+   * reexecução do efeito de seleção (renovação de token, nova aba com o mesmo
+   * link, etc.) tentava "corrigir" a seleção de volta para lá.
+   *
+   * Não entra em loop: mudar a URL aqui reexecuta o efeito acima com um
+   * `urlDeviceId` novo, mas como o aparelho já é o selecionado, `setSearchParams`
+   * e a nova chamada de `setSelectedDeviceId` recebem o MESMO valor que já está
+   * no estado — o React não re-renderiza por um `setState` com valor idêntico
+   * (`Object.is`), e o `urlDeviceIdAplicadoRef` já sobe para o valor novo nessa
+   * mesma passada, então não sobra nenhuma reexecução pendente.
+   *
+   * O `jid` é APAGADO aqui, e isso não é limpeza cosmética. Ele identifica uma
+   * conversa DENTRO de um aparelho; carregá-lo para outro não quer dizer nada.
+   * Enquanto a URL nunca era reescrita, o efeito do deep link logo abaixo se
+   * protegia sozinho (`urlDeviceId` continuava no aparelho antigo e a guarda
+   * `selectedDeviceId !== urlDeviceId` barrava tudo). Passando a sincronizar o
+   * `device`, essa proteção cai: a guarda passa a valer, a chave
+   * `${aparelho}:${jid}` muda junto com o aparelho, e o efeito reabriria o
+   * contato da URL no aparelho recém-escolhido — logo depois de a troca de
+   * aparelho ter fechado a conversa de propósito.
+   */
+  const handleSelectDevice = useCallback((deviceId: string) => {
+    setSelectedDeviceId(deviceId)
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('device', deviceId)
+      next.delete('jid')
+      return next
+    }, { replace: true })
+  }, [setSearchParams])
 
   /**
    * Abre a conversa pedida na URL (`/chat?device=...&jid=...`).
@@ -1181,7 +1259,7 @@ export default function ChatHub() {
           <ChatList
             devices={devices}
             selectedDeviceId={selectedDeviceId}
-            onSelectDevice={setSelectedDeviceId}
+            onSelectDevice={handleSelectDevice}
             conversations={conversations}
             contacts={contacts}
             selectedContact={selectedContact}
@@ -1207,7 +1285,7 @@ export default function ChatHub() {
             <ChatList
               devices={devices}
               selectedDeviceId={selectedDeviceId}
-              onSelectDevice={setSelectedDeviceId}
+              onSelectDevice={handleSelectDevice}
               conversations={conversations}
               contacts={contacts}
               selectedContact={selectedContact}

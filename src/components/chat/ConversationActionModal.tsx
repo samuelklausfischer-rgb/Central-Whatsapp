@@ -4,6 +4,7 @@ import { UserCheck, Users, Clock, CheckCircle, Loader2 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import supabase from '@/lib/supabase/client'
+import { useAuth } from '@/hooks/use-auth'
 import type { ConversationAssignment, ConversationRecentViewer } from '@/lib/supabase/types'
 
 interface ConversationActionModalProps {
@@ -41,8 +42,17 @@ export function ConversationActionModal({
   onFinish,
 }: ConversationActionModalProps) {
   const [loading, setLoading] = useState<LoadingAction>(null)
+  const { user } = useAuth()
 
   const isLoading = loading !== null
+  // Mesmo gate de posse do ChatWindow.tsx (linhas 2466/2504): a RPC recusa
+  // designar conversa que já tem outro dono. Sem essa condição o botão fica
+  // visível para quem não pode usá-lo e o clique só resulta em erro.
+  const podeDesignar = assignment != null && (
+    assignment.status === 'open' ||
+    assignment.status === 'waiting' ||
+    assignment.assigned_to === user?.id
+  )
 
   async function handleTake() {
     setLoading('take')
@@ -161,16 +171,18 @@ export function ConversationActionModal({
               Pegar atendimento
             </Button>
 
-            <Button
-              variant="secondary"
-              size="lg"
-              className="w-full justify-start gap-3 text-sm font-medium"
-              onClick={handleAssign}
-              disabled={isLoading}
-            >
-              <Users className="h-4 w-4" />
-              Designar para equipe
-            </Button>
+            {podeDesignar && (
+              <Button
+                variant="secondary"
+                size="lg"
+                className="w-full justify-start gap-3 text-sm font-medium"
+                onClick={handleAssign}
+                disabled={isLoading}
+              >
+                <Users className="h-4 w-4" />
+                Designar para equipe
+              </Button>
+            )}
 
             <Button
               variant="outline"

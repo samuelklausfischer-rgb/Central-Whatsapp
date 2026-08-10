@@ -1,15 +1,49 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import { Loader2, Pencil, MessageSquare, Search, ShieldCheck, AlertTriangle } from 'lucide-react'
+import { Loader2, Pencil, MessageSquare, Search, ShieldCheck, ShieldMinus, UserX, AlertTriangle } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from '@/components/ui/alert-dialog'
 import { SmartAvatar } from '@/components/chat/SmartAvatar'
 import { cn } from '@/lib/utils'
 import { findContactByIdentifier } from '@/lib/contacts/normalize'
+import { useToast } from '@/hooks/use-toast'
+import { EvolutionApiError } from '@/services/evolution_instances'
 import {
   getParticipantesDoGrupo,
   escolherConversaDoParticipante,
+  promoverParticipante,
+  rebaixarParticipante,
+  removerParticipante,
   type Participante,
 } from '@/services/groups'
+
+/**
+ * Mesma tradução de código de erro usada em `GroupActionsDialog` — duplicada
+ * (e não importada de lá) porque é uma função de 6 linhas e os dois
+ * componentes não têm nenhuma outra razão para se acoplar.
+ */
+function mensagemDeErro(err: unknown): string {
+  if (err instanceof EvolutionApiError) {
+    const code = (err.details as any)?.code
+    if (code === 'group_unavailable') {
+      return 'Este número não está mais nesse grupo — a ação não pode ser executada.'
+    }
+    if (code === 'not_group_admin') {
+      return 'O número conectado não é administrador deste grupo.'
+    }
+    return err.message || 'Erro ao executar a ação.'
+  }
+  return err instanceof Error ? err.message : 'Erro inesperado.'
+}
 
 /**
  * Lista de membros do grupo.
@@ -33,6 +67,12 @@ interface Props {
   contactIndex: Map<string, any>
   onEditarApelido: (jid: string, nomeAtual: string) => void
   onAbrirConversa: (jid: string) => void
+  /**
+   * Promover/rebaixar admin é liberado pra qualquer um com acesso ao aparelho.
+   * Remover participante é destrutivo — gate de admin decidido pelo usuário,
+   * o botão fica OCULTO (não desabilitado) pra quem não é admin.
+   */
+  isAdmin: boolean
 }
 
 function formatarTelefone(digits: string): string {
@@ -51,12 +91,17 @@ export function GroupMembersPanel({
   contactIndex,
   onEditarApelido,
   onAbrirConversa,
+  isAdmin,
 }: Props) {
+  const { toast } = useToast()
   const [carregando, setCarregando] = useState(true)
   const [parcial, setParcial] = useState(false)
   const [participantes, setParticipantes] = useState<Participante[]>([])
   const [busca, setBusca] = useState('')
   const [abrindo, setAbrindo] = useState<string | null>(null)
+  /** `${id-do-participante}:${'promote'|'demote'|'remove'}` da ação em voo — só uma por vez, por item. */
+  const [acaoEmCurso, setAcaoEmCurso] = useState<string | null>(null)
+  const [alvoRemocao, setAlvoRemocao] = useState<{ p: Participante; nome: string } | null>(null)
 
   const carregar = useCallback(
     (forcar = false) => {
@@ -124,6 +169,40 @@ export function GroupMembersPanel({
     [deviceId, onAbrirConversa],
   )
 
+  /**
+   * Promove/rebaixa/remove e, se a chamada teve sucesso, recarrega a lista.
+   * `promoverParticipante`/`rebaixarParticipante`/`removerParticipante` já
+   * invalidam o cache DAQUELE grupo em `services/groups.ts` — sem recarregar
+   * aqui, o painel ficaria mostrando o cargo antigo até o atendente fechar e
+   * reabrir o painel.
+   */
+  const executarAcaoParticipante = useCallback(
+    async (p: Participante, acao: 'promote' | 'demote' | 'remove') => {
+      const chave = `${p.id}:${acao}`
+      setAcaoEmCurso(chave)
+      try {
+        if (acao === 'promote') await promoverParticipante(deviceId, groupJid, p.id)
+        else if (acao === 'demote') await rebaixarParticipante(deviceId, groupJid, p.id)
+        else await removerParticipante(deviceId, groupJid, p.id)
+
+        toast({
+          title:
+            acao === 'promote'
+              ? 'Participante promovido a admin'
+              : acao === 'demote'
+                ? 'Participante rebaixado'
+                : 'Participante removido do grupo',
+        })
+        carregar(true)
+      } catch (err) {
+        toast({ title: mensagemDeErro(err), variant: 'destructive' })
+      } finally {
+        setAcaoEmCurso(null)
+      }
+    },
+    [deviceId, groupJid, toast, carregar],
+  )
+
   if (carregando) {
     return (
       <div className="flex items-center justify-center gap-2 py-8 text-chat-muted">
@@ -134,6 +213,7 @@ export function GroupMembersPanel({
   }
 
   return (
+    <>
     <div className="flex flex-col gap-2">
       {parcial && (
         <div className="flex items-start gap-2 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2">
@@ -229,6 +309,55 @@ export function GroupMembersPanel({
                     <MessageSquare className="h-3.5 w-3.5" />
                   )}
                 </Button>
+
+                {/* Promover/rebaixar: liberado a qualquer um com acesso ao
+                    aparelho. O criador do grupo (superadmin) não aparece aqui —
+                    o próprio WhatsApp não permite rebaixar nem remover quem
+                    criou o grupo. */}
+                {p.admin !== 'superadmin' && p.id && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-chat-muted hover:text-chat-text"
+                    title={
+                      parcial
+                        ? 'Grupo indisponível no momento: não é possível alterar cargos'
+                        : p.admin === 'admin'
+                          ? 'Rebaixar admin'
+                          : 'Promover a admin'
+                    }
+                    disabled={parcial || acaoEmCurso === `${p.id}:${p.admin === 'admin' ? 'demote' : 'promote'}`}
+                    onClick={() => executarAcaoParticipante(p, p.admin === 'admin' ? 'demote' : 'promote')}
+                  >
+                    {acaoEmCurso === `${p.id}:${p.admin === 'admin' ? 'demote' : 'promote'}` ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : p.admin === 'admin' ? (
+                      <ShieldMinus className="h-3.5 w-3.5" />
+                    ) : (
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                )}
+
+                {/* Remover do grupo: destrutivo/irreversível — só admin, e só
+                    com confirmação explícita (AlertDialog abaixo). Fica OCULTO
+                    pra quem não é admin, nunca só desabilitado. */}
+                {isAdmin && p.admin !== 'superadmin' && p.id && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-chat-muted hover:text-red-400"
+                    title={parcial ? 'Grupo indisponível no momento: não é possível remover' : 'Remover do grupo'}
+                    disabled={parcial || acaoEmCurso === `${p.id}:remove`}
+                    onClick={() => setAlvoRemocao({ p, nome })}
+                  >
+                    {acaoEmCurso === `${p.id}:remove` ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <UserX className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                )}
               </div>
             </div>
           )
@@ -239,5 +368,35 @@ export function GroupMembersPanel({
         Atualizar lista
       </Button>
     </div>
+
+    <AlertDialog open={!!alvoRemocao} onOpenChange={(v) => { if (!v) setAlvoRemocao(null) }}>
+      <AlertDialogContent className="bg-chat-panel border-chat-border">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Remover {alvoRemocao?.nome} do grupo?</AlertDialogTitle>
+          <AlertDialogDescription className="text-chat-muted">
+            Esta ação é irreversível: a pessoa sai do grupo agora e só volta se alguém do grupo
+            adicionar de novo.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter className="gap-2">
+          <AlertDialogCancel className="bg-transparent border-chat-border hover:bg-chat-hover text-chat-text">
+            Cancelar
+          </AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-red-600 hover:bg-red-500 text-white"
+            onClick={(e) => {
+              e.preventDefault() // fechamento manual: depende do await abaixo
+              if (!alvoRemocao) return
+              const { p } = alvoRemocao
+              setAlvoRemocao(null)
+              executarAcaoParticipante(p, 'remove')
+            }}
+          >
+            Remover
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   )
 }

@@ -77,8 +77,25 @@ export function isEmbedMessage(data: unknown): data is EmbedMessage {
  * (ex.: `https://app.exemplo.com/relatorios?tenant=prn`).
  * Devolve `null` quando a env está vazia ou não é uma URL válida — quem chama
  * mostra o aviso de configuração em vez de renderizar um iframe quebrado.
+ *
+ * `version`, quando informado, vira `?v=<versão>` — cache-busting só do
+ * DOCUMENTO do iframe (o `ToolFrame` usa isso ao recarregar depois que o
+ * usuário aceita a faixa de atualização). O bundle interno do app filho, com
+ * hash no nome dos arquivos, continua cacheado normalmente: não é este `v`
+ * que decide isso, é o navegador batendo hash-miss no HTML novo.
+ *
+ * ALTERNATIVA PREFERÍVEL, NÃO IMPLEMENTADA: a ferramenta externa poderia
+ * informar a própria versão dentro do `ready` do handshake abaixo (ex.:
+ * `{ source, type: 'ready', version }`). Evitaria a requisição extra a
+ * `/version.json` e qualquer risco de CORS — mas depende de mudar o filho
+ * (`embed.ts` nos dois apps) e não é o caminho atual. Ver
+ * `src/hooks/use-tool-version.ts` para a implementação via `version.json`.
  */
-export function buildEmbedUrl(baseUrl: string, nonce: string): { src: string; origin: string } | null {
+export function buildEmbedUrl(
+  baseUrl: string,
+  nonce: string,
+  version?: string,
+): { src: string; origin: string } | null {
   const trimmed = baseUrl.trim()
   if (!trimmed) return null
 
@@ -86,6 +103,7 @@ export function buildEmbedUrl(baseUrl: string, nonce: string): { src: string; or
     const url = new URL(trimmed)
     url.searchParams.set('embed', '1')
     url.searchParams.set('h', nonce)
+    if (version) url.searchParams.set('v', version)
     return { src: url.toString(), origin: url.origin }
   } catch {
     return null

@@ -158,6 +158,263 @@ async function groupParticipantsAction(body: JsonRecord) {
   })
 }
 
+/**
+ * Resolve `deviceId → instance_key`, mesmo padrão de `groupParticipantsAction`
+ * (linha ~124): o `instanceName` nunca vem do corpo da requisição, sempre do
+ * aparelho já autorizado pelo gate. Extraído para função porque as 8 novas
+ * actions de escrita de grupo repetem exatamente essa resolução.
+ */
+async function resolveInstanceName(deviceId: string): Promise<string | null> {
+  const deviceResp = await fetch(
+    `${SUPABASE_URL}/rest/v1/devices?id=eq.${encodeURIComponent(deviceId)}&deleted_at=is.null&select=instance_key`,
+    { headers: serviceHeaders },
+  )
+  if (!deviceResp.ok) return null
+  const devices = await deviceResp.json()
+  const instanceName = String((Array.isArray(devices) ? devices[0]?.instance_key : '') || '').trim()
+  return instanceName || null
+}
+
+/** `groupJid` só é aceitável no formato de grupo do WhatsApp. Recusa cedo. */
+function validarGroupJid(groupJid: string): string | null {
+  if (!groupJid || !groupJid.endsWith('@g.us')) {
+    return 'groupJid inválido: precisa terminar em "@g.us"'
+  }
+  return null
+}
+
+/**
+ * Traduz uma resposta de ESCRITA da Evolution em erro explícito para a UI.
+ * Duas categorias precisam ser DISTINGUÍVEIS do erro genérico (exigência
+ * explícita desta tarefa — leitura pode degradar em silêncio, escrita não):
+ *
+ *  - 404 → a instância não está mais nesse grupo. Mesma causa dos ~18% de 404
+ *    medidos na LEITURA (`groupParticipantsAction`), mas aqui não dá pra cair
+ *    de volta no banco: é uma ação de escrita, ou ela aconteceu ou não.
+ *  - permissão → a Evolution recusa quando o número conectado não é admin do
+ *    grupo. NÃO existe um contrato estável e documentado para esse caso; o
+ *    heurístico abaixo procura por 401/403 ou por palavras como "admin" /
+ *    "not authorized" no corpo do erro 400. Se a Evolution mudar a mensagem,
+ *    cai no ramo genérico — nunca vira sucesso silencioso, só perde a
+ *    distinção. PRECISA DE CONFIRMAÇÃO MANUAL contra a Evolution real.
+ */
+function respostaErroDeGrupo(
+  result: { ok: boolean; status: number; payload: unknown },
+  groupJid: string,
+) {
+  if (result.ok) return null
+
+  if (result.status === 404) {
+    return json({
+      error: 'A instância não está mais nesse grupo.',
+      code: 'group_unavailable',
+      groupJid,
+    }, 404)
+  }
+
+  const textoErro = JSON.stringify(result.payload ?? '').toLowerCase()
+  const pareceErroDePermissao =
+    [401, 403].includes(result.status) ||
+    (result.status === 400 && /admin|not.?authoriz|forbidden|permission/.test(textoErro))
+
+  if (pareceErroDePermissao) {
+    return json({
+      error: 'O número conectado não é administrador deste grupo.',
+      code: 'not_group_admin',
+      details: result.payload,
+    }, 403)
+  }
+
+  return json({
+    error: 'Falha ao executar ação no grupo na Evolution API.',
+    code: 'evolution_error',
+    details: result.payload,
+    evolutionStatus: result.status,
+  }, 502)
+}
+
+/** Muda a foto do grupo. Gate: `requireDeviceAccess`. */
+async function groupUpdatePictureAction(body: JsonRecord) {
+  const deviceId = String(body.deviceId || '').trim()
+  const groupJid = String(body.groupJid || '').trim()
+  // INCERTEZA DE CONTRATO: `/group/updateGroupPicture` costuma aceitar o campo
+  // `image`, mas o FORMATO aceito (URL pública vs. base64 data URL) varia por
+  // versão da Evolution e não há como confirmar isso sem chamar a API real —
+  // proibido nesta tarefa. Por isso `image` é repassado EXATAMENTE como veio do
+  // cliente, sem tentar normalizar ou adivinhar o formato. Verificação manual
+  // necessária antes de ir para produção.
+  const image = String(body.image || '').trim()
+
+  if (!deviceId) return json({ error: 'deviceId is required' }, 400)
+  const erroJid = validarGroupJid(groupJid)
+  if (erroJid) return json({ error: erroJid }, 400)
+  if (!image) return json({ error: 'image is required' }, 400)
+
+  const instanceName = await resolveInstanceName(deviceId)
+  if (!instanceName) return json({ error: 'device not found' }, 400)
+
+  const result = await evolutionRequest(
+    'PUT',
+    `/group/updateGroupPicture/${encodeURIComponent(instanceName)}?groupJid=${encodeURIComponent(groupJid)}`,
+    { image },
+  )
+
+  const erro = respostaErroDeGrupo(result, groupJid)
+  if (erro) return erro
+
+  return json({ groupJid, updated: true })
+}
+
+/** Muda o nome (assunto) do grupo. Gate: `requireDeviceAccess`. */
+async function groupUpdateSubjectAction(body: JsonRecord) {
+  const deviceId = String(body.deviceId || '').trim()
+  const groupJid = String(body.groupJid || '').trim()
+  const subject = String(body.subject || '').trim()
+
+  if (!deviceId) return json({ error: 'deviceId is required' }, 400)
+  const erroJid = validarGroupJid(groupJid)
+  if (erroJid) return json({ error: erroJid }, 400)
+  if (!subject) return json({ error: 'subject is required' }, 400)
+
+  const instanceName = await resolveInstanceName(deviceId)
+  if (!instanceName) return json({ error: 'device not found' }, 400)
+
+  const result = await evolutionRequest(
+    'PUT',
+    `/group/updateGroupSubject/${encodeURIComponent(instanceName)}?groupJid=${encodeURIComponent(groupJid)}`,
+    { subject },
+  )
+
+  const erro = respostaErroDeGrupo(result, groupJid)
+  if (erro) return erro
+
+  return json({ groupJid, subject, updated: true })
+}
+
+/** Muda a descrição do grupo. Gate: `requireDeviceAccess`. */
+async function groupUpdateDescriptionAction(body: JsonRecord) {
+  const deviceId = String(body.deviceId || '').trim()
+  const groupJid = String(body.groupJid || '').trim()
+  // Descrição vazia é caso de uso legítimo (apagar a descrição do grupo), então
+  // só exigimos deviceId/groupJid válidos — não que `description` venha preenchido.
+  const description = String(body.description ?? '').trim()
+
+  if (!deviceId) return json({ error: 'deviceId is required' }, 400)
+  const erroJid = validarGroupJid(groupJid)
+  if (erroJid) return json({ error: erroJid }, 400)
+
+  const instanceName = await resolveInstanceName(deviceId)
+  if (!instanceName) return json({ error: 'device not found' }, 400)
+
+  const result = await evolutionRequest(
+    'PUT',
+    `/group/updateGroupDescription/${encodeURIComponent(instanceName)}?groupJid=${encodeURIComponent(groupJid)}`,
+    { description },
+  )
+
+  const erro = respostaErroDeGrupo(result, groupJid)
+  if (erro) return erro
+
+  return json({ groupJid, description, updated: true })
+}
+
+/**
+ * `promote` | `demote` | `remove` compartilham a mesma rota da Evolution
+ * (`/group/updateParticipant`), só muda o campo `action` do corpo. `promote` e
+ * `demote` chegam aqui com gate `requireDeviceAccess`; `remove` chega com
+ * `requireAdmin` (é destrutivo — decisão explícita do usuário, ver despacho).
+ */
+async function groupUpdateParticipantAction(body: JsonRecord, acao: 'promote' | 'demote' | 'remove') {
+  const deviceId = String(body.deviceId || '').trim()
+  const groupJid = String(body.groupJid || '').trim()
+  const participant = String(body.participant || '').trim()
+
+  if (!deviceId) return json({ error: 'deviceId is required' }, 400)
+  const erroJid = validarGroupJid(groupJid)
+  if (erroJid) return json({ error: erroJid }, 400)
+  if (!participant) return json({ error: 'participant is required' }, 400)
+
+  const instanceName = await resolveInstanceName(deviceId)
+  if (!instanceName) return json({ error: 'device not found' }, 400)
+
+  const result = await evolutionRequest(
+    'PUT',
+    `/group/updateParticipant/${encodeURIComponent(instanceName)}?groupJid=${encodeURIComponent(groupJid)}`,
+    { action: acao, participants: [participant] },
+  )
+
+  const erro = respostaErroDeGrupo(result, groupJid)
+  if (erro) return erro
+
+  return json({ groupJid, participant, action: acao, updated: true })
+}
+
+/**
+ * Cria um grupo novo. Gate: `requireAdmin` (decisão explícita do usuário —
+ * junto com sair do grupo e remover participante, são as três ações
+ * destrutivas/irreversíveis desta camada).
+ */
+async function groupCreateAction(body: JsonRecord) {
+  const deviceId = String(body.deviceId || '').trim()
+  const subject = String(body.subject || '').trim()
+  const participants = Array.isArray(body.participants)
+    ? body.participants.map((p) => String(p).trim()).filter(Boolean)
+    : []
+  const description = String(body.description || '').trim()
+
+  if (!deviceId) return json({ error: 'deviceId is required' }, 400)
+  if (!subject) return json({ error: 'subject is required' }, 400)
+  if (participants.length === 0) return json({ error: 'at least one participant is required' }, 400)
+
+  const instanceName = await resolveInstanceName(deviceId)
+  if (!instanceName) return json({ error: 'device not found' }, 400)
+
+  const payload: JsonRecord = { subject, participants }
+  if (description) payload.description = description
+
+  const result = await evolutionRequest('POST', `/group/create/${encodeURIComponent(instanceName)}`, payload)
+
+  if (!result.ok) {
+    return json({
+      error: 'Falha ao criar grupo na Evolution API.',
+      code: 'evolution_error',
+      details: result.payload,
+      evolutionStatus: result.status,
+    }, 502)
+  }
+
+  const dados = (result.payload ?? {}) as JsonRecord
+  const groupJid = String(dados.id ?? dados.groupJid ?? '') || null
+
+  return json({ created: true, groupJid, raw: dados })
+}
+
+/**
+ * Sai do grupo. Gate: `requireAdmin` (destrutivo/irreversível — mesma decisão
+ * do usuário citada em `groupCreateAction`).
+ */
+async function groupLeaveAction(body: JsonRecord) {
+  const deviceId = String(body.deviceId || '').trim()
+  const groupJid = String(body.groupJid || '').trim()
+
+  if (!deviceId) return json({ error: 'deviceId is required' }, 400)
+  const erroJid = validarGroupJid(groupJid)
+  if (erroJid) return json({ error: erroJid }, 400)
+
+  const instanceName = await resolveInstanceName(deviceId)
+  if (!instanceName) return json({ error: 'device not found' }, 400)
+
+  const result = await evolutionRequest(
+    'DELETE',
+    `/group/leaveGroup/${encodeURIComponent(instanceName)}?groupJid=${encodeURIComponent(groupJid)}`,
+  )
+
+  const erro = respostaErroDeGrupo(result, groupJid)
+  if (erro) return erro
+
+  return json({ groupJid, left: true })
+}
+
 async function getEvolutionConfig() {
   let apiKey = Deno.env.get('EVOLUTION_API_KEY') || ''
   let apiUrl = (Deno.env.get('EVOLUTION_API_URL') || '').replace(/\/+$/, '')
@@ -507,13 +764,40 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({})) as JsonRecord
     const action = String(body.action || '').trim()
 
-    // `group_participants` é operação de atendimento, não de administração:
-    // valida sessão + acesso ao aparelho. Todo o resto continua exigindo admin,
-    // exatamente como antes.
-    if (action === 'group_participants') {
+    // Ações de ATENDIMENTO (não de administração de instância): valida sessão +
+    // acesso ao aparelho, não o papel de admin. `group_participants` é leitura;
+    // as quatro de grupo abaixo são escrita, mas ainda são operação do dia a dia
+    // de quem já tem o aparelho liberado — mudar nome/foto/descrição do grupo ou
+    // promover/rebaixar um admin não é ação destrutiva/irreversível. Todo o
+    // resto (inclusive criar grupo, sair do grupo e remover participante — essas
+    // três SÃO destrutivas/irreversíveis) continua exigindo admin, como antes.
+    const acoesDeAparelho = new Set([
+      'group_participants',
+      'group_update_picture',
+      'group_update_subject',
+      'group_update_description',
+      'group_promote_participant',
+      'group_demote_participant',
+    ])
+
+    if (acoesDeAparelho.has(action)) {
       const acesso = await requireDeviceAccess(authHeader, String(body.deviceId || '').trim())
       if (acesso.error) return acesso.error
-      return await groupParticipantsAction(body)
+
+      switch (action) {
+        case 'group_participants':
+          return await groupParticipantsAction(body)
+        case 'group_update_picture':
+          return await groupUpdatePictureAction(body)
+        case 'group_update_subject':
+          return await groupUpdateSubjectAction(body)
+        case 'group_update_description':
+          return await groupUpdateDescriptionAction(body)
+        case 'group_promote_participant':
+          return await groupUpdateParticipantAction(body, 'promote')
+        case 'group_demote_participant':
+          return await groupUpdateParticipantAction(body, 'demote')
+      }
     }
 
     const admin = await requireAdmin(authHeader)
@@ -534,6 +818,12 @@ Deno.serve(async (req: Request) => {
         return await renameDisplayAction(body)
       case 'configure_webhook':
         return await configureWebhookAction(body)
+      case 'group_create':
+        return await groupCreateAction(body)
+      case 'group_leave':
+        return await groupLeaveAction(body)
+      case 'group_remove_participant':
+        return await groupUpdateParticipantAction(body, 'remove')
       default:
         return json({ error: `unknown action: ${action}` }, 400)
     }

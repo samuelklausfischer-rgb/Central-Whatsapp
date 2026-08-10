@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, Loader2, RefreshCw } from 'lucide-react'
+import { AlertCircle, Download, Loader2, RefreshCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   buildEmbedUrl,
@@ -7,6 +7,7 @@ import {
   EMBED_PROTOCOL,
   type EmbedCredential,
 } from '@/lib/tool-embed'
+import { useToolVersion } from '@/hooks/use-tool-version'
 
 interface ToolFrameProps {
   /** Nome da ferramenta, usado no título do iframe e nas mensagens de erro. */
@@ -23,11 +24,24 @@ interface ToolFrameProps {
    * a função de limpeza.
    */
   watch?: (send: (credential: EmbedCredential) => void) => () => void
+  /**
+   * Intervalo entre checagens de `version.json`, em ms. Default: 5 minutos.
+   * Exposto como prop (em vez de constante) para permitir ajuste por
+   * ferramenta sem tocar no hook — ex.: um app que publica com mais frequência.
+   */
+  versionCheckIntervalMs?: number
 }
 
 type Status = 'connecting' | 'ready' | 'error'
 
-export function ToolFrame({ title, baseUrl, envVarName, getCredential, watch }: ToolFrameProps) {
+export function ToolFrame({
+  title,
+  baseUrl,
+  envVarName,
+  getCredential,
+  watch,
+  versionCheckIntervalMs,
+}: ToolFrameProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const [status, setStatus] = useState<Status>('connecting')
   const [error, setError] = useState<string | null>(null)
@@ -37,13 +51,23 @@ export function ToolFrame({ title, baseUrl, envVarName, getCredential, watch }: 
   // aba antiga a chance de injetar credencial numa nova.
   const [nonce, setNonce] = useState(() => crypto.randomUUID())
 
+  // Versão usada como cache-busting do documento do iframe. Só é preenchida
+  // quando o usuário aceita a faixa de atualização (ver `applyUpdate` abaixo)
+  // — nunca sozinho, senão um retry de erro comum já forçaria reload com `v`
+  // antes de qualquer atualização real existir.
+  const [iframeVersion, setIframeVersion] = useState<string | undefined>(undefined)
+
   // useMemo não é cosmético aqui: `buildEmbedUrl` devolve objeto novo a cada
   // render, o que trocaria a identidade de `send` e remontaria o efeito abaixo.
   // O `setStatus('ready')` do handshake já causa um render — o efeito seria
   // limpo, a inscrição do `watch` cairia junto, e o filho nunca receberia o
   // token renovado (o `ready` é uma vez só). Resultado: Relatórios expirando
   // depois de ~1h dentro do iframe.
-  const target = useMemo(() => buildEmbedUrl(baseUrl, nonce), [baseUrl, nonce])
+  const target = useMemo(() => buildEmbedUrl(baseUrl, nonce, iframeVersion), [baseUrl, nonce, iframeVersion])
+
+  // Detecção de versão do app publicado — genérica, então Licitações herda de
+  // graça. Degrada em silêncio quando `version.json` não existe (ver o hook).
+  const { updateVersion, dismiss, applied } = useToolVersion({ baseUrl, intervalMs: versionCheckIntervalMs })
 
   // Refs para não recriar o listener a cada render — o handshake precisa
   // sobreviver a re-renders, senão um `ready` chega com o listener já removido.
@@ -124,6 +148,19 @@ export function ToolFrame({ title, baseUrl, envVarName, getCredential, watch }: 
     setRetryNonce((n) => n + 1)
   }
 
+  // Clique na faixa de atualização: NUNCA automático — o gestor pode estar no
+  // meio de um relatório. Reusa o mesmo mecanismo do `retry` (nonce novo +
+  // `key` do iframe) e só adiciona o cache-busting `?v=` da versão nova.
+  const applyUpdate = () => {
+    if (!updateVersion) return
+    applied(updateVersion)
+    setIframeVersion(updateVersion)
+    setError(null)
+    setStatus('connecting')
+    setNonce(crypto.randomUUID())
+    setRetryNonce((n) => n + 1)
+  }
+
   if (!target) {
     return (
       <div className="flex h-full items-center justify-center p-6">
@@ -151,6 +188,27 @@ export function ToolFrame({ title, baseUrl, envVarName, getCredential, watch }: 
         className="h-full w-full border-0"
         allow="clipboard-write; fullscreen"
       />
+
+      {/* Faixa discreta — mesmo tom do UpdateGate (Electron), mas nunca em tela
+          cheia e nunca recarrega sozinha: só aparece com o iframe já pronto,
+          pra não empilhar com o overlay de "Conectando..." acima. */}
+      {status === 'ready' && updateVersion && (
+        <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between gap-3 border-b border-border bg-card/95 px-4 py-2 text-sm shadow-sm backdrop-blur">
+          <span className="flex items-center gap-2 text-muted-foreground">
+            <Download className="h-4 w-4" />
+            Nova versão do {title} disponível.
+          </span>
+          <div className="flex items-center gap-1">
+            <Button size="sm" onClick={applyUpdate}>
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Atualizar
+            </Button>
+            <Button size="sm" variant="ghost" onClick={dismiss} aria-label="Dispensar aviso de atualização">
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       {status !== 'ready' && (
         <div className="absolute inset-0 flex items-center justify-center bg-background">
