@@ -919,13 +919,45 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
    * `contact` já mudaram. Conferir `remote_sender`/`device_id` da própria
    * mensagem evita gravar progresso de leitura na conversa errada.
    */
-  const registrarProgressoDaUltimaVisivel = (deviceId: string, remoteSender: string) => {
-    if (!isNearBottomRef.current) return
+  const registrarProgressoDaUltimaVisivel = (
+    deviceId: string,
+    remoteSender: string,
+    { exigirRolagemNoFim = true }: { exigirRolagemNoFim?: boolean } = {},
+  ) => {
+    if (exigirRolagemNoFim && !isNearBottomRef.current) return
     const ultima = messages[messages.length - 1]
     if (!ultima) return
     if (ultima.remote_sender !== remoteSender || ultima.device_id !== deviceId) return
     registrarProgressoDeLeitura(deviceId, remoteSender, ultima.id, ultima.created_at)
   }
+
+  /**
+   * O gatilho é a ÚLTIMA MENSAGEM, não a troca de conversa — e essa distinção é o
+   * bug inteiro que este efeito conserta.
+   *
+   * As duas chamadas anteriores penduravam em `[contact, unread_count, device]`.
+   * Como o `ChatWindow` não desmonta ao trocar de conversa, quando esses efeitos
+   * rodavam o array `messages` ainda era o da conversa ANTERIOR (ou vazio, já que
+   * as mensagens carregam depois). A guarda de `remote_sender` fazia seu trabalho
+   * e rejeitava — e, como `messages` não estava nas dependências, o efeito nunca
+   * rodava de novo quando as mensagens finalmente chegavam. Depois disso
+   * `unread_count` caía para 0 e a condição `> 0` fechava a última porta.
+   *
+   * Resultado medido em produção: UMA linha na tabela inteira, de um único
+   * usuário. Pessoas que responderam a conversa apareciam como "não visto".
+   *
+   * Pendurar no id da última mensagem faz o registro acontecer exatamente quando
+   * há progresso novo — inclusive quando chega mensagem nova com a conversa
+   * aberta. `registrarProgressoDeLeitura` não insere se o progresso não avançou,
+   * então repetição não vira lixo.
+   */
+  const idDaUltimaMensagem = messages[messages.length - 1]?.id
+
+  useEffect(() => {
+    if (!device || !contact) return
+    registrarProgressoDaUltimaVisivel(device.id, contact)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [device?.id, contact, idDaUltimaMensagem])
 
   /**
    * Modo de seleção (marcar várias mensagens e agir sobre todas).
@@ -1404,7 +1436,9 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     if (conversation && conversation.unread_count > 0 && device && contact) {
       markConversationRead(device.id, contact)
       markConversationReadGlobal(device.id, contact)
-      registrarProgressoDaUltimaVisivel(device.id, contact)
+      // O progresso de leitura NÃO entra aqui: quando este efeito roda, as
+      // mensagens da conversa ainda não chegaram. Ficou a cargo do efeito que
+      // observa a última mensagem.
     }
   }, [contact, conversation?.unread_count, device])
 
@@ -1429,7 +1463,6 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         markConversationReadGlobal(device.id, contact),
       ])
       if (cancelled) return
-      registrarProgressoDaUltimaVisivel(device.id, contact)
       // `getConversationRecentViewers` saiu junto com o indicador de "quem mais
       // está vendo": era o único consumidor, e mantê-lo seria uma consulta por
       // conversa aberta sem nada para mostrar.
@@ -1636,6 +1669,23 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault()
     if ((!msgText.trim() && attachments.length === 0 && !audioBlob) || !device || !user || !contact) return
+
+    /**
+     * Responder é prova de que leu.
+     *
+     * O recibo não existe PORQUE a pessoa respondeu — ele existe porque ela viu;
+     * mas quem responde obrigatoriamente viu, e essa é a evidência mais forte
+     * que temos. Foi o caso que revelou o bug: um atendente respondeu a conversa
+     * pelo app e o painel continuava listando ele em "Não visto".
+     *
+     * Sem `exigirRolagemNoFim`, de propósito: aqui a rolagem é irrelevante.
+     * Alguém pode responder olhando a mensagem citada, sem estar no fim da lista
+     * — e ainda assim viu o que está respondendo.
+     *
+     * Registra a última mensagem que JÁ EXISTE, não a que está sendo enviada:
+     * essa ainda não foi criada, e é a anterior que a pessoa acabou de ler.
+     */
+    registrarProgressoDaUltimaVisivel(device.id, contact, { exigirRolagemNoFim: false })
 
     /**
      * Menção, calculada UMA vez para todos os caminhos de envio.
