@@ -7,6 +7,22 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.205',
+    date: '2026-08-11 14:00',
+    title: 'Quem viu cada mensagem, quem designou a conversa, e a lista só com o que é seu',
+    details: [
+      '👀 "Informações da mensagem", no menu de qualquer mensagem: mostra quem da equipe já viu aquela mensagem, com dia e hora, e quem ainda não viu. O horário fica registrado como o momento em que a pessoa viu — não muda depois',
+      '🕓 O histórico foi reconstruído a partir de quem respondeu cada conversa, então boa parte das conversas antigas já aparece com o "visto por" preenchido',
+      '🙋 A conversa atribuída passa a dizer quem designou e quando, no topo da conversa e nas informações do contato — antes ela chegava sem dizer de onde veio',
+      '📥 O card "Taxa de resposta" deu lugar a "Meus atendimentos": quantas conversas estão na sua mão agora, e quantas chegaram para você hoje',
+      '🔔 O card "Não lidas" virou clicável e abre a lista das conversas com mensagem nova, da mais recente para a mais antiga; clicar em uma abre a conversa',
+      '🙈 Conversa que já tem dono sai da sua lista: quem olha "Geral" está atrás do que ainda não tem responsável. Para ver as dos colegas, marque "De outros atendentes" nos filtros',
+      '🔎 A busca continua achando todo mundo, inclusive quem está com outro atendente — procurar pelo nome traz o contato mesmo quando ele está escondido da lista',
+      '🧹 Administradores ganharam "Zerar todas as notificações": marca como lida toda conversa de todos os aparelhos, para a equipe inteira. Pede confirmação, e não tem como desfazer',
+      '🛡️ O instalador passou a ser assinado digitalmente — primeiro passo para o antivírus parar de bloquear o app. O bloqueio só termina de vez depois que o certificado da empresa for instalado em cada computador, e disso o pessoal de TI cuida',
+    ],
+  },
+  {
     version: '0.0.204',
     date: '2026-08-10 18:00',
     title: 'Designar volta a funcionar, e o app para de trocar de aparelho sozinho',
