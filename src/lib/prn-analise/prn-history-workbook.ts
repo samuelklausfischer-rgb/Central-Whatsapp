@@ -16,6 +16,19 @@ export type HistorySheetData = {
   rows: unknown[][]
 }
 
+/**
+ * Cobertura de meses dos arquivos históricos selecionados.
+ * Usada para avisar o usuário ANTES de disparar a análise.
+ */
+export type HistoryCoverage = {
+  /** Todos os meses distintos encontrados, do mais antigo para o mais recente. */
+  months: MonthInfo[]
+  /** Ao menos um dos arquivos tinha a aba consolidada "financas". */
+  hasConsolidatedSheet: boolean
+  /** Arquivos que não tinham a aba "financas" (caíram no caminho legado). */
+  filesWithoutSheet: string[]
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTES DO NOVO FORMATO CONSOLIDADO
 // ─────────────────────────────────────────────────────────────────────────────
@@ -192,11 +205,11 @@ function normalizeCategoryForN8n(cat: string, unit: string): string {
 }
 
 /**
- * Detecta os 3 meses mais recentes presentes nos dados da planilha consolidada.
- * Varre todos os blocos coletando pares {num, year}, ordena cronologicamente
- * e retorna os 3 mais recentes em ordem crescente.
+ * Coleta TODOS os meses distintos presentes nos dados da planilha consolidada.
+ * Varre todos os blocos coletando pares {num, year} e devolve em ordem
+ * cronológica crescente (mais antigo primeiro).
  */
-function detectMonths(dataRows: unknown[][]): MonthInfo[] {
+function collectDistinctMonths(dataRows: unknown[][]): MonthInfo[] {
   const seen = new Map<string, MonthInfo>()
 
   for (const block of CONSOLIDATED_BLOCKS) {
@@ -212,12 +225,21 @@ function detectMonths(dataRows: unknown[][]): MonthInfo[] {
     }
   }
 
-  const sorted = Array.from(seen.values()).sort(
+  return Array.from(seen.values()).sort(
     (a, b) => (a.year * 100 + a.num) - (b.year * 100 + b.num),
   )
+}
 
-  // Pega os 3 mais recentes e retorna em ordem crescente (mais antigo primeiro)
-  return sorted.slice(-3)
+/**
+ * Quantos meses o cruzamento usa como referência histórica.
+ */
+export const HISTORY_MONTH_WINDOW = 3
+
+/**
+ * Detecta os 3 meses mais recentes presentes nos dados da planilha consolidada.
+ */
+function detectMonths(dataRows: unknown[][]): MonthInfo[] {
+  return collectDistinctMonths(dataRows).slice(-HISTORY_MONTH_WINDOW)
 }
 
 /**
@@ -227,7 +249,8 @@ function detectMonths(dataRows: unknown[][]): MonthInfo[] {
  * (a partir da linha DATA_START_ROW) e:
  *  1. Verifica se a linha possui dados para aquele bloco.
  *  2. Converte a data serial para ISO e extrai o mês.
- *  3. Descarta linhas cujo mês não esteja em ALLOWED_MONTHS (Mar, Abr, Maio).
+ *  3. Descarta linhas cujo mês não esteja em `allowedYearMonths` (os meses
+ *     detectados dinamicamente por `detectMonths`).
  *  4. Monta uma linha normalizada com os 4 campos do bloco.
  *
  * Retorna um HistorySheetData por bloco, com sheetName identificando a matriz,
@@ -315,30 +338,27 @@ function extractLegacySheets(
 // FUNÇÃO PRINCIPAL EXPORTADA
 // ─────────────────────────────────────────────────────────────────────────────
 
+type ParsedConsolidatedFile = { fileName: string; rows: unknown[][]; dataRows: unknown[][] }
+
+type ParsedHistoryFiles = {
+  consolidatedFiles: ParsedConsolidatedFile[]
+  legacySheets: HistorySheetData[]
+  filesWithoutSheet: string[]
+}
+
 /**
- * Extrai os dados históricos de uma lista de arquivos Excel.
+ * Parseia cada arquivo e separa consolidado (aba "financas", com tolerância a
+ * maiúsculas/acentos/espaços) de legado — sem filtrar meses ainda.
  *
- * Detecta automaticamente o formato da planilha:
- *   - NOVO (consolidado): aba "financas" com 3 blocos de colunas (MATRIZ,
- *     CAMBORIU, PALHOCA). Aplica filtro de período (Mar-Abr-Maio) e fragmenta
- *     em 3 conjuntos de dados independentes.
- *   - LEGADO: formato antigo com uma matriz por aba. Comportamento preservado.
+ * Compartilhado por `extractHistoricalRows` e `inspectHistoricalCoverage`,
+ * para que a prévia mostrada no formulário e o que é de fato enviado à análise
+ * nunca divirjam.
  */
-export async function extractHistoricalRows(
-  files: File[],
-  _meta?: HistorySourceMeta[],
-): Promise<{ sheets: HistorySheetData[]; detectedMonths: MonthInfo[] }> {
-  if (files.length === 0) {
-    throw new Error('Selecione ao menos uma planilha histórica para a análise.')
-  }
-
-  type ParsedConsolidatedFile = { fileName: string; rows: unknown[][]; dataRows: unknown[][] }
-
+async function parseHistoryFiles(files: File[]): Promise<ParsedHistoryFiles> {
   const consolidatedFiles: ParsedConsolidatedFile[] = []
   const legacySheets: HistorySheetData[] = []
+  const filesWithoutSheet: string[] = []
 
-  // 1ª passagem: parseia cada arquivo e separa consolidado (aba "financas",
-  // com tolerância a maiúsculas/acentos/espaços) de legado — sem filtrar meses ainda.
   for (const file of files) {
     const buffer = await file.arrayBuffer()
     const workbook = XLSX.read(buffer, { type: 'array', cellDates: false })
@@ -354,10 +374,61 @@ export async function extractHistoricalRows(
       consolidatedFiles.push({ fileName: file.name, rows, dataRows })
     } else {
       // FORMATO LEGADO: uma matriz por aba (comportamento anterior preservado)
+      filesWithoutSheet.push(file.name)
       const legacy = extractLegacySheets(file.name, workbook)
       legacySheets.push(...legacy)
     }
   }
+
+  return { consolidatedFiles, legacySheets, filesWithoutSheet }
+}
+
+/**
+ * Lê os arquivos históricos apenas para descobrir quais meses eles cobrem,
+ * sem montar os dados da análise. Serve para avisar no formulário — antes de
+ * enviar — que a seleção cobre menos meses do que o cruzamento espera.
+ *
+ * Diferente de `extractHistoricalRows`, devolve TODOS os meses distintos
+ * encontrados (não só os 3 mais recentes), para que a UI possa dizer quantos
+ * meses existem e quais serão realmente usados.
+ */
+export async function inspectHistoricalCoverage(files: File[]): Promise<HistoryCoverage> {
+  if (files.length === 0) {
+    return { months: [], hasConsolidatedSheet: false, filesWithoutSheet: [] }
+  }
+
+  const { consolidatedFiles, filesWithoutSheet } = await parseHistoryFiles(files)
+  const combinedDataRows = consolidatedFiles.flatMap((f) => f.dataRows)
+
+  return {
+    months: collectDistinctMonths(combinedDataRows),
+    hasConsolidatedSheet: consolidatedFiles.length > 0,
+    filesWithoutSheet,
+  }
+}
+
+/**
+ * Extrai os dados históricos de uma lista de arquivos Excel.
+ *
+ * Detecta automaticamente o formato da planilha:
+ *   - NOVO (consolidado): aba "financas" com 3 blocos de colunas (MATRIZ,
+ *     CAMBORIU, PALHOCA). Filtra pelos 3 meses mais recentes encontrados e
+ *     fragmenta em 3 conjuntos de dados independentes.
+ *   - LEGADO: formato antigo com uma matriz por aba. Comportamento preservado.
+ */
+export async function extractHistoricalRows(
+  files: File[],
+  _meta?: HistorySourceMeta[],
+): Promise<{
+  sheets: HistorySheetData[]
+  detectedMonths: MonthInfo[]
+  filesWithoutSheet: string[]
+}> {
+  if (files.length === 0) {
+    throw new Error('Selecione ao menos uma planilha histórica para a análise.')
+  }
+
+  const { consolidatedFiles, legacySheets, filesWithoutSheet } = await parseHistoryFiles(files)
 
   // Detecta os 3 meses mais recentes considerando TODOS os arquivos consolidados
   // juntos (não por arquivo isolado) — evita que a ordem de seleção decida o resultado.
@@ -378,5 +449,5 @@ export async function extractHistoricalRows(
     throw new Error('Nenhuma aba válida encontrada nos arquivos históricos.')
   }
 
-  return { sheets: allSheets, detectedMonths }
+  return { sheets: allSheets, detectedMonths, filesWithoutSheet }
 }

@@ -26,7 +26,8 @@ import { PrnHistoryTable } from '@/components/prn-analise/prn-history-table'
 import { PrnReportView } from '@/components/prn-analise/prn-report-view'
 import { ResultsDashboard } from '@/components/prn-analise/duplicity-dashboard'
 import { parsePrnDailyReceipts } from '@/lib/prn-analise/prn-daily-parser'
-import { extractHistoricalRows } from '@/lib/prn-analise/prn-history-workbook'
+import { extractHistoricalRows, HISTORY_MONTH_WINDOW } from '@/lib/prn-analise/prn-history-workbook'
+import { formatMonthList } from '@/lib/prn-analise/audit-utils'
 
 const normalizePrnPayloadWithDailyFile = async (payload: any, dailyFile: File, referenceDate?: string) => {
   const parsed = await parsePrnDailyReceipts(dailyFile, { referenceDate })
@@ -195,22 +196,34 @@ function PrnAnalysisInner() {
         })),
       ]
 
-      const { sheets: historicalRows, detectedMonths } = await extractHistoricalRows(
+      const { sheets: historicalRows, detectedMonths, filesWithoutSheet } = await extractHistoricalRows(
         [...downloadedHistoricalFiles, ...temporaryHistoricalFiles],
         historyMeta,
       )
 
-      if (detectedMonths.length === 3) {
+      if (detectedMonths.length === 0) {
+        // Nenhuma data reconhecida — aqui sim é falha de leitura do arquivo.
+        const semAba = filesWithoutSheet.length > 0
+          ? ` Sem a aba "financas": ${filesWithoutSheet.join(', ')}.`
+          : ''
         toast({
-          title: 'Meses detectados',
-          description: `Histórico processado com base em: ${detectedMonths.map((m) => m.abbr).join(', ')}.`,
+          title: 'Não consegui ler as datas do histórico',
+          description:
+            `Nenhuma data foi reconhecida nos arquivos históricos. Confira se a aba se chama "financas" e se a coluna "Data de Registro" está preenchida.${semAba}`,
+          variant: 'destructive',
+        })
+      } else if (detectedMonths.length < HISTORY_MONTH_WINDOW) {
+        // Leitura funcionou, mas a seleção cobre menos meses do que o cruzamento usa.
+        toast({
+          title: 'Histórico incompleto',
+          description:
+            `Os arquivos selecionados cobrem apenas ${formatMonthList(detectedMonths)}. ` +
+            `O cruzamento usa ${HISTORY_MONTH_WINDOW} meses — selecione também a outra base do cofre para completar o período.`,
         })
       } else {
         toast({
-          title: 'Meses não detectados automaticamente',
-          description:
-            'Não foi possível identificar os meses na planilha histórica. Verifique se a aba está nomeada "financas". Usando Mar/Abr/Mai como padrão.',
-          variant: 'destructive',
+          title: 'Meses detectados',
+          description: `Histórico processado com base em: ${formatMonthList(detectedMonths)}.`,
         })
       }
 

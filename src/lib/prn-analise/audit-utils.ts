@@ -23,6 +23,22 @@ export const DEFAULT_MONTHS: MonthInfo[] = [
   monthInfo(3, 2025), monthInfo(4, 2025), monthInfo(5, 2025),
 ]
 
+/**
+ * Formata uma lista de meses para exibição, agrupando o ano no final quando
+ * todos são do mesmo ano: [Mai, Jun, Jul de 2026] → "Mai, Jun, Jul/2026".
+ * Anos diferentes viram "Nov/2025, Dez/2025, Jan/2026".
+ */
+export function formatMonthList(months: MonthInfo[]): string {
+  if (months.length === 0) return '—'
+
+  const sameYear = months.every((m) => m.year === months[0].year)
+  if (sameYear) {
+    return `${months.map((m) => m.abbr).join(', ')}/${months[0].year}`
+  }
+
+  return months.map((m) => `${m.abbr}/${m.year}`).join(', ')
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 const monthNames: Record<string, string> = {

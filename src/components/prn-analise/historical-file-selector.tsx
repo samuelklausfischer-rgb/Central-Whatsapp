@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState, type ChangeEvent, type MouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent } from 'react'
 import { format } from 'date-fns'
-import { FileSpreadsheet, Loader2, Trash2, UploadCloud, CheckCircle2, Download } from 'lucide-react'
+import { AlertTriangle, FileSpreadsheet, Loader2, Trash2, UploadCloud, CheckCircle2, Download } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -20,6 +20,12 @@ import {
   deleteHistoryFile,
   downloadHistoryFile,
 } from '@/services/prn-analise/prn-service'
+import {
+  inspectHistoricalCoverage,
+  HISTORY_MONTH_WINDOW,
+  type HistoryCoverage,
+} from '@/lib/prn-analise/prn-history-workbook'
+import { formatMonthList } from '@/lib/prn-analise/audit-utils'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 
@@ -67,7 +73,25 @@ export function HistoricalFileSelector({
   const [fileToDelete, setFileToDelete] = useState<HistoryFileReference | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [downloadingFile, setDownloadingFile] = useState<string | null>(null)
+  const [coverage, setCoverage] = useState<HistoryCoverage | null>(null)
+  const [isInspecting, setIsInspecting] = useState(false)
   const selection = useMemo(() => normalizeSelection(value), [value])
+
+  // Evita rebaixar o mesmo arquivo do cofre a cada clique de seleção.
+  const vaultFileCache = useRef(new Map<string, File>())
+
+  // Chave estável da seleção: os arrays trocam de identidade a cada onChange,
+  // mas o conteúdo selecionado é o que importa para recalcular a cobertura.
+  const selectionKey = useMemo(
+    () =>
+      [
+        ...selection.saved.map((saved) => `v:${saved.name}`),
+        ...selection.temporary.map((file) => `t:${buildTempFileKey(file)}`),
+      ]
+        .sort()
+        .join('|'),
+    [selection],
+  )
 
   const fetchFiles = async () => {
     setIsLoading(true)
@@ -84,6 +108,50 @@ export function HistoricalFileSelector({
   useEffect(() => {
     fetchFiles()
   }, [])
+
+  // Descobre quais meses a seleção cobre ANTES de a análise ser enviada — é o
+  // que evita rodar o cruzamento com menos meses do que ele espera.
+  useEffect(() => {
+    if (selection.saved.length === 0 && selection.temporary.length === 0) {
+      setCoverage(null)
+      setIsInspecting(false)
+      return
+    }
+
+    let cancelled = false
+
+    const inspect = async () => {
+      setIsInspecting(true)
+      try {
+        const vaultFiles = await Promise.all(
+          selection.saved.map(async (saved) => {
+            const cached = vaultFileCache.current.get(saved.name)
+            if (cached) return cached
+
+            const file = await downloadHistoryFile(saved.name, saved.originalFilename || undefined)
+            vaultFileCache.current.set(saved.name, file)
+            return file
+          }),
+        )
+
+        const result = await inspectHistoricalCoverage([...vaultFiles, ...selection.temporary])
+        if (!cancelled) setCoverage(result)
+      } catch (error) {
+        // Falha aqui é só a prévia — não pode impedir o envio da análise.
+        console.error('Failed to inspect historical coverage', error)
+        if (!cancelled) setCoverage(null)
+      } finally {
+        if (!cancelled) setIsInspecting(false)
+      }
+    }
+
+    inspect()
+
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionKey])
 
   const toggleSavedFile = (file: HistoryFileReference) => {
     const isSelected = selection.saved.some((selected) => selected.name === file.name)
@@ -184,6 +252,7 @@ export function HistoricalFileSelector({
     setIsDeleting(true)
     try {
       await deleteHistoryFile(fileToDelete.name)
+      vaultFileCache.current.delete(fileToDelete.name)
       toast({ title: 'Sucesso', description: 'Arquivo excluído do cofre.' })
 
       onChange({
@@ -241,6 +310,70 @@ export function HistoricalFileSelector({
     })
   }
 
+  const renderCoveragePanel = () => {
+    if (isInspecting) {
+      return (
+        <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs font-bold text-gray-500">
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+          Verificando os meses cobertos...
+        </div>
+      )
+    }
+
+    if (!coverage) return null
+
+    const { months, filesWithoutSheet } = coverage
+
+    if (months.length === 0) {
+      return (
+        <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-700">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div className="space-y-1">
+            <div>Nenhuma data reconhecida nos arquivos selecionados.</div>
+            <div className="font-medium text-red-600">
+              {filesWithoutSheet.length > 0
+                ? `Sem a aba "financas": ${filesWithoutSheet.join(', ')}.`
+                : 'Confira se a coluna "Data de Registro" está preenchida.'}
+            </div>
+          </div>
+        </div>
+      )
+    }
+
+    if (months.length < HISTORY_MONTH_WINDOW) {
+      return (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-800">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div className="space-y-1">
+            <div>Cobertura: apenas {formatMonthList(months)}</div>
+            <div className="font-medium text-amber-700">
+              O cruzamento usa {HISTORY_MONTH_WINDOW} meses — selecione também a outra base do cofre
+              para completar o período.
+            </div>
+          </div>
+        </div>
+      )
+    }
+
+    const usedMonths = months.slice(-HISTORY_MONTH_WINDOW)
+
+    return (
+      <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-bold text-emerald-800">
+        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+        <div className="space-y-1">
+          <div>Cobertura: {formatMonthList(usedMonths)}</div>
+          {months.length > HISTORY_MONTH_WINDOW && (
+            <div className="font-medium text-emerald-700">
+              {months.length} meses encontrados — o cruzamento usa os {HISTORY_MONTH_WINDOW} mais recentes.
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  const coveragePanel = renderCoveragePanel()
+
   return (
     <>
     <div className="space-y-6">
@@ -264,6 +397,8 @@ export function HistoricalFileSelector({
           <Loader2 className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
         </Button>
       </div>
+
+      {coveragePanel}
 
       <div className="space-y-2">
         {files.map((file) => {
