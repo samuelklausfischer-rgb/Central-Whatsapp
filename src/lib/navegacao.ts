@@ -62,13 +62,23 @@ export const DESTINOS_PRINCIPAIS: DestinoNav[] = [
   { title: 'Email', description: 'Caixa de entrada', icon: Mail, url: '/email' },
 ]
 
-/** Sempre visíveis, para qualquer usuário. */
-const FERRAMENTAS_BASE: ItemDeFerramenta[] = [
+/**
+ * O que é do PRÓPRIO app: mexe nas conversas, nas tarefas e nas notas que vivem
+ * aqui dentro. Sempre visíveis, para qualquer usuário.
+ *
+ * Estas não passam por gate porque não há o que liberar — quem entrou no Central
+ * Whats já pode usar todas.
+ */
+const FERRAMENTAS_DO_APP: DestinoNav[] = [
   { title: 'Tarefas', description: 'Kanban interno', icon: ListTodo, url: '/crm' },
   { title: 'Anotações', description: 'Notas rápidas', icon: StickyNote, url: '/notes' },
   { title: 'Gatilhos', description: 'Mensagens auto', icon: Zap, url: '/triggers' },
-  { title: 'Agendamentos', description: 'Envios futuros', icon: CalendarClock, url: '/scheduled-messages' },
-  { title: 'Notificações', description: 'Som e alertas', icon: Bell, action: 'notifications' },
+  {
+    title: 'Agendamentos',
+    description: 'Envios futuros',
+    icon: CalendarClock,
+    url: '/scheduled-messages',
+  },
 ]
 
 const ANALISE_PRN: DestinoNav = {
@@ -114,39 +124,77 @@ type UsuarioDeNav = Pick<Profile, 'is_admin' | 'department'> & { is_super_admin?
  * Liberação das ferramentas externas. Não sai do `profile` como as outras: mora
  * no banco (`public.tool_access` e `relatorios.profiles`) e chega por
  * `useToolAccess()`. Opcional para que quem só monta menu estático continue
- * chamando `ferramentasDoUsuario(user)` sem mudar nada.
+ * chamando `gruposDeFerramentas(user)` sem mudar nada.
  */
 export interface AcessoFerramentasExternas {
   relatorios: boolean
   licitacoes: boolean
 }
 
+export interface GrupoDeFerramentas {
+  titulo: string
+  itens: DestinoNav[]
+}
+
 /**
- * Ferramentas que ESTE usuário pode ver.
+ * Ferramentas que ESTE usuário pode ver, JÁ SEPARADAS em dois grupos.
+ *
+ * A lista era plana e crescia sem hierarquia: para um admin com tudo liberado
+ * eram dez itens seguidos, misturando o que é do próprio app com sistemas que
+ * nem WhatsApp são. A divisão vive aqui, e não em cada menu, para que o desktop
+ * e a folha do celular nunca discordem sobre onde uma ferramenta nova entra.
+ *
+ * Grupo VAZIO é descartado: quem não tem nenhum sistema liberado veria só um
+ * título "Sistemas PRN" solto, prometendo algo que não está ali.
  *
  * As rotas já são protegidas em `App.tsx` (`FinanceiroToolRoute`,
  * `SuperAdminRoute`, `ExternalToolRoute`); esconder aqui é para não oferecer
  * porta que bate na cara.
  */
-export function ferramentasDoUsuario(
+export function gruposDeFerramentas(
   user: UsuarioDeNav | null | undefined,
   externas?: AcessoFerramentasExternas,
-): ItemDeFerramenta[] {
-  return [
-    ...FERRAMENTAS_BASE,
+): GrupoDeFerramentas[] {
+  const sistemas: DestinoNav[] = [
     ...(canAccessFinanceiroTools(user) ? [ANALISE_PRN, RATEIO] : []),
     ...(externas?.relatorios ? [RELATORIOS] : []),
     ...(externas?.licitacoes ? [LICITACOES] : []),
     ...(user?.is_super_admin ? [RELATORIO_APP] : []),
   ]
+
+  return [
+    { titulo: 'Do app', itens: FERRAMENTAS_DO_APP },
+    { titulo: 'Sistemas PRN', itens: sistemas },
+  ].filter((grupo) => grupo.itens.length > 0)
 }
 
-/** Itens de conta: no desktop vivem no menu do avatar; no celular, na folha "Mais". */
-export function itensDeConta(user: UsuarioDeNav | null | undefined): DestinoNav[] {
+/**
+ * Itens de conta: no desktop vivem no menu do avatar; no celular, na folha "Mais".
+ *
+ * **Notificações** mora aqui, e não entre as ferramentas: ela não abre uma tela,
+ * abre um diálogo de preferências de som e alerta. Ao lado de Configurações ela
+ * é o que é; no meio das ferramentas era mais um item competindo por atenção.
+ * Por causa dela o retorno é `ItemDeFerramenta[]`, e não `DestinoNav[]` — quem
+ * renderiza precisa desviar por `ehAcao`.
+ */
+export function itensDeConta(user: UsuarioDeNav | null | undefined): ItemDeFerramenta[] {
   return [
     ...(user?.is_admin
-      ? [{ title: 'Gestão de Equipe', description: 'Usuários e acessos', icon: ShieldAlert, url: '/admin' }]
+      ? [
+          {
+            title: 'Gestão de Equipe',
+            description: 'Usuários e acessos',
+            icon: ShieldAlert,
+            url: '/admin',
+          },
+        ]
       : []),
-    { title: 'Configurações', description: 'Preferências do app', icon: Settings, url: '/settings/general' },
+    { title: 'Notificações', description: 'Som e alertas', icon: Bell, action: 'notifications' },
+    {
+      title: 'Configurações',
+      description: 'Preferências do app',
+      icon: Settings,
+      url: '/settings/general',
+    },
   ]
 }

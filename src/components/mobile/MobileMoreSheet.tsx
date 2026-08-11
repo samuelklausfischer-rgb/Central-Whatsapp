@@ -6,7 +6,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useAuth } from '@/hooks/use-auth'
 import { useToolAccess } from '@/hooks/use-tool-access'
-import { ferramentasDoUsuario, itensDeConta, ehAcao, type ItemDeFerramenta } from '@/lib/navegacao'
+import { gruposDeFerramentas, itensDeConta, ehAcao, type ItemDeFerramenta } from '@/lib/navegacao'
 import { NotificationsDialog } from '@/components/NotificationsDialog'
 import { ReleaseNotesDialog } from '@/components/ReleaseNotesDialog'
 import { ReportarProblemaDialog } from '@/components/ReportarProblemaDialog'
@@ -38,7 +38,7 @@ export function MobileMoreSheet({
   const [problemaAberto, setProblemaAberto] = useState(false)
 
   const escuro = resolvedTheme === 'dark'
-  const ferramentas = ferramentasDoUsuario(user, useToolAccess())
+  const grupos = gruposDeFerramentas(user, useToolAccess())
   const conta = itensDeConta(user)
   const iniciais = (user?.name?.[0] || user?.username?.[0] || 'U').toUpperCase()
 
@@ -69,7 +69,9 @@ export function MobileMoreSheet({
             <SheetTitle className="flex items-center gap-3 text-left">
               <Avatar className="h-10 w-10 border border-border">
                 <AvatarImage src={user?.avatar_url || undefined} alt={user?.name || 'Usuário'} />
-                <AvatarFallback className="bg-primary/20 text-primary text-sm">{iniciais}</AvatarFallback>
+                <AvatarFallback className="bg-primary/20 text-primary text-sm">
+                  {iniciais}
+                </AvatarFallback>
               </Avatar>
               <span className="flex-1 min-w-0">
                 <span className="block truncate text-base font-medium text-foreground">
@@ -85,26 +87,33 @@ export function MobileMoreSheet({
           {/* `overscroll-contain` impede que a rolagem no fim da lista arraste a
               folha inteira e a feche sem querer. */}
           <div className="flex-1 overflow-y-auto overscroll-contain px-2 py-3">
-            <Secao titulo="Ferramentas">
-              {ferramentas.map((item) => (
+            {/*
+              Uma seção por grupo ("Do app" e "Sistemas PRN"), com os mesmos
+              rótulos do menu do desktop — a divisão vem pronta de
+              `lib/navegacao`, então os dois nunca discordam.
+            */}
+            {grupos.map((grupo) => (
+              <Secao key={grupo.titulo} titulo={grupo.titulo}>
+                {grupo.itens.map((item) => (
+                  <Linha
+                    key={item.url}
+                    icone={item.icon}
+                    titulo={item.title}
+                    descricao={item.description}
+                    onClick={() => irPara(item.url)}
+                  />
+                ))}
+              </Secao>
+            ))}
+
+            <Secao titulo="Conta">
+              {conta.map((item) => (
                 <Linha
                   key={item.title}
                   icone={item.icon}
                   titulo={item.title}
                   descricao={item.description}
                   onClick={() => acionar(item)}
-                />
-              ))}
-            </Secao>
-
-            <Secao titulo="Conta">
-              {conta.map((item) => (
-                <Linha
-                  key={item.url}
-                  icone={item.icon}
-                  titulo={item.title}
-                  descricao={item.description}
-                  onClick={() => irPara(item.url)}
                 />
               ))}
               <Linha
