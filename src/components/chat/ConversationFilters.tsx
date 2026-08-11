@@ -9,10 +9,12 @@ interface ConversationFiltersProps {
   statusFilter: string
   showUnresponded: boolean
   showArchived: boolean
+  showDeOutros: boolean
   onPeriodFilterChange: (v: string) => void
   onStatusFilterChange: (v: string) => void
   onUnrespondedChange: (v: boolean) => void
   onArchivedChange: (v: boolean) => void
+  onDeOutrosChange: (v: boolean) => void
   onClearAll: () => void
   isMobile: boolean
   filterCount: number
@@ -23,10 +25,12 @@ export default function ConversationFilters({
   statusFilter,
   showUnresponded,
   showArchived,
+  showDeOutros,
   onPeriodFilterChange,
   onStatusFilterChange,
   onUnrespondedChange,
   onArchivedChange,
+  onDeOutrosChange,
   onClearAll,
   isMobile,
   filterCount,
@@ -69,6 +73,20 @@ export default function ConversationFilters({
             className="rounded border-muted-foreground/30 accent-primary"
           />
           <span>Arquivadas</span>
+        </label>
+        {/*
+          Único filtro que REVELA em vez de restringir: conversa com dono fica
+          escondida por padrão. Fica marcado como desvio no contador de filtros
+          justamente por inverter o sentido dos outros.
+        */}
+        <label className="flex items-center gap-2.5 text-sm cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showDeOutros}
+            onChange={(e) => onDeOutrosChange(e.target.checked)}
+            className="rounded border-muted-foreground/30 accent-primary"
+          />
+          <span>De outros atendentes</span>
         </label>
       </div>
       {filterCount > 0 && (

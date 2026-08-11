@@ -19,7 +19,19 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { format, startOfDay, differenceInCalendarDays } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { Check, CheckCheck, Smartphone, Search, X, MessageCircle, Pin, RefreshCw, UserCheck, UsersRound } from 'lucide-react'
+import { Check, CheckCheck, Smartphone, Search, X, MessageCircle, Pin, RefreshCw, UserCheck, UsersRound, BellOff } from 'lucide-react'
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from '@/components/ui/alert-dialog'
+import { useToast } from '@/hooks/use-toast'
+import { zerarTodasAsNotificacoes } from '@/services/conversation_states'
 import { ContactNoteIcon } from '@/components/ui/ContactNoteIcon'
 import { ConversationActionsMenu } from '@/components/chat/ConversationActionsMenu'
 import { ConversationActionsContent } from '@/components/chat/ConversationActionsContent'
@@ -386,6 +398,38 @@ export function ChatList({
   // diálogo precisa existir para o não-admin ver botão nenhum.
   const [criarGrupoAberto, setCriarGrupoAberto] = useState(false)
 
+  // Zerar notificações apaga o badge de TODOS os aparelhos para a EQUIPE INTEIRA
+  // e não tem desfazer. Mesmo tratamento de "Criar grupo": para quem não é admin
+  // o ponto de entrada nem existe. E, diferente de tudo o mais nesta tela, exige
+  // confirmação — um clique sem querer aqui apaga o trabalho de acompanhamento de
+  // todo mundo.
+  const [zerarAberto, setZerarAberto] = useState(false)
+  const [zerando, setZerando] = useState(false)
+  const { toast } = useToast()
+
+  const handleZerarNotificacoes = useCallback(async () => {
+    setZerando(true)
+    try {
+      const afetadas = await zerarTodasAsNotificacoes()
+      setZerarAberto(false)
+      toast({
+        title: 'Notificações zeradas',
+        description: `${afetadas} ${afetadas === 1 ? 'conversa marcada' : 'conversas marcadas'} como lida para toda a equipe.`,
+      })
+      onRefreshAll?.()
+    } catch {
+      // A RPC já registrou o erro real no console. Aqui só importa que o diálogo
+      // NÃO feche: fechar sem avisar deixaria a pessoa achando que funcionou.
+      toast({
+        title: 'Não foi possível zerar as notificações',
+        description: 'Nada foi alterado. Tente de novo em alguns instantes.',
+        variant: 'destructive',
+      })
+    } finally {
+      setZerando(false)
+    }
+  }, [toast, onRefreshAll])
+
   /**
    * Geral = tudo do aparelho. Minhas = o que está sob minha responsabilidade.
    *
@@ -394,6 +438,20 @@ export function ChatList({
    * vista. Entrar ali faria "Remover" pular de aba sem o usuário pedir.
    */
   const [escopoLista, setEscopoLista] = useState<'geral' | 'minhas'>('geral')
+
+  /**
+   * Conversa que já tem dono sai da lista por padrão: quem olha a Geral está
+   * atrás do que ainda não tem responsável, e o que já foi pego só atrapalha.
+   *
+   * Ao contrário dos outros filtros, este REVELA em vez de restringir — e é por
+   * isso que conta no `activeFilterCount` quando LIGADO: aqui o desvio do padrão
+   * é mostrar, não esconder.
+   *
+   * A busca ignora esse ocultamento (ver `filteredConversations`). Sem isso,
+   * procurar por alguém que está com um colega não traria nada e o contato
+   * pareceria ter sumido do sistema — que é justamente o que não pode acontecer.
+   */
+  const [mostrarDeOutros, setMostrarDeOutros] = useState(false)
 
   // Conjunto de conversas com rascunho. A store só troca a referência do snapshot
   // quando o CONJUNTO muda — digitar dentro de uma conversa que já tem rascunho
@@ -406,14 +464,16 @@ export function ChatList({
     if (activeStatusFilter !== 'all') count++
     if (showUnrespondedOnly) count++
     if (showArchived) count++
+    if (mostrarDeOutros) count++
     if (searchQuery.trim()) count++
     return count
-  }, [activePeriodFilter, activeStatusFilter, showUnrespondedOnly, showArchived, searchQuery])
+  }, [activePeriodFilter, activeStatusFilter, showUnrespondedOnly, showArchived, mostrarDeOutros, searchQuery])
 
   const handleClearAllFilters = useCallback(() => {
     setActivePeriodFilter('all')
     setActiveStatusFilter('all')
     setShowUnrespondedOnly(false)
+    setMostrarDeOutros(false)
     if (showArchived) onToggleArchived()
     setSearchQuery('')
   }, [showArchived, onToggleArchived])
@@ -457,10 +517,38 @@ export function ChatList({
     [conversations, ehMinha],
   )
 
+  /**
+   * "De outro" NÃO é simplesmente o contrário de `ehMinha`: conversa sem dono
+   * também não é minha, e essa precisa continuar aparecendo — a fila livre é o
+   * motivo de a Geral existir. Só é de outro quando há um responsável de verdade,
+   * ainda ativo, e não sou eu.
+   *
+   * `finished` fica de fora porque atendimento encerrado não tem dono corrente:
+   * a conversa volta a ser de todos.
+   */
+  const ehDeOutro = useCallback(
+    (remoteSender: string) => {
+      if (!currentUserId) return false
+      const a = assignments?.get(remoteSender)
+      if (!a || !a.assigned_to) return false
+      if (a.status === 'finished') return false
+      return a.assigned_to !== currentUserId
+    },
+    [assignments, currentUserId],
+  )
+
   const filteredConversations = useMemo(() => {
     let filtered = conversations
     if (escopoLista === 'minhas') {
       filtered = filtered.filter((conv) => ehMinha(conv.remote_sender))
+    }
+    // Esconder o que já tem dono, EXCETO enquanto a pessoa está buscando: quem
+    // digita um nome quer aquele contato, não a fila. Achar "nenhum resultado"
+    // para alguém que existe é pior do que mostrar uma conversa a mais.
+    //
+    // Fora da Geral não se aplica: "Minhas" por definição só traz o que é meu.
+    if (escopoLista === 'geral' && !mostrarDeOutros && !deferredSearch.trim()) {
+      filtered = filtered.filter((conv) => !ehDeOutro(conv.remote_sender))
     }
     if (activePeriodFilter !== 'all') {
       filtered = filtered.filter((conv) => matchesPeriod(conv.lastMessage?.created_at, activePeriodFilter))
@@ -490,7 +578,7 @@ export function ChatList({
       })
     }
     return filtered
-  }, [deferredSearch, showUnrespondedOnly, showArchived, conversations, contactIndex, statesByKey, selectedDeviceId, activePeriodFilter, activeStatusFilter, escopoLista, ehMinha])
+  }, [deferredSearch, showUnrespondedOnly, showArchived, conversations, contactIndex, statesByKey, selectedDeviceId, activePeriodFilter, activeStatusFilter, escopoLista, ehMinha, mostrarDeOutros, ehDeOutro])
 
   const isSearching = deferredSearch !== searchQuery
 
@@ -512,6 +600,15 @@ export function ChatList({
                 title="Criar grupo"
               >
                 <UsersRound className="h-4 w-4" />
+              </button>
+            )}
+            {user?.is_admin && (
+              <button
+                onClick={() => setZerarAberto(true)}
+                className="text-chat-muted hover:text-chat-text transition-colors"
+                title="Zerar todas as notificações"
+              >
+                <BellOff className="h-4 w-4" />
               </button>
             )}
             {onRefreshAll && (
@@ -612,10 +709,12 @@ export function ChatList({
             statusFilter={activeStatusFilter}
             showUnresponded={showUnrespondedOnly}
             showArchived={showArchived}
+            showDeOutros={mostrarDeOutros}
             onPeriodFilterChange={setActivePeriodFilter}
             onStatusFilterChange={setActiveStatusFilter}
             onUnrespondedChange={setShowUnrespondedOnly}
             onArchivedChange={(v) => { if (v !== showArchived) onToggleArchived() }}
+            onDeOutrosChange={setMostrarDeOutros}
             onClearAll={handleClearAllFilters}
             isMobile={isMobile}
             filterCount={activeFilterCount}
@@ -647,6 +746,9 @@ export function ChatList({
             )}
             {showArchived && (
               <FilterChip label="Arquivadas" onRemove={() => onToggleArchived()} />
+            )}
+            {mostrarDeOutros && (
+              <FilterChip label="De outros atendentes" onRemove={() => setMostrarDeOutros(false)} />
             )}
             {searchQuery.trim() && (
               <FilterChip label={`Busca: "${searchQuery}"`} onRemove={() => setSearchQuery('')} />
@@ -765,6 +867,53 @@ export function ChatList({
           instanceKey={selectedDevice?.instance_key}
           onCriado={() => onRefreshAll?.()}
         />
+      )}
+
+      {user?.is_admin && (
+        <AlertDialog open={zerarAberto} onOpenChange={(v) => { if (!zerando) setZerarAberto(v) }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Zerar todas as notificações?</AlertDialogTitle>
+              {/*
+                O texto diz o alcance real em vez de um "tem certeza?" genérico:
+                pega todos os aparelhos, vale para todos os atendentes e não tem
+                desfazer. Quem confirmar precisa ter lido as três coisas.
+              */}
+              <AlertDialogDescription asChild>
+                <div className="space-y-2">
+                  <p>
+                    Todas as conversas de <strong>todos os aparelhos</strong> serão marcadas
+                    como lidas para <strong>toda a equipe</strong> — não só para você.
+                  </p>
+                  <p>
+                    Os avisos de mensagem nova somem da tela de todos os atendentes, e
+                    <strong> não há como desfazer</strong>. As mensagens em si não são
+                    apagadas nem alteradas.
+                  </p>
+                  <p className="text-xs">
+                    Conversas marcadas como “aguardando” mantêm o aviso.
+                  </p>
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={zerando}>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={zerando}
+                onClick={(e) => {
+                  // O AlertDialogAction fecha o diálogo por conta própria ao ser
+                  // clicado. Aqui isso esconderia o estado "zerando" e, num erro,
+                  // faria a ação parecer bem-sucedida — o fechamento é decidido
+                  // pelo handler, depois de saber o resultado.
+                  e.preventDefault()
+                  void handleZerarNotificacoes()
+                }}
+              >
+                {zerando ? 'Zerando...' : 'Zerar notificações'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       )}
     </div>
   )
