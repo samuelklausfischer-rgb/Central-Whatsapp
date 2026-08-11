@@ -7,6 +7,20 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.206',
+    date: '2026-08-11 14:15',
+    title: 'Ferramentas separadas em dois grupos, e a Análise PRN diz o que está faltando',
+    details: [
+      '🧰 O menu Ferramentas estava com item demais e sem ordem: o que é do próprio Central Whats aparecia embolado com os outros sistemas da empresa. Agora são dois grupos lado a lado — "Do app" (Tarefas, Anotações, Gatilhos, Agendamentos) e "Sistemas PRN" (Análise PRN, Rateio, Relatórios, Licitações)',
+      '📱 No celular a divisão é a mesma, em duas seções dentro de "Mais" — o que você aprende num lugar vale no outro',
+      '🔔 Notificações saiu de Ferramentas e foi para junto de Configurações: no computador, no menu do seu nome; no celular, na seção "Conta". Ela ajusta som e alerta, não abre uma tela, e ali fica ao lado das outras preferências',
+      '👤 Quem não tem nenhum sistema liberado vê só o grupo "Do app", sem seção vazia prometendo o que não está lá',
+      '⌨️ O menu passou a fechar com Esc e a aceitar as setas do teclado, e não escapa mais da tela em janela estreita',
+      '📊 Na Análise PRN, o aviso "Meses não detectados" acusava falha de leitura da planilha quando, na maioria das vezes, faltava só selecionar a segunda base do cofre. Agora a mensagem diz o que já está coberto e pede o que falta — e só fala em erro de leitura quando nenhuma data foi reconhecida mesmo, apontando quais arquivos estão sem a aba "financas"',
+      '🔍 O seletor de arquivos históricos mostra a cobertura ANTES de processar: quais meses os arquivos escolhidos cobrem e se ainda falta alguma coisa',
+    ],
+  },
+  {
     version: '0.0.205',
     date: '2026-08-11 14:00',
     title: 'Quem viu cada mensagem, quem designou a conversa, e a lista só com o que é seu',
