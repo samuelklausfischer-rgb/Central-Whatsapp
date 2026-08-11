@@ -100,15 +100,24 @@ export interface ConversationViewer {
   last_opened_at: string | null
 }
 
-export async function markAllConversationsReadForDevice(deviceId: string): Promise<void> {
-  const { data } = await supabase
-    .from('messages')
-    .select('remote_sender')
-    .eq('device_id', deviceId)
-    .eq('direction', 'inbound')
-    .is('deleted_at', null)
-  const senders = [...new Set((data || []).map((r: { remote_sender: string }) => r.remote_sender))]
-  await Promise.all(senders.map((s) => markConversationRead(deviceId, s)))
+/**
+ * Zera as notificações de TODOS os aparelhos a que o usuário tem acesso, para a
+ * EQUIPE INTEIRA. Devolve quantas conversas foram afetadas. Não há desfazer —
+ * quem chama precisa confirmar antes.
+ *
+ * O trabalho todo mora na RPC. A versão anterior desta função vivia aqui no
+ * cliente e estava quebrada de duas formas: lia `remote_sender` de `messages` sem
+ * paginação (o PostgREST corta em 1.000 linhas em silêncio, e são 46 mil
+ * mensagens — enxergava uma fração das conversas) e depois disparava um RPC por
+ * conversa, milhares de chamadas para o que no banco é uma instrução só.
+ */
+export async function zerarTodasAsNotificacoes(): Promise<number> {
+  const { data, error } = await supabase.rpc('mark_all_conversations_read_global')
+  if (error) {
+    console.error('Error clearing all notifications:', error)
+    throw error
+  }
+  return (data as number) ?? 0
 }
 
 export async function toggleResponded(deviceId: string, remoteSender: string): Promise<string | null> {
