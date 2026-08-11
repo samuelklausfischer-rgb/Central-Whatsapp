@@ -7,8 +7,8 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
-    version: '0.0.206',
-    date: '2026-08-11 14:15',
+    version: '0.0.207',
+    date: '2026-08-11 15:00',
     title: 'Ferramentas separadas em dois grupos, e a Análise PRN diz o que está faltando',
     details: [
       '🧰 O menu Ferramentas estava com item demais e sem ordem: o que é do próprio Central Whats aparecia embolado com os outros sistemas da empresa. Agora são dois grupos lado a lado — "Do app" (Tarefas, Anotações, Gatilhos, Agendamentos) e "Sistemas PRN" (Análise PRN, Rateio, Relatórios, Licitações)',

@@ -19,11 +19,12 @@
     "provider": "github",
     "owner": "samuelklausfischer-rgb",
     "repo": "Central-Whatsapp-releases",
-    "releaseType": "release"
+    "releaseType": "prerelease"
   },
   "win": {
     "target": "nsis",
     "icon": "central-whats-app/icon.png",
+    "verifyUpdateCodeSignature": false,
     "signtoolOptions": {
       "certificateSubjectName": "Central Whats",
       "publisherName": "Central Whats",

@@ -48,6 +48,38 @@ certificado EV (único com reputação SmartScreen imediata).
 
 ---
 
+## 🚨 Não religue `verifyUpdateCodeSignature` sem o `.cer` implantado
+
+Desde a **v0.0.207**, `central-whats-app/builder.json` traz `win.verifyUpdateCodeSignature:
+false`. Isso **não** desliga a assinatura — o binário continua sendo assinado. O que muda é
+que o `app-update.yml` gerado sai **sem** `publisherName`, e por isso o app deixa de exigir
+que a assinatura valide antes de aceitar uma atualização.
+
+Por que ficou assim: em **11/08/2026** a v0.0.206 foi publicada com a verificação ligada e
+**quebrou o auto-update da frota inteira**. Os apps baixavam os 112 MB e falhavam em
+`ERR_UPDATER_INVALID_SIGNATURE`, porque o `.cer` não estava nas máquinas e
+`Get-AuthenticodeSignature` devolvia `UnknownError`. A release teve que ser retirada do ar.
+
+O detalhe que torna o erro caro: **o `publisherName` fica gravado dentro do app instalado**
+(`app-update.yml`, lido por `configOnDisk` em `NsisUpdater.js`). Uma vez publicada uma versão
+com ele, nenhuma release posterior conserta as máquinas que já estão nessa versão — só
+implantar o certificado, ou uma instalação manual em cada uma.
+
+Riscos concretos de religar:
+
+- Máquina nova, fora do domínio ou com Windows reinstalado não recebe a GPO e trava.
+- A chave privada existe **só** na máquina de build e **não tem `.pfx` de backup**. Se ela
+  for perdida, um certificado novo (mesmo CN, chave diferente) trava a frota inteira.
+
+Se for religar mesmo assim: implantar o `.cer` **antes**, e confirmar `Valid` numa máquina
+real de usuário — **não** na máquina de build, que pode não estar no escopo da GPO. Foi
+exatamente essa confusão que causou o incidente.
+
+A integridade do download continua garantida de qualquer forma: o `electron-updater` confere
+o `sha512` publicado no `latest.yml` em toda atualização (`AppUpdater.js`).
+
+---
+
 ## Implantação na frota (executar pelo TI)
 
 ### 1. Confiar no certificado nas máquinas
