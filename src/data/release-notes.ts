@@ -7,6 +7,15 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.208',
+    date: '2026-08-12 15:00',
+    title: 'Relatórios e Licitações voltam a abrir',
+    details: [
+      '🔧 Em Ferramentas, Relatórios e Licitações abriam com o aviso "não está configurado" em vez do sistema. Voltaram a funcionar normalmente',
+      '✅ Análise PRN e Rateio não foram afetados e seguem como estavam',
+    ],
+  },
+  {
     version: '0.0.207',
     date: '2026-08-11 15:00',
     title: 'Ferramentas separadas em dois grupos, e a Análise PRN diz o que está faltando',
