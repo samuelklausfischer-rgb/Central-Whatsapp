@@ -1,5 +1,35 @@
 # Antivírus bloqueando o Central Whats — diagnóstico e implantação
 
+> ## ⚠️ ESTADO ATUAL (desde a v0.0.207): a assinatura foi REMOVIDA
+>
+> `central-whats-app/builder.json` **não tem mais** `win.signtoolOptions`. O app volta a ser
+> distribuído sem assinatura Authenticode, e `win.verifyUpdateCodeSignature: false` faz o
+> `app-update.yml` nascer sem `publisherName`.
+>
+> **Por quê:** a assinatura autoassinada não estava entregando nada. Ela só vale se o `.cer`
+> estiver implantado nas máquinas, e isso nunca aconteceu — para o Defender, uma cadeia que
+> termina em raiz não confiável não é melhor que binário sem assinatura. Medido em 11/08:
+> instalador sem assinatura devolve `NotSigned` (2), assinado com o certificado atual devolve
+> `UnknownError` (1); o `electron-updater` só aceita `0` (Valid), então **os dois eram
+> recusados igualmente**.
+>
+> **O que ela estava custando:** em 11/08 a v0.0.206 saiu com a verificação ligada e
+> **quebrou o auto-update da frota inteira** — os apps baixavam 112 MB e falhavam em
+> `ERR_UPDATER_INVALID_SIGNATURE`. A release teve que ser retirada do ar. O agravante é que
+> o `publisherName` fica gravado **dentro do app instalado** (`app-update.yml`, lido por
+> `configOnDisk` em `NsisUpdater.js`), então nenhuma release posterior alcança quem já está
+> numa versão que o tem. A saída foi uma instalação manual da v0.0.207, que nasce limpa.
+>
+> **O que continua protegendo o download:** o `electron-updater` confere o `sha512` publicado
+> no `latest.yml` em toda atualização (`AppUpdater.js`) — integridade preservada.
+>
+> **Se um dia quiser assinar de novo:** o certificado e o `.cer` continuam existindo, e o
+> resto deste documento segue válido. Mas então o `.cer` precisa ser implantado **antes** de
+> publicar, e a confirmação (`Get-AuthenticodeSignature` = `Valid`) tem que ser feita numa
+> **máquina de usuário real** — não na máquina de build, que pode não estar no escopo da GPO.
+> Confundir as duas foi exatamente o que causou o incidente. Para valer fora da frota
+> (SmartScreen), só Azure Trusted Signing ou EV.
+
 ## O problema
 
 O instalador era detectado como vírus e bloqueado (Windows Defender/SmartScreen e

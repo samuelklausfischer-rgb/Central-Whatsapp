@@ -24,17 +24,11 @@
   "win": {
     "target": "nsis",
     "icon": "central-whats-app/icon.png",
-    "verifyUpdateCodeSignature": false,
-    "signtoolOptions": {
-      "certificateSubjectName": "Central Whats",
-      "publisherName": "Central Whats",
-      "signingHashAlgorithms": ["sha256"],
-      "rfc3161TimeStampServer": "http://timestamp.digicert.com"
-    }
+    "verifyUpdateCodeSignature": false
   },
   "nsis": {
-    "oneClick": false,
-    "allowToChangeInstallationDirectory": true,
+    "oneClick": true,
+    "allowToChangeInstallationDirectory": false,
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true,
     "shortcutName": "Central Whats",
