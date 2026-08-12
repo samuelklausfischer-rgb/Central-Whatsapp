@@ -19,7 +19,7 @@
     "provider": "github",
     "owner": "samuelklausfischer-rgb",
     "repo": "Central-Whatsapp-releases",
-    "releaseType": "prerelease"
+    "releaseType": "release"
   },
   "win": {
     "target": "nsis",
