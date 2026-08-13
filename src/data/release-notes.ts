@@ -7,6 +7,20 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.209',
+    date: '2026-08-13 17:00',
+    title: 'Contato compartilhado, resposta citada e a mensagem que sumia',
+    details: [
+      '👥 Compartilhar VÁRIOS contatos de uma vez chegava como um balão vazio, sem nada dentro. Agora aparecem todos os cartões, um por contato, como no WhatsApp',
+      '↩️ Quando alguém responde citando uma mensagem, a citação agora aparece por cima da resposta — antes o texto chegava solto e quem estava atendendo perdia o contexto do atendimento',
+      '📤 Mensagem enviada para número digitado à mão podia sumir: ia parar numa conversa paralela, e quando o contato respondia a resposta caía em outra. A conversa agora se junta sozinha quando isso acontece',
+      '✍️ A assinatura saía em dobro ao reaproveitar uma mensagem já enviada — copiar e colar trazia a assinatura junto, e o sistema acrescentava a dele. Agora sai uma só',
+      '👻 Balões vazios que apareciam do nada no meio da conversa deixaram de ser criados: vinham de avisos internos do WhatsApp, que não são mensagem',
+      '📎 Na versão web, enviar documento logo depois de uma atualização falhava com um erro em inglês. Agora a página se atualiza sozinha, e o aviso é em português',
+      'ℹ️ Mensagem editada no WhatsApp ainda não atualiza aqui: o WhatsApp manda o texto novo criptografado, e sem a chave não há como aplicar',
+    ],
+  },
+  {
     version: '0.0.208',
     date: '2026-08-12 15:00',
     title: 'Relatórios e Licitações voltam a abrir',
