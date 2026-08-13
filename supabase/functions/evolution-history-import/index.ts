@@ -218,16 +218,126 @@ function parseVcard(vcard: string): { name: string | null; phone: string | null 
   return { name, phone }
 }
 
-function getContactInfo(msgObj: Record<string, unknown>): ContactInfo | null {
-  const m = msgObj as Record<string, any>
-  if (!m.contactMessage) return null
-  const cm = m.contactMessage
-  const vcard = typeof cm.vcard === 'string' ? cm.vcard : ''
+/** Um cartão de contato a partir do objeto cru da Evolution. */
+function cartaoDeContato(cm: unknown): ContactInfo | null {
+  if (!cm || typeof cm !== 'object') return null
+  const c = cm as Record<string, any>
+  const vcard = typeof c.vcard === 'string' ? c.vcard : ''
   const parsed = vcard ? parseVcard(vcard) : { name: null, phone: null }
+  const nome = typeof c.displayName === 'string' && c.displayName.trim() ? c.displayName.trim() : null
   return {
-    name: cm.displayName || parsed.name || 'Contato',
+    name: nome || parsed.name || 'Contato',
     phone: parsed.phone,
   }
+}
+
+/**
+ * Contatos compartilhados numa mensagem. SEMPRE lista — inclusive quando é um só.
+ *
+ * GÊMEA da função de mesmo nome em `evolution-webhook/index.ts`, e precisa
+ * continuar assim. As duas funções são independentes: não há `_shared` nem
+ * import entre elas, e o deploy é ARQUIVO A ARQUIVO no self-hosted (com portão
+ * de sha256), então extrair essas ~40 linhas para um módulo comum custaria
+ * mudar o pipeline de publicação inteiro. Ao alterar aqui, alterar lá também.
+ *
+ * O porquê está documentado na versão do webhook: o WhatsApp usa
+ * `contactMessage` para um contato e `contactsArrayMessage` para vários, e só o
+ * singular era tratado — vários viravam balão vazio.
+ */
+function getContactInfos(msgObj: Record<string, unknown>): ContactInfo[] | null {
+  const m = msgObj as Record<string, any>
+
+  if (m.contactMessage) {
+    const um = cartaoDeContato(m.contactMessage)
+    return um ? [um] : null
+  }
+
+  const arr = m.contactsArrayMessage
+  if (arr && typeof arr === 'object') {
+    const brutos = Array.isArray(arr.contacts) ? arr.contacts : []
+    const cartoes = brutos
+      .map((c: unknown) => cartaoDeContato(c))
+      .filter((c: ContactInfo | null): c is ContactInfo => c !== null)
+    if (cartoes.length > 0) return cartoes
+
+    const rotulo = typeof arr.displayName === 'string' && arr.displayName.trim()
+      ? arr.displayName.trim()
+      : 'Contato'
+    return [{ name: rotulo, phone: null }]
+  }
+
+  return null
+}
+
+/**
+ * Prévia da citação, com os mesmos rótulos humanos usados no webhook — o front
+ * mostra "Voz" para qualquer texto que ele reconheça como rótulo técnico, e sem
+ * esta tradução uma FOTO citada apareceria como "Voz".
+ */
+function textoParaCitacao(bruto: string): string {
+  const t = (bruto || '').trim()
+  if (!t) return ''
+  if (t.startsWith('[Documento:')) return 'Documento'
+  if (t.startsWith('[Contato:')) return 'Contato'
+  if (t.startsWith('[Lista:')) return 'Lista'
+  const mapa: Record<string, string> = {
+    '[Imagem]': 'Foto',
+    '[Vídeo]': 'Vídeo',
+    '[Música]': 'Música',
+    '[Figurinha]': 'Figurinha',
+    '[Documento]': 'Documento',
+    '[Contato]': 'Contato',
+    '[Localização]': 'Localização',
+    '[Mensagem de mídia]': 'Mídia',
+    '[Anexo]': 'Anexo',
+  }
+  return mapa[t] ?? t
+}
+
+/**
+ * Citação de uma mensagem importada — SEM consulta ao banco, de propósito.
+ *
+ * O webhook procura a mensagem citada por `device_id + external_id` para
+ * preencher também o `reply_to_id`. Aqui isso seria uma ida ao banco POR
+ * MENSAGEM, num caminho que processa dezenas de milhares delas em lote (a
+ * Evolution retém 380 mil mensagens só de um aparelho) — e a própria importação
+ * já é a principal suspeita de saturar a ingestão ao vivo. Não vale.
+ *
+ * O snapshot sozinho resolve a tela: o front renderiza a citação sem precisar do
+ * `reply_to_id`. Perde-se só o clique para pular até a original.
+ *
+ * O `contextInfo` é procurado em DOIS lugares porque o payload do histórico não
+ * passa pelo mesmo `prepareMessage` que iça o campo para o topo nos webhooks —
+ * então aqui ele pode vir aninhado dentro do tipo da mensagem. Não achou, não
+ * grava nada: nunca piora o que já existe.
+ */
+function citacaoDoHistorico(
+  record: Record<string, any>,
+  msgObj: Record<string, unknown>,
+): JsonRecord | null {
+  const m = msgObj as Record<string, any>
+  const candidatos = [
+    record?.contextInfo,
+    ...Object.values(m).map((v: any) => (v && typeof v === 'object' ? v.contextInfo : null)),
+  ]
+  const ctx = candidatos.find((c: any) => c && typeof c === 'object' && (c.stanzaId || c.quotedMessage))
+  if (!ctx) return null
+
+  const stanzaId = typeof ctx.stanzaId === 'string' ? ctx.stanzaId : ''
+  const quoted = ctx.quotedMessage
+  if (!quoted || typeof quoted !== 'object') return null
+
+  let texto = ''
+  try {
+    texto = textoParaCitacao(extractContent(unwrapMessage(quoted as Record<string, unknown>) || {}))
+  } catch {
+    return null
+  }
+  if (!texto) return null
+
+  // `sender_name` vazio: o `participant` é um JID cru, e o front cai para
+  // "Mensagem original", que é melhor de ler.
+  return { id: stanzaId, content: texto, sender_name: '' } as JsonRecord
 }
 
 type ListRow = { rowId: string; title: string; description?: string }
@@ -263,8 +373,14 @@ function extractContent(msgObj: Record<string, unknown>): string {
   if (m.extendedTextMessage?.text) return m.extendedTextMessage.text
   if (mediaInfo) return mediaInfo.caption || mediaInfo.label
   if (m.reactionMessage) return '[Reação]'
-  const contactInfo = getContactInfo(m)
-  if (contactInfo) return `[Contato: ${contactInfo.name}]`
+  const contactInfos = getContactInfos(m)
+  if (contactInfos && contactInfos.length > 0) {
+    // Prefixo "[Contato: " obrigatório nos dois casos: é por ele que o front
+    // esconde o rótulo técnico e mostra os balões. Ver a versão do webhook.
+    return contactInfos.length === 1
+      ? `[Contato: ${contactInfos[0].name}]`
+      : `[Contato: ${contactInfos[0].name} e outros ${contactInfos.length - 1}]`
+  }
   const listInfo = getListInfo(m)
   if (listInfo) return `[Lista: ${listInfo.title || 'Menu'}]`
   if (m.locationMessage) return '[Localização]'
@@ -502,7 +618,8 @@ function normalizeMessage(raw: unknown, deviceId: string, instanceName: string, 
   const createdAt = messageTimestampToIso(record.messageTimestamp)
   const msgObj = unwrapMessage((asRecord(record.message) || {}) as Record<string, unknown>)
   const mediaInfo = getMediaInfo(msgObj)
-  const sharedContactInfo = getContactInfo(msgObj)
+  const sharedContactInfos = getContactInfos(msgObj)
+  const citacao = citacaoDoHistorico(record as Record<string, any>, msgObj)
   const listInfo = getListInfo(msgObj)
   const content = extractContent(msgObj)
   const shouldFetchMedia = job.media_mode === 'hybrid' && mediaInfo && isRecent(createdAt, job.recent_media_days)
@@ -527,11 +644,12 @@ function normalizeMessage(raw: unknown, deviceId: string, instanceName: string, 
       origin: 'webhook',
       external_id: externalId,
       created_at: createdAt,
-      ...(sharedContactInfo
-        ? { attachments: [{ type: 'contact', name: sharedContactInfo.name, phone: sharedContactInfo.phone }] }
+      ...(sharedContactInfos && sharedContactInfos.length > 0
+        ? { attachments: sharedContactInfos.map((c) => ({ type: 'contact', name: c.name, phone: c.phone })) }
         : listInfo
         ? { attachments: [{ type: 'list', title: listInfo.title, description: listInfo.description, buttonText: listInfo.buttonText, sections: listInfo.sections }] }
         : {}),
+      ...(citacao ? { reply_to_snapshot: citacao } : {}),
     } as JsonRecord,
   }
 }
