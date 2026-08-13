@@ -452,15 +452,253 @@ function parseVcard(vcard: string): { name: string | null; phone: string | null 
   return { name, phone }
 }
 
-function getContactInfo(msgObj: Record<string, unknown>): ContactInfo | null {
-  const m = msgObj as Record<string, any>
-  if (!m.contactMessage) return null
-  const cm = m.contactMessage
-  const vcard = typeof cm.vcard === 'string' ? cm.vcard : ''
+/** Um cartão de contato a partir do objeto cru da Evolution. */
+function cartaoDeContato(cm: unknown): ContactInfo | null {
+  if (!cm || typeof cm !== 'object') return null
+  const c = cm as Record<string, any>
+  const vcard = typeof c.vcard === 'string' ? c.vcard : ''
   const parsed = vcard ? parseVcard(vcard) : { name: null, phone: null }
+  const nome = typeof c.displayName === 'string' && c.displayName.trim() ? c.displayName.trim() : null
   return {
-    name: cm.displayName || parsed.name || 'Contato',
+    name: nome || parsed.name || 'Contato',
     phone: parsed.phone,
+  }
+}
+
+/**
+ * Contatos compartilhados numa mensagem. SEMPRE lista — inclusive quando é um só.
+ *
+ * O WhatsApp usa DOIS tipos: `contactMessage` para um contato e
+ * `contactsArrayMessage` para vários. Só o singular era tratado, então
+ * compartilhar 16 contatos caía no `[Mensagem de mídia]` do fim do
+ * `extractContent`, sem anexo nenhum — e como o front esconde esse rótulo, o
+ * atendente via um balão VAZIO. Caso real: mensagem `a4a1b453` de 12/08/2026.
+ *
+ * A lista existe porque o front já renderiza UM BALÃO POR ANEXO
+ * (`ChatWindow.tsx`): N contatos viram N anexos numa mensagem só, sem mudar
+ * uma linha do app.
+ *
+ * ⚠️ O formato de `contactsArrayMessage` é convenção do Baileys, NÃO confirmado
+ * contra payload real desta instalação — é a mesma incerteza que existiu com
+ * `isForwarded`, e que só se resolveu olhando produção. Por isso: se `contacts`
+ * não vier como array, ainda assim devolvemos um cartão com o `displayName` do
+ * envelope (que no WhatsApp é o "Fulano e outros 15 contatos"), em vez de null.
+ * Melhor um balão com nome e sem telefone do que o balão vazio de hoje. E a
+ * sonda de tipo desconhecido registra o payload para ajustar depois.
+ */
+function getContactInfos(msgObj: Record<string, unknown>): ContactInfo[] | null {
+  const m = msgObj as Record<string, any>
+
+  if (m.contactMessage) {
+    const um = cartaoDeContato(m.contactMessage)
+    return um ? [um] : null
+  }
+
+  const arr = m.contactsArrayMessage
+  if (arr && typeof arr === 'object') {
+    const brutos = Array.isArray(arr.contacts) ? arr.contacts : []
+    const cartoes = brutos
+      .map((c: unknown) => cartaoDeContato(c))
+      .filter((c: ContactInfo | null): c is ContactInfo => c !== null)
+    if (cartoes.length > 0) return cartoes
+
+    const rotulo = typeof arr.displayName === 'string' && arr.displayName.trim()
+      ? arr.displayName.trim()
+      : 'Contato'
+    return [{ name: rotulo, phone: null }]
+  }
+
+  return null
+}
+
+type CitacaoInfo = {
+  reply_to_id: string | null
+  reply_to_snapshot: { content: string; sender_name: string; id: string } | null
+}
+
+/**
+ * Texto que vai na PRÉVIA da citação.
+ *
+ * O front mostra **"Voz"** para qualquer conteúdo que ele reconheça como rótulo
+ * técnico (`isTechnicalPlaceholder`, em `ChatWindow.tsx`) — e essa lista inclui
+ * `[Imagem]`, `[Vídeo]` e `[Documento: …]`. Mandar o rótulo cru faria uma FOTO
+ * citada aparecer como "Voz" na prévia.
+ *
+ * Por isso os rótulos viram palavras comuns, que não estão naquela lista e por
+ * isso são exibidas como estão. `[Áudio]` é a única exceção proposital: ele
+ * continua batendo com a lista, vira "Voz", e é exatamente o que se quer.
+ */
+function textoParaCitacao(bruto: string): string {
+  const t = (bruto || '').trim()
+  if (!t) return ''
+  if (t.startsWith('[Documento:')) return 'Documento'
+  if (t.startsWith('[Contato:')) return 'Contato'
+  if (t.startsWith('[Lista:')) return 'Lista'
+  const mapa: Record<string, string> = {
+    '[Imagem]': 'Foto',
+    '[Vídeo]': 'Vídeo',
+    '[Música]': 'Música',
+    '[Figurinha]': 'Figurinha',
+    '[Documento]': 'Documento',
+    '[Contato]': 'Contato',
+    '[Localização]': 'Localização',
+    '[Mensagem de mídia]': 'Mídia',
+    '[Anexo]': 'Anexo',
+  }
+  return mapa[t] ?? t
+}
+
+/**
+ * Resposta citada que CHEGOU do WhatsApp.
+ *
+ * A Evolution entrega o `contextInfo` içado para o topo do payload, e dentro
+ * dele vem `stanzaId` (id da mensagem citada) e `quotedMessage` (o conteúdo
+ * dela). Até aqui só o `isForwarded` era aproveitado — o resto era descartado, e
+ * o atendente recebia a resposta solta, sem saber a que ela respondia. As
+ * colunas `reply_to_id`/`reply_to_snapshot` já existiam e o front já as
+ * renderiza; só ninguém preenchia no caminho de entrada.
+ *
+ * DOIS CAMINHOS, nesta ordem:
+ *  1. Achou a mensagem citada no nosso banco → grava id + snapshot reais.
+ *  2. Não achou (citaram algo anterior à importação, o caso mais comum) →
+ *     monta o snapshot com o próprio `quotedMessage` e deixa `reply_to_id`
+ *     nulo. O front renderiza a citação só com o snapshot, então funciona
+ *     igual — é por isso que vale a pena não desistir no passo 1.
+ *
+ * NUNCA LANÇA. Este é o único webhook de ingestão da empresa: uma exceção aqui
+ * derrubaria a gravação da mensagem inteira, e perder a mensagem é muito pior
+ * do que perder a citação dela.
+ */
+async function resolverCitacao(
+  contextInfo: unknown,
+  deviceId: string,
+  headers: Record<string, string>,
+): Promise<CitacaoInfo> {
+  const vazio: CitacaoInfo = { reply_to_id: null, reply_to_snapshot: null }
+  if (!contextInfo || typeof contextInfo !== 'object') return vazio
+
+  const ctx = contextInfo as Record<string, any>
+  const stanzaId = typeof ctx.stanzaId === 'string' && ctx.stanzaId ? ctx.stanzaId : null
+  const quoted = ctx.quotedMessage
+  if (!stanzaId && !quoted) return vazio
+
+  if (stanzaId) {
+    try {
+      const resp = await fetch(
+        `${SUPABASE_URL}/rest/v1/messages?device_id=eq.${deviceId}&external_id=eq.${encodeURIComponent(stanzaId)}&select=id,content,sender_name`,
+        { headers },
+      )
+      if (resp.ok) {
+        const arr = await resp.json().catch(() => null)
+        const orig = Array.isArray(arr) && arr.length > 0 ? arr[0] : null
+        if (orig?.id) {
+          return {
+            reply_to_id: orig.id,
+            reply_to_snapshot: {
+              id: orig.id,
+              content: textoParaCitacao(orig.content ?? ''),
+              sender_name: orig.sender_name ?? '',
+            },
+          }
+        }
+      } else {
+        // Mesmo padrão do revoke: registra e segue. Não derruba a mensagem.
+        console.warn('[citacao] busca da original falhou', { status: resp.status, stanzaId })
+      }
+    } catch (err) {
+      console.warn('[citacao] busca da original com erro', String(err))
+    }
+  }
+
+  if (quoted && typeof quoted === 'object') {
+    let texto = ''
+    try {
+      texto = textoParaCitacao(extractContent(unwrapMessage(quoted as Record<string, unknown>) || {}))
+    } catch (err) {
+      console.warn('[citacao] nao consegui ler o quotedMessage', String(err))
+    }
+    // `sender_name` fica VAZIO de propósito. O `contextInfo.participant` é um JID
+    // cru (`5548...@s.whatsapp.net`), e estampar isso no cabeçalho da citação
+    // ficaria pior do que não ter nome. Vazio faz o front cair no rótulo
+    // "Mensagem original", que é honesto e legível.
+    return {
+      reply_to_id: null,
+      reply_to_snapshot: { id: stanzaId ?? '', content: texto, sender_name: '' },
+    }
+  }
+
+  return vazio
+}
+
+/**
+ * A divergencia e EXATAMENTE o nono digito de um celular brasileiro?
+ *
+ * `55 DD 9 XXXXXXXX` contra `55 DD XXXXXXXX`, mesmo DDD e mesmos 8 finais. Nada
+ * mais passa: existem 28 mil mensagens legitimas em chave de 13 digitos, porque
+ * para aqueles numeros o JID canonico TEM o 9. Uma regra generica de "normalizar
+ * telefone" quebraria todas elas.
+ */
+function soDifereNoNonoDigito(a: string, b: string): boolean {
+  if (!a || !b || a === b) return false
+  const com9 = a.length === 13 ? a : b
+  const sem9 = a.length === 13 ? b : a
+  return (
+    /^55[0-9]{2}9[0-9]{8}$/.test(com9) &&
+    /^55[0-9]{10}$/.test(sem9) &&
+    com9.slice(0, 4) === sem9.slice(0, 4) &&
+    com9.slice(5) === sem9.slice(4)
+  )
+}
+
+/**
+ * Conserta a conversa quando o app gravou a chave errada.
+ *
+ * O app monta o JID a partir do que o atendente digitou; o WhatsApp tem o seu, e
+ * as duas formas divergem no nono digito para muitos numeros. O envio funciona,
+ * mas a linha fica numa conversa paralela -- e quando o contato responde, o
+ * webhook cria a conversa DE VERDADE e a mensagem enviada some da vista.
+ *
+ * O eco do webhook e o unico momento em que as duas chaves estao lado a lado: a
+ * gravada e a canonica. E aqui, portanto, que da para consertar sozinho.
+ *
+ * Delega para a RPC `mover_conversa_para_jid_canonico`, que move as SETE tabelas
+ * numa transacao. Fazer seis PATCHes daqui deixaria atribuicao e marcadores
+ * apontando para conversa inexistente se um deles falhasse.
+ *
+ * NUNCA LANCA: perder a mensagem por causa de uma correcao de chave seria pior
+ * que a chave errada.
+ */
+async function curarChave(
+  deviceId: string,
+  chaveGravada: string,
+  chaveCanonica: string,
+  headers: Record<string, string>,
+  externalId: string,
+): Promise<void> {
+  if (!soDifereNoNonoDigito(chaveGravada, chaveCanonica)) return
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/rest/v1/rpc/mover_conversa_para_jid_canonico`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        p_device_id: deviceId,
+        p_de: chaveGravada,
+        p_para: chaveCanonica,
+      }),
+    })
+    const corpo = await resp.text().catch(() => '')
+    console.log(
+      JSON.stringify({
+        scope: 'cura_nono_digito',
+        messageId: externalId,
+        de: chaveGravada,
+        para: chaveCanonica,
+        status: resp.status,
+        resultado: corpo.slice(0, 300),
+      }),
+    )
+  } catch (err) {
+    console.warn('[cura] falhou ao mover conversa', String(err))
   }
 }
 
@@ -672,7 +910,7 @@ async function fetchMediaAttachment(
   }
 }
 
-Deno.serve(async (req: Request) => {
+async function tratarWebhook(req: Request): Promise<Response> {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'method not allowed' }), { status: 405 })
   }
@@ -843,6 +1081,40 @@ Deno.serve(async (req: Request) => {
   const msgObj = unwrapMessage(messageData.message || {})
   const messageTypeKeys = getMessageTypeKeys(msgObj)
 
+  /**
+   * `secretEncryptedMessage` NÃO é mensagem — é envelope de controle, e virava
+   * balão fantasma vazio na conversa.
+   *
+   * É assim que o WhatsApp entrega a EDIÇÃO de uma mensagem: o texto novo vem
+   * em `encPayload`, cifrado, e `targetMessageKey.id` aponta para a mensagem
+   * original. Confirmado no payload real de `2A86272917E5103CFADB`, que aponta
+   * para `2A905703E38D955F01AD` ("Pode pedir revisão de bobo") — a mensagem que
+   * o usuário havia editado segundos antes.
+   *
+   * Como não temos a chave para decifrar o `encPayload`, não dá para aplicar a
+   * edição. Mas gravar o envelope como mensagem é pior que ignorá-lo: ele cai no
+   * `[Mensagem de mídia]` do fim do `extractContent`, sem anexo, e o front
+   * esconde esse rótulo — sobra um balão vazio no meio do atendimento. Havia
+   * 1.973 linhas assim no banco, a um ritmo de 20 a 30 por dia.
+   *
+   * O `targetMessageKey` fica no log: é o dado que faltava para um dia tratar
+   * edição de verdade, e a sonda antiga (`detectEditSignal`) nunca o encontrou
+   * porque procurava por `protocolMessage`/`editedMessage`, que o WhatsApp não
+   * usa neste caso.
+   */
+  const envelopeCifrado = (msgObj as Record<string, any>).secretEncryptedMessage
+  if (envelopeCifrado) {
+    editProbeLog('secret_encrypted_ignorado', {
+      messageId: externalId,
+      alvo: envelopeCifrado?.targetMessageKey?.id ?? null,
+      tipo: envelopeCifrado?.secretEncType ?? null,
+    })
+    return new Response(
+      JSON.stringify({ status: 'ignored', reason: 'secretEncryptedMessage', build: BUILD_MARKER }),
+      { status: 200 },
+    )
+  }
+
   // ---- Reaction handling: update original message instead of creating a new one ----
   const reactionMsg = msgObj.reactionMessage
   if (reactionMsg) {
@@ -892,7 +1164,7 @@ Deno.serve(async (req: Request) => {
   // ---- End reaction handling ----
 
   const mediaInfo = getMediaInfo(msgObj)
-  const sharedContactInfo = getContactInfo(msgObj)
+  const sharedContactInfos = getContactInfos(msgObj)
   const listInfo = getListInfo(msgObj)
   const content = extractContent(msgObj)
   const nameToUse = !isWeakSenderName(pushName) ? pushName : ''
@@ -926,7 +1198,10 @@ Deno.serve(async (req: Request) => {
 
   if (externalId) {
     const existingResp = await fetch(
-      `${SUPABASE_URL}/rest/v1/messages?device_id=eq.${device.id}&external_id=eq.${encodeURIComponent(externalId)}&select=id,content,sender_name,attachments`,
+      // `remote_sender` entrou para a auto-cura do nono digito (ver `curarChave`).
+      // `group_participant` ja era LIDO na montagem do patch (`:1155`) mas nao vinha
+      // no select: a comparacao usava `undefined` e reescrevia o campo a cada eco.
+      `${SUPABASE_URL}/rest/v1/messages?device_id=eq.${device.id}&external_id=eq.${encodeURIComponent(externalId)}&select=id,content,sender_name,attachments,remote_sender,group_participant`,
       { headers }
     )
     const existing = await existingResp.json()
@@ -943,8 +1218,8 @@ Deno.serve(async (req: Request) => {
       const nextAttachments =
         mediaInfo && currentAttachments.length === 0
           ? [await fetchMediaAttachment(body.instance, messageData, mediaInfo)].filter(Boolean)
-          : sharedContactInfo && currentAttachments.length === 0
-          ? [{ type: 'contact', name: sharedContactInfo.name, phone: sharedContactInfo.phone }]
+          : sharedContactInfos && currentAttachments.length === 0
+          ? sharedContactInfos.map((c) => ({ type: 'contact', name: c.name, phone: c.phone }))
           : listInfo && currentAttachments.length === 0
           ? [{ type: 'list', title: listInfo.title, description: listInfo.description, buttonText: listInfo.buttonText, sections: listInfo.sections }]
           : []
@@ -970,6 +1245,13 @@ Deno.serve(async (req: Request) => {
           })
         }
       }
+
+      // Este eco e o unico momento em que as duas chaves aparecem juntas: a que o
+      // app gravou e a que o WhatsApp usa. Se divergirem so no nono digito, a
+      // conversa e movida inteira para a canonica -- e a mensagem que "sumiu"
+      // reaparece junto com as respostas do contato.
+      await curarChave(device.id, existing[0].remote_sender ?? '', remoteSender, headers, externalId)
+
       return new Response(JSON.stringify({ status: 'success', action: 'updated' }), { status: 200 })
     }
   }
@@ -981,16 +1263,18 @@ Deno.serve(async (req: Request) => {
   }
 
   const mediaAttachment = mediaInfo ? await fetchMediaAttachment(body.instance, messageData, mediaInfo) : null
-  const contactAttachment = sharedContactInfo
-    ? { type: 'contact', name: sharedContactInfo.name, phone: sharedContactInfo.phone }
+  // Um anexo POR CONTATO: o front renderiza um balão por anexo, então é assim
+  // que 16 contatos viram 16 cartões dentro de uma única mensagem.
+  const contactAttachments = sharedContactInfos
+    ? sharedContactInfos.map((c) => ({ type: 'contact', name: c.name, phone: c.phone }))
     : null
   const listAttachment = listInfo
     ? { type: 'list', title: listInfo.title, description: listInfo.description, buttonText: listInfo.buttonText, sections: listInfo.sections }
     : null
   const attachments = mediaAttachment
     ? [mediaAttachment]
-    : contactAttachment
-    ? [contactAttachment]
+    : contactAttachments && contactAttachments.length > 0
+    ? contactAttachments
     : listAttachment
     ? [listAttachment]
     : undefined
@@ -998,6 +1282,8 @@ Deno.serve(async (req: Request) => {
   if (mediaInfo && !mediaAttachment) {
     mediaWarn('media_attachment_null_before_insert', { messageId: externalId, mediaType: mediaInfo.type })
   }
+
+  const citacao = await resolverCitacao(messageData.contextInfo, device.id, headers)
 
   const insertResp = await fetch(`${SUPABASE_URL}/rest/v1/messages`, {
     method: 'POST',
@@ -1014,6 +1300,8 @@ Deno.serve(async (req: Request) => {
       ...(externalId ? { external_id: externalId } : {}),
       ...(groupParticipant ? { group_participant: groupParticipant } : {}),
       ...(isForwarded ? { is_forwarded: true } : {}),
+      ...(citacao.reply_to_id ? { reply_to_id: citacao.reply_to_id } : {}),
+      ...(citacao.reply_to_snapshot ? { reply_to_snapshot: citacao.reply_to_snapshot } : {}),
     }),
   })
 
@@ -1042,6 +1330,43 @@ Deno.serve(async (req: Request) => {
   }
 
   return new Response(JSON.stringify({ status: 'success' }), { status: 200 })
+}
+
+/**
+ * Rede de segurança do ÚNICO ponto de entrada de mensagens da empresa.
+ *
+ * Até aqui o corpo inteiro do handler rodava sem `try/catch` de topo: qualquer
+ * exceção não prevista (um campo com formato inesperado, um payload novo do
+ * WhatsApp) virava 500 — e um 500 significa **mensagem perdida**, para todos os
+ * aparelhos ao mesmo tempo, porque este webhook atende a frota inteira.
+ *
+ * Devolve **200 mesmo em erro**, de propósito: um 4xx/5xx faria a Evolution
+ * reenfileirar e repetir o mesmo payload que já falhou, transformando um defeito
+ * de parser numa tempestade de reentrega. O 200 encerra a entrega, e o log fica
+ * com o que for preciso para investigar.
+ *
+ * O log registra o TIPO e a MENSAGEM do erro, com a pilha truncada — nunca o
+ * payload, que carrega conversa de paciente.
+ */
+Deno.serve(async (req: Request) => {
+  try {
+    return await tratarWebhook(req)
+  } catch (err) {
+    const erro = err instanceof Error ? err : new Error(String(err))
+    console.error(
+      JSON.stringify({
+        scope: 'webhook_falha_nao_tratada',
+        build: BUILD_MARKER,
+        nome: erro.name,
+        mensagem: erro.message,
+        pilha: (erro.stack || '').split('\n').slice(0, 4).join(' | '),
+      }),
+    )
+    return new Response(
+      JSON.stringify({ status: 'error', reason: 'unhandled', build: BUILD_MARKER }),
+      { status: 200 },
+    )
+  }
 })
 
 function extractContent(msgObj: Record<string, unknown>): string {
@@ -1052,10 +1377,37 @@ function extractContent(msgObj: Record<string, unknown>): string {
   if (m.extendedTextMessage?.text) return m.extendedTextMessage.text
   if (mediaInfo) return mediaInfo.caption || mediaInfo.label
   if (m.reactionMessage) return '[Reação]'
-  const contactInfo = getContactInfo(m)
-  if (contactInfo) return `[Contato: ${contactInfo.name}]`
+  const contactInfos = getContactInfos(m)
+  if (contactInfos && contactInfos.length > 0) {
+    // PREFIXO OBRIGATORIAMENTE "[Contato: ". O front esconde o rótulo técnico
+    // por `startsWith('[Contato:')` e mostra os balões no lugar; um plural
+    // "[Contatos:" NÃO casaria com esse teste, e o texto apareceria repetido ao
+    // lado dos cartões. Corrigir isso do lado do front obrigaria a publicar web,
+    // Electron e Android — e é justamente o que esta correção evita.
+    // Este texto é o que aparece na PRÉVIA da lista de conversas.
+    return contactInfos.length === 1
+      ? `[Contato: ${contactInfos[0].name}]`
+      : `[Contato: ${contactInfos[0].name} e outros ${contactInfos.length - 1}]`
+  }
   const listInfo = getListInfo(m)
   if (listInfo) return `[Lista: ${listInfo.title || 'Menu'}]`
   if (m.locationMessage) return '[Localização]'
+
+  // SONDA: daqui para baixo é tudo que o parser NÃO reconheceu, e é exatamente
+  // o que vira balão vazio na tela (o front esconde este rótulo e não há anexo
+  // para mostrar no lugar). Registrar as chaves é o que permitiu descobrir que
+  // `contactsArrayMessage` existia; sem isso, cada tipo novo do WhatsApp custa
+  // uma investigação inteira a partir de print de usuário.
+  //
+  // Só as CHAVES e um resumo — nunca o payload cru inteiro, que carrega texto de
+  // paciente.
+  try {
+    console.warn(
+      '[tipo-desconhecido] mensagem sem parser',
+      JSON.stringify({ chaves: Object.keys(m).slice(0, 20) }),
+    )
+  } catch {
+    /* log nunca pode derrubar a ingestão */
+  }
   return '[Mensagem de mídia]'
 }

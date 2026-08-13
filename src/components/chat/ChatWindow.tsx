@@ -100,6 +100,18 @@ import {
   PADRAO_MENCAO,
 } from '@/lib/mentions'
 import { compartilharContatos, podeCompartilhar, paraCartao } from '@/services/contact_share'
+/**
+ * ESTÁTICO de propósito. Era `await import('@/services/storage')` dentro do
+ * envio e do agendamento — os dois únicos pontos do app em que um import sob
+ * demanda dispara COM TRABALHO NA TELA (arquivo já escolhido, legenda digitada,
+ * áudio gravado). Depois de um deploy, o chunk antigo não existe mais e o envio
+ * morria com erro técnico, sem forma de recuperar sem recarregar e perder tudo.
+ * O módulo tem 1,3 kB e sua única dependência (o client do Supabase) já está no
+ * bundle principal, importada por dezenas de arquivos — carregar junto não
+ * custa praticamente nada, e tira a rede do caminho crítico.
+ */
+import { uploadAudio, uploadFile } from '@/services/storage'
+import { traduzErro } from '@/lib/friendly-error'
 import { getParticipantesDoGrupo, escolherConversaDoParticipante } from '@/services/groups'
 import { AudioMessage } from '@/components/chat/AudioMessage'
 import { MediaViewer, type ViewerMedia } from '@/components/chat/MediaViewer'
@@ -435,6 +447,23 @@ const isMediaPlaceholder = (content?: string) => {
     cleaned.startsWith('[Contato:') ||
     cleaned.startsWith('[Lista:')
   )
+}
+
+/**
+ * Tira a assinatura que veio colada no começo do texto.
+ *
+ * A RPC de envio prepende a assinatura do aparelho (ou do perfil) uma vez. Quando
+ * o atendente copia uma mensagem já enviada — que no WhatsApp aparece COM a
+ * assinatura — e cola para reaproveitar, o texto chega já assinado e o servidor
+ * assina de novo. O destinatário recebe o nome duas vezes.
+ *
+ * Remove só a PRIMEIRA ocorrência, e só quando ela abre o texto. Assinatura no
+ * meio da mensagem é conteúdo que a pessoa escreveu, e não se mexe nisso.
+ */
+function removerAssinaturaDuplicada(texto: string, assinatura: string): string {
+  const assinaturaLimpa = assinatura.trim()
+  if (!assinaturaLimpa || !texto.startsWith(assinaturaLimpa)) return texto
+  return texto.slice(assinaturaLimpa.length).replace(/^\s+/, '')
 }
 
 const isTechnicalPlaceholder = (content?: string) => {
@@ -1709,12 +1738,20 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     // Caminho otimista (texto puro, sem edição/áudio/anexo): mostra o balão na
     // hora e limpa o input, sem esperar o round-trip RPC -> Evolution -> insert.
     if (!editingMessageId && msgText.trim() && attachments.length === 0 && !audioBlob) {
-      const content = msgText.trim()
+      const signature = device?.signature || user?.signature || ''
+      // Texto colado que JÁ vem assinado não pode ser assinado de novo.
+      //
+      // Quem reaproveita um comunicado copia a mensagem já enviada — e no
+      // WhatsApp ela aparece COM a assinatura. Colando, a assinatura vem junto, e
+      // a RPC acrescenta a dela: o cliente recebia o nome duas vezes (visto em
+      // 13/08/2026). Tirar aqui, e não no banco, porque `send_whatsapp_message`
+      // tem 326 linhas e é o caminho de envio de toda a empresa — não vale
+      // reescrevê-la inteira por um defeito de aparência.
+      const content = removerAssinaturaDuplicada(msgText.trim(), signature)
       // A mensagem otimista precisa nascer com EXATAMENTE o conteúdo que o
       // servidor grava: a RPC send_whatsapp_message prepende a assinatura como
       // `assinatura + "\n\n" + texto` (devices.signature, senão profiles.signature).
       // Replicar isso evita o balão sem assinatura que depois era substituído.
-      const signature = device?.signature || user?.signature || ''
       const displayContent = signature ? `${signature}\n\n${content}` : content
       const replyId = replyingTo?.id
       const replySnapshot = replyingTo
@@ -1758,8 +1795,9 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         onOptimisticConfirm?.(tempId, res?.message)
       } catch (err) {
         onOptimisticFail?.(tempId)
+        console.error('[envio] falhou', err)
         toast({
-          title: err instanceof Error ? err.message : 'Erro ao enviar mensagem',
+          title: traduzErro(err, 'Erro ao enviar mensagem'),
           variant: 'destructive',
         })
       }
@@ -1786,8 +1824,6 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         toast({ title: 'Mensagem editada' })
         return
       }
-
-      const { uploadAudio, uploadFile } = await import('@/services/storage')
 
       if (audioBlob) {
         const mediaUrl = await uploadAudio(audioBlob, user.id)
@@ -1858,8 +1894,9 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         setMencionarTodos(false)
       })
     } catch (err) {
+      console.error('[envio] falhou', err)
       toast({
-        title: err instanceof Error ? err.message : 'Erro ao enviar mensagem',
+        title: traduzErro(err, 'Erro ao enviar mensagem'),
         variant: 'destructive',
       })
     } finally {
@@ -1965,7 +2002,6 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
 
     setIsScheduling(true)
     try {
-      const { uploadAudio, uploadFile } = await import('@/services/storage')
       const scheduledAttachments: CreateScheduledMessageInput['attachments'] = []
 
       if (audioBlob) {
@@ -1996,8 +2032,9 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       })
       setIsScheduleOpen(false)
     } catch (err) {
+      console.error('[agendamento] falhou', err)
       toast({
-        title: err instanceof Error ? err.message : 'Erro ao agendar mensagem',
+        title: traduzErro(err, 'Erro ao agendar mensagem'),
         variant: 'destructive',
       })
     } finally {
