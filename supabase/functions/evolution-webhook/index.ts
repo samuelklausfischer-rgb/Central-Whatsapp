@@ -1009,6 +1009,40 @@ async function tratarWebhook(req: Request): Promise<Response> {
   const msgObj = unwrapMessage(messageData.message || {})
   const messageTypeKeys = getMessageTypeKeys(msgObj)
 
+  /**
+   * `secretEncryptedMessage` NÃO é mensagem — é envelope de controle, e virava
+   * balão fantasma vazio na conversa.
+   *
+   * É assim que o WhatsApp entrega a EDIÇÃO de uma mensagem: o texto novo vem
+   * em `encPayload`, cifrado, e `targetMessageKey.id` aponta para a mensagem
+   * original. Confirmado no payload real de `2A86272917E5103CFADB`, que aponta
+   * para `2A905703E38D955F01AD` ("Pode pedir revisão de bobo") — a mensagem que
+   * o usuário havia editado segundos antes.
+   *
+   * Como não temos a chave para decifrar o `encPayload`, não dá para aplicar a
+   * edição. Mas gravar o envelope como mensagem é pior que ignorá-lo: ele cai no
+   * `[Mensagem de mídia]` do fim do `extractContent`, sem anexo, e o front
+   * esconde esse rótulo — sobra um balão vazio no meio do atendimento. Havia
+   * 1.973 linhas assim no banco, a um ritmo de 20 a 30 por dia.
+   *
+   * O `targetMessageKey` fica no log: é o dado que faltava para um dia tratar
+   * edição de verdade, e a sonda antiga (`detectEditSignal`) nunca o encontrou
+   * porque procurava por `protocolMessage`/`editedMessage`, que o WhatsApp não
+   * usa neste caso.
+   */
+  const envelopeCifrado = (msgObj as Record<string, any>).secretEncryptedMessage
+  if (envelopeCifrado) {
+    editProbeLog('secret_encrypted_ignorado', {
+      messageId: externalId,
+      alvo: envelopeCifrado?.targetMessageKey?.id ?? null,
+      tipo: envelopeCifrado?.secretEncType ?? null,
+    })
+    return new Response(
+      JSON.stringify({ status: 'ignored', reason: 'secretEncryptedMessage', build: BUILD_MARKER }),
+      { status: 200 },
+    )
+  }
+
   // ---- Reaction handling: update original message instead of creating a new one ----
   const reactionMsg = msgObj.reactionMessage
   if (reactionMsg) {
