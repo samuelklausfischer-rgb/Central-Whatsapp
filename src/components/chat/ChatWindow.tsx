@@ -100,6 +100,18 @@ import {
   PADRAO_MENCAO,
 } from '@/lib/mentions'
 import { compartilharContatos, podeCompartilhar, paraCartao } from '@/services/contact_share'
+/**
+ * ESTÁTICO de propósito. Era `await import('@/services/storage')` dentro do
+ * envio e do agendamento — os dois únicos pontos do app em que um import sob
+ * demanda dispara COM TRABALHO NA TELA (arquivo já escolhido, legenda digitada,
+ * áudio gravado). Depois de um deploy, o chunk antigo não existe mais e o envio
+ * morria com erro técnico, sem forma de recuperar sem recarregar e perder tudo.
+ * O módulo tem 1,3 kB e sua única dependência (o client do Supabase) já está no
+ * bundle principal, importada por dezenas de arquivos — carregar junto não
+ * custa praticamente nada, e tira a rede do caminho crítico.
+ */
+import { uploadAudio, uploadFile } from '@/services/storage'
+import { traduzErro } from '@/lib/friendly-error'
 import { getParticipantesDoGrupo, escolherConversaDoParticipante } from '@/services/groups'
 import { AudioMessage } from '@/components/chat/AudioMessage'
 import { MediaViewer, type ViewerMedia } from '@/components/chat/MediaViewer'
@@ -1758,8 +1770,9 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         onOptimisticConfirm?.(tempId, res?.message)
       } catch (err) {
         onOptimisticFail?.(tempId)
+        console.error('[envio] falhou', err)
         toast({
-          title: err instanceof Error ? err.message : 'Erro ao enviar mensagem',
+          title: traduzErro(err, 'Erro ao enviar mensagem'),
           variant: 'destructive',
         })
       }
@@ -1786,8 +1799,6 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         toast({ title: 'Mensagem editada' })
         return
       }
-
-      const { uploadAudio, uploadFile } = await import('@/services/storage')
 
       if (audioBlob) {
         const mediaUrl = await uploadAudio(audioBlob, user.id)
@@ -1858,8 +1869,9 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         setMencionarTodos(false)
       })
     } catch (err) {
+      console.error('[envio] falhou', err)
       toast({
-        title: err instanceof Error ? err.message : 'Erro ao enviar mensagem',
+        title: traduzErro(err, 'Erro ao enviar mensagem'),
         variant: 'destructive',
       })
     } finally {
@@ -1965,7 +1977,6 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
 
     setIsScheduling(true)
     try {
-      const { uploadAudio, uploadFile } = await import('@/services/storage')
       const scheduledAttachments: CreateScheduledMessageInput['attachments'] = []
 
       if (audioBlob) {
@@ -1996,8 +2007,9 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       })
       setIsScheduleOpen(false)
     } catch (err) {
+      console.error('[agendamento] falhou', err)
       toast({
-        title: err instanceof Error ? err.message : 'Erro ao agendar mensagem',
+        title: traduzErro(err, 'Erro ao agendar mensagem'),
         variant: 'destructive',
       })
     } finally {
