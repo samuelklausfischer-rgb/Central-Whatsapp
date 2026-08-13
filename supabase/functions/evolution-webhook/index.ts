@@ -630,6 +630,78 @@ async function resolverCitacao(
   return vazio
 }
 
+/**
+ * A divergencia e EXATAMENTE o nono digito de um celular brasileiro?
+ *
+ * `55 DD 9 XXXXXXXX` contra `55 DD XXXXXXXX`, mesmo DDD e mesmos 8 finais. Nada
+ * mais passa: existem 28 mil mensagens legitimas em chave de 13 digitos, porque
+ * para aqueles numeros o JID canonico TEM o 9. Uma regra generica de "normalizar
+ * telefone" quebraria todas elas.
+ */
+function soDifereNoNonoDigito(a: string, b: string): boolean {
+  if (!a || !b || a === b) return false
+  const com9 = a.length === 13 ? a : b
+  const sem9 = a.length === 13 ? b : a
+  return (
+    /^55[0-9]{2}9[0-9]{8}$/.test(com9) &&
+    /^55[0-9]{10}$/.test(sem9) &&
+    com9.slice(0, 4) === sem9.slice(0, 4) &&
+    com9.slice(5) === sem9.slice(4)
+  )
+}
+
+/**
+ * Conserta a conversa quando o app gravou a chave errada.
+ *
+ * O app monta o JID a partir do que o atendente digitou; o WhatsApp tem o seu, e
+ * as duas formas divergem no nono digito para muitos numeros. O envio funciona,
+ * mas a linha fica numa conversa paralela -- e quando o contato responde, o
+ * webhook cria a conversa DE VERDADE e a mensagem enviada some da vista.
+ *
+ * O eco do webhook e o unico momento em que as duas chaves estao lado a lado: a
+ * gravada e a canonica. E aqui, portanto, que da para consertar sozinho.
+ *
+ * Delega para a RPC `mover_conversa_para_jid_canonico`, que move as SETE tabelas
+ * numa transacao. Fazer seis PATCHes daqui deixaria atribuicao e marcadores
+ * apontando para conversa inexistente se um deles falhasse.
+ *
+ * NUNCA LANCA: perder a mensagem por causa de uma correcao de chave seria pior
+ * que a chave errada.
+ */
+async function curarChave(
+  deviceId: string,
+  chaveGravada: string,
+  chaveCanonica: string,
+  headers: Record<string, string>,
+  externalId: string,
+): Promise<void> {
+  if (!soDifereNoNonoDigito(chaveGravada, chaveCanonica)) return
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/rest/v1/rpc/mover_conversa_para_jid_canonico`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        p_device_id: deviceId,
+        p_de: chaveGravada,
+        p_para: chaveCanonica,
+      }),
+    })
+    const corpo = await resp.text().catch(() => '')
+    console.log(
+      JSON.stringify({
+        scope: 'cura_nono_digito',
+        messageId: externalId,
+        de: chaveGravada,
+        para: chaveCanonica,
+        status: resp.status,
+        resultado: corpo.slice(0, 300),
+      }),
+    )
+  } catch (err) {
+    console.warn('[cura] falhou ao mover conversa', String(err))
+  }
+}
+
 type ListRow = { rowId: string; title: string; description?: string }
 type ListSection = { title?: string; rows: ListRow[] }
 type ListInfo = { title: string; description: string; buttonText: string; sections: ListSection[] }
@@ -1126,7 +1198,10 @@ async function tratarWebhook(req: Request): Promise<Response> {
 
   if (externalId) {
     const existingResp = await fetch(
-      `${SUPABASE_URL}/rest/v1/messages?device_id=eq.${device.id}&external_id=eq.${encodeURIComponent(externalId)}&select=id,content,sender_name,attachments`,
+      // `remote_sender` entrou para a auto-cura do nono digito (ver `curarChave`).
+      // `group_participant` ja era LIDO na montagem do patch (`:1155`) mas nao vinha
+      // no select: a comparacao usava `undefined` e reescrevia o campo a cada eco.
+      `${SUPABASE_URL}/rest/v1/messages?device_id=eq.${device.id}&external_id=eq.${encodeURIComponent(externalId)}&select=id,content,sender_name,attachments,remote_sender,group_participant`,
       { headers }
     )
     const existing = await existingResp.json()
@@ -1170,6 +1245,13 @@ async function tratarWebhook(req: Request): Promise<Response> {
           })
         }
       }
+
+      // Este eco e o unico momento em que as duas chaves aparecem juntas: a que o
+      // app gravou e a que o WhatsApp usa. Se divergirem so no nono digito, a
+      // conversa e movida inteira para a canonica -- e a mensagem que "sumiu"
+      // reaparece junto com as respostas do contato.
+      await curarChave(device.id, existing[0].remote_sender ?? '', remoteSender, headers, externalId)
+
       return new Response(JSON.stringify({ status: 'success', action: 'updated' }), { status: 200 })
     }
   }

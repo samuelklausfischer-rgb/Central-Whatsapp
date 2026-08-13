@@ -449,6 +449,23 @@ const isMediaPlaceholder = (content?: string) => {
   )
 }
 
+/**
+ * Tira a assinatura que veio colada no começo do texto.
+ *
+ * A RPC de envio prepende a assinatura do aparelho (ou do perfil) uma vez. Quando
+ * o atendente copia uma mensagem já enviada — que no WhatsApp aparece COM a
+ * assinatura — e cola para reaproveitar, o texto chega já assinado e o servidor
+ * assina de novo. O destinatário recebe o nome duas vezes.
+ *
+ * Remove só a PRIMEIRA ocorrência, e só quando ela abre o texto. Assinatura no
+ * meio da mensagem é conteúdo que a pessoa escreveu, e não se mexe nisso.
+ */
+function removerAssinaturaDuplicada(texto: string, assinatura: string): string {
+  const assinaturaLimpa = assinatura.trim()
+  if (!assinaturaLimpa || !texto.startsWith(assinaturaLimpa)) return texto
+  return texto.slice(assinaturaLimpa.length).replace(/^\s+/, '')
+}
+
 const isTechnicalPlaceholder = (content?: string) => {
   if (!content) return false
   const trimmed = content.trim()
@@ -1721,12 +1738,20 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     // Caminho otimista (texto puro, sem edição/áudio/anexo): mostra o balão na
     // hora e limpa o input, sem esperar o round-trip RPC -> Evolution -> insert.
     if (!editingMessageId && msgText.trim() && attachments.length === 0 && !audioBlob) {
-      const content = msgText.trim()
+      const signature = device?.signature || user?.signature || ''
+      // Texto colado que JÁ vem assinado não pode ser assinado de novo.
+      //
+      // Quem reaproveita um comunicado copia a mensagem já enviada — e no
+      // WhatsApp ela aparece COM a assinatura. Colando, a assinatura vem junto, e
+      // a RPC acrescenta a dela: o cliente recebia o nome duas vezes (visto em
+      // 13/08/2026). Tirar aqui, e não no banco, porque `send_whatsapp_message`
+      // tem 326 linhas e é o caminho de envio de toda a empresa — não vale
+      // reescrevê-la inteira por um defeito de aparência.
+      const content = removerAssinaturaDuplicada(msgText.trim(), signature)
       // A mensagem otimista precisa nascer com EXATAMENTE o conteúdo que o
       // servidor grava: a RPC send_whatsapp_message prepende a assinatura como
       // `assinatura + "\n\n" + texto` (devices.signature, senão profiles.signature).
       // Replicar isso evita o balão sem assinatura que depois era substituído.
-      const signature = device?.signature || user?.signature || ''
       const displayContent = signature ? `${signature}\n\n${content}` : content
       const replyId = replyingTo?.id
       const replySnapshot = replyingTo
