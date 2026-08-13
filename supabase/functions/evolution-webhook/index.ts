@@ -10,7 +10,10 @@ const STORAGE_BUCKET = 'chat-attachments'
 // conferir o arquivo em disco não prova que o isolate do Deno recarregou. Este
 // marcador volta no corpo de qualquer resposta e é a única checagem que prova
 // qual código está REALMENTE rodando. Incrementar a cada deploy desta função.
-const BUILD_MARKER = 'contact-avatar-fix-2026-07-28'
+// Trocar A CADA deploy. É o único jeito de provar que o isolate do Deno recarregou:
+// conferir o arquivo dentro do container mostra o que está em disco, não o que está
+// rodando. A verificação é um POST à função conferindo este campo na resposta.
+const BUILD_MARKER = 'contatos-citacao-nono-digito-2026-08-13'
 
 type MediaType = 'image' | 'video' | 'audio' | 'document' | 'sticker'
 
