@@ -5,6 +5,28 @@ const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
 const STORAGE_BUCKET = 'chat-attachments'
 const ALLOWED_INSTANCES = ['Financeiro Medimagem', 'Financeiro PRN', 'WhatsApp Adm']
 const DEFAULT_PAGE_SIZE = 50
+
+/**
+ * Teto do arquivo de mídia, em caracteres de base64 (~4/3 do tamanho real).
+ * 12 MB de base64 ≈ 9 MB de arquivo — cobre foto, áudio, documento e a grande
+ * maioria dos vídeos de WhatsApp. Acima disso a mensagem entra sem o anexo, em
+ * vez de arriscar matar o worker por memória e travar a importação inteira.
+ */
+const MAX_MEDIA_BASE64 = 12 * 1024 * 1024
+
+/**
+ * Teto de espera por resposta da Evolution. Precisa ser bem menor que o limite
+ * do worker: falhar aqui é recuperável (o laço repete a página, o progresso está
+ * salvo); ser morto pelo runtime não é — não roda `catch` e o job fica preso.
+ */
+const EVOLUTION_TIMEOUT_MS = 45_000
+
+/**
+ * Tempo sem progresso a partir do qual um job ativo é considerado morto e deixa
+ * de bloquear novas importações. 10 min é folgado: cada página atualiza o job, e
+ * uma chamada inteira não passa de ~1 min mesmo com o timeout da Evolution.
+ */
+const JOB_PARADO_MS = 10 * 60 * 1000
 const DEFAULT_RECENT_MEDIA_DAYS = 7
 
 const corsHeaders = {
@@ -484,11 +506,31 @@ async function getEvolutionConfig() {
 
 async function evolutionRequest(method: string, path: string, body?: Record<string, unknown>) {
   const { apiKey, apiUrl } = await getEvolutionConfig()
-  const response = await fetch(`${apiUrl}${path}`, {
-    method,
-    headers: { apikey: apiKey, 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
+
+  // TIMEOUT EXPLÍCITO — o `fetch` do Deno não tem um por padrão.
+  //
+  // Sem isto, uma chamada que a Evolution nunca responde segura o worker até o
+  // runtime matá-lo. E worker morto não roda `catch`: o job fica preso em
+  // `running` para sempre, bloqueando novas importações da instância (é o índice
+  // de um job ativo por instância). Falhar em 45s é recuperável — o laço tenta a
+  // mesma página de novo e o progresso está salvo. Pendurar não é.
+  let response: Response
+  try {
+    response = await fetch(`${apiUrl}${path}`, {
+      method,
+      headers: { apikey: apiKey, 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(EVOLUTION_TIMEOUT_MS),
+    })
+  } catch (err) {
+    const erro = err instanceof Error ? err : new Error(String(err))
+    const expirou = erro.name === 'TimeoutError' || erro.name === 'AbortError'
+    throw new Error(
+      expirou
+        ? `Evolution não respondeu em ${EVOLUTION_TIMEOUT_MS / 1000}s (${path})`
+        : `Falha de rede com a Evolution (${path}): ${erro.message}`,
+    )
+  }
 
   const text = await response.text()
   let payload: unknown = text
@@ -757,6 +799,33 @@ async function fetchMediaAttachment(instanceName: string, messageData: Record<st
 
     const data = asRecord(result.payload) || {}
     const parsed = parseBase64(foundBase64, stringFrom(data.mimetype, data.mimeType) || mediaInfo.mime)
+
+    // TETO DE TAMANHO — antes não havia nenhum.
+    //
+    // `decodeBase64` materializa o arquivo inteiro na memória do isolate, e o
+    // base64 que veio já ocupa ~4/3 do tamanho original. Um vídeo de 40 MB vira
+    // ~54 MB de string MAIS 40 MB de array, tudo de uma vez. Estourado o limite
+    // de memória, o worker é MORTO: nenhum catch roda, o job fica preso em
+    // `running` sem mensagem de erro, e o cliente recebe uma resposta sem JSON.
+    // É o principal suspeito das importações que morrem entre as páginas 12 e 68.
+    //
+    // Acima do teto a mensagem entra SEM anexo, como as mídias antigas já entram
+    // (o balão mostra o rótulo). Perder o arquivo de uma mensagem é muito melhor
+    // que derrubar a importação inteira e bloquear a fila.
+    const tamanhoBase64 = parsed.base64.length
+    if (tamanhoBase64 > MAX_MEDIA_BASE64) {
+      console.warn(
+        JSON.stringify({
+          scope: 'midia_grande_ignorada',
+          messageId: stringFrom(messageData.key?.id),
+          tipo: mediaInfo.type,
+          base64Chars: tamanhoBase64,
+          tetoChars: MAX_MEDIA_BASE64,
+        }),
+      )
+      return null
+    }
+
     const bytes = decodeBase64(parsed.base64)
     const mime = parsed.mime || mediaInfo.mime
     const name = ensureExtension(safeFileName(stringFrom(data.fileName, data.filename) || mediaInfo.name), mime)
@@ -828,8 +897,37 @@ async function startAction(body: JsonRecord, userId: string) {
   const instanceName = stringFrom(body.instanceName) || ALLOWED_INSTANCES[0]
   validateInstance(instanceName)
 
+  /**
+   * Job parado não pode bloquear para sempre.
+   *
+   * Quem empurra a importação é um laço dentro da aba do navegador. Se a aba
+   * fecha — ou se o worker morre no meio, como vinha acontecendo —, o job fica
+   * em `running` e NUNCA sai de lá: não há quem o finalize. Como só se admite um
+   * job ativo por instância, ele passa a barrar toda importação nova. Foi assim
+   * que Financeiro PRN ficou travado de 23/07 a 12/08, e Celular teste desde 28/07.
+   *
+   * Aqui um job sem progresso há mais de `JOB_PARADO_MS` é encerrado como
+   * `failed`, com o motivo escrito, e a importação nova segue. O corte é por
+   * `updated_at`, que avança a cada página — job de verdade em andamento nunca
+   * fica tanto tempo sem se mexer.
+   */
   const active = await getActiveJob(instanceName)
-  if (active) return json({ error: 'Já existe importação ativa para esta instância', job: active }, 409)
+  if (active) {
+    const paradoDesde = Date.parse(String(active.updated_at ?? active.created_at ?? '')) || 0
+    const parado = paradoDesde > 0 && Date.now() - paradoDesde > JOB_PARADO_MS
+    if (!parado) {
+      return json({ error: 'Já existe importação ativa para esta instância', job: active }, 409)
+    }
+    const minutos = Math.round((Date.now() - paradoDesde) / 60000)
+    console.warn(
+      JSON.stringify({ scope: 'job_parado_liberado', jobId: active.id, instanceName, minutosParado: minutos }),
+    )
+    await updateJob(active.id, {
+      status: 'failed',
+      error_message: `Encerrado automaticamente: sem progresso por ${minutos} min. Provável queda do worker ou fechamento da aba.`,
+      finished_at: new Date().toISOString(),
+    })
+  }
 
   const pageSize = clampInt(body.pageSize, DEFAULT_PAGE_SIZE, 1, 200)
   const mode = stringFrom(body.mode) || 'test'
@@ -989,29 +1087,70 @@ async function cancelAction(body: JsonRecord) {
   return json({ job: updated })
 }
 
+/**
+ * Trocar a cada deploy. Sem isto não há como provar que o isolate do Deno
+ * recarregou — conferir o arquivo no container mostra o disco, não o que roda.
+ */
+const BUILD_MARKER = 'import-erro-falante-2026-08-14'
+
 Deno.serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
-  if (req.method !== 'POST') return json({ error: 'method not allowed' }, 405)
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return json({ error: 'Supabase environment not configured' }, 500)
-
-  const admin = await requireAdmin(req.headers.get('Authorization') || '')
-  if (admin.error) return admin.error
-
+  /**
+   * TUDO dentro do try, inclusive o `requireAdmin`.
+   *
+   * Antes, `requireAdmin` rodava ANTES do try. Os dois `fetch` dele (auth e
+   * profiles) podiam lançar numa falha transitória de rede, e aí quem respondia
+   * era o runtime: 500 de texto puro, sem corpo JSON.
+   *
+   * Isso importava mais do que parece. O cliente lê `corpo.error` para montar a
+   * mensagem (`evolution_history_import.ts`); sem esse campo ele cai no texto
+   * genérico "Edge Function returned a non-2xx status code" — que foi
+   * exatamente o que o usuário viu em 14/08, e que não diz nada a ninguém.
+   *
+   * Agora TODA saída de erro carrega `error`, `etapa` e `build`. Uma falha vira
+   * uma frase em vez de um enigma.
+   *
+   * O que este try NÃO alcança: worker morto por limite de memória ou CPU. Aí
+   * não há JavaScript rodando para responder — o sintoma continua sendo resposta
+   * sem JSON, e é assim que se distingue um caso do outro.
+   */
+  let etapa = 'inicio'
   try {
+    if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
+    if (req.method !== 'POST') return json({ error: 'method not allowed', build: BUILD_MARKER }, 405)
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+      return json({ error: 'Supabase environment not configured', build: BUILD_MARKER }, 500)
+    }
+
+    etapa = 'auth'
+    const admin = await requireAdmin(req.headers.get('Authorization') || '')
+    if (admin.error) return admin.error
+
+    etapa = 'body'
     const body = await req.json().catch(() => ({})) as JsonRecord
     const action = stringFrom(body.action)
     const userId = stringFrom((admin as any).user?.id)
 
+    etapa = `acao:${action || '(vazia)'}`
     switch (action) {
       case 'preview': return await previewAction(body)
       case 'start': return await startAction(body, userId)
       case 'run': return await runAction(body)
       case 'status': return await statusAction(body)
       case 'cancel': return await cancelAction(body)
-      default: return json({ error: `unknown action: ${action}` }, 400)
+      default: return json({ error: `unknown action: ${action}`, build: BUILD_MARKER }, 400)
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Erro inesperado'
-    return json({ error: message }, 500)
+    const erro = error instanceof Error ? error : new Error(String(error))
+    console.error(
+      JSON.stringify({
+        scope: 'import_falha_nao_tratada',
+        build: BUILD_MARKER,
+        etapa,
+        nome: erro.name,
+        mensagem: erro.message,
+        pilha: (erro.stack || '').split('\n').slice(0, 4).join(' | '),
+      }),
+    )
+    return json({ error: `[${etapa}] ${erro.name}: ${erro.message}`, etapa, build: BUILD_MARKER }, 500)
   }
 })

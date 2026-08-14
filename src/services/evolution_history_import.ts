@@ -65,14 +65,35 @@ const invoke = async <T>(body: Record<string, unknown>): Promise<T> => {
 
   if (error) {
     const ctx = (error as any).context
-    let ctxData: any = typeof ctx === 'object' && ctx ? ctx : {}
-    if (ctx && typeof ctx.clone === 'function') {
-      ctxData = await ctx.clone().json().catch(() => ctxData)
+    const resposta: Response | null = ctx && typeof ctx.clone === 'function' ? (ctx as Response) : null
+
+    // Lê o corpo UMA vez como texto e só então tenta interpretar. Antes era
+    // `.json()` direto: quando a resposta não era JSON, a chamada falhava e o
+    // corpo real se perdia — o usuário via só "Edge Function returned a non-2xx
+    // status code", que não diz nada sobre o que aconteceu.
+    let corpo: any = {}
+    let textoCru = ''
+    if (resposta) {
+      textoCru = await resposta.clone().text().catch(() => '')
+      try {
+        corpo = textoCru ? JSON.parse(textoCru) : {}
+      } catch {
+        corpo = {}
+      }
     }
-    const message = (ctxData as any).error || error.message
-    const details = (ctxData as any).details
-    const job = (ctxData as any).job || null
-    throw new EvolutionHistoryImportError(message, details, job)
+
+    // Sem campo `error` no corpo, quem respondeu NÃO foi a função — toda saída
+    // de erro dela carrega esse campo. Sobra worker morto (memória/CPU), gateway
+    // ou proxy. Mostrar o status e um trecho cru é o que separa esses casos de
+    // "sessão expirada" sem precisar abrir log de container.
+    const status = resposta?.status
+    const message: string =
+      corpo.error ||
+      (status
+        ? `HTTP ${status}${textoCru ? ` — ${textoCru.slice(0, 200)}` : ' (resposta sem corpo — função não respondeu)'}`
+        : error.message)
+
+    throw new EvolutionHistoryImportError(message, corpo.details, corpo.job ?? null)
   }
 
   return data as T
