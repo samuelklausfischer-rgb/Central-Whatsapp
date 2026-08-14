@@ -39,3 +39,82 @@ export function traduzErro(err: unknown, padrao: string): string {
 
   return texto
 }
+
+/** O que sobrou de um erro de `supabase.functions.invoke`, já legível. */
+export interface ErroDeFuncao {
+  /** Mensagem pronta para mostrar ao atendente. */
+  message: string
+  /** Código HTTP, quando houve resposta. */
+  status?: number
+  /** Corpo JSON, quando a função respondeu com um. */
+  corpo: Record<string, any>
+  /** Sessão encerrada no servidor — quem chama pode mandar para o login. */
+  sessaoExpirada: boolean
+}
+
+/**
+ * Interpreta o erro de uma chamada a edge function.
+ *
+ * POR QUE EXISTE
+ * O `supabase.functions.invoke` devolve um erro cuja `message` é sempre a mesma
+ * frase — "Edge Function returned a non-2xx status code" —, e a causa real fica no
+ * CORPO da resposta, dentro de `error.context`. Cada serviço lia isso de um jeito
+ * (ou não lia), e o resultado era o atendente vendo uma frase em inglês que não diz
+ * o que fazer. Em 14/08/2026 isso custou uma investigação inteira: o corpo dizia
+ * `WorkerRequestCancelled` e ninguém via.
+ *
+ * O corpo é lido como TEXTO e só então interpretado como JSON. Chamar `.json()`
+ * direto consome o corpo quando ele não é JSON, e aí a causa se perde de vez —
+ * justamente nos casos em que quem respondeu não foi a função, e sim a plataforma
+ * (worker morto, gateway, proxy), que é quando a informação mais faz falta.
+ */
+export async function interpretarErroDeFuncao(err: unknown, padrao: string): Promise<ErroDeFuncao> {
+  const ctx = (err as { context?: unknown } | null)?.context
+  const resposta = ctx && typeof (ctx as Response).clone === 'function' ? (ctx as Response) : null
+
+  let corpo: Record<string, any> = {}
+  let textoCru = ''
+  if (resposta) {
+    textoCru = await resposta.clone().text().catch(() => '')
+    try {
+      corpo = textoCru ? JSON.parse(textoCru) : {}
+    } catch {
+      corpo = {}
+    }
+  }
+
+  const status = resposta?.status
+  const doServidor = typeof corpo.error === 'string' ? corpo.error : ''
+
+  // 401/403 com "session"/"JWT" no texto: a sessão morreu no servidor. Acontece
+  // quando alguém sai em outra máquina, quando a senha muda, ou quando um admin
+  // revoga o acesso. O token guardado aqui continua "válido" até vencer, então o
+  // app não percebe sozinho — daí a mensagem precisar dizer o que fazer.
+  const sessaoExpirada =
+    (status === 401 || status === 403) && /invalid session|jwt|session|token/i.test(doServidor || '')
+
+  if (sessaoExpirada) {
+    return {
+      message: 'Sua sessão foi encerrada. Entre novamente para continuar.',
+      status,
+      corpo,
+      sessaoExpirada: true,
+    }
+  }
+
+  if (doServidor) return { message: doServidor, status, corpo, sessaoExpirada: false }
+
+  // Sem `error` no corpo, quem respondeu NÃO foi a função — toda saída de erro dela
+  // carrega esse campo. Mostrar status e trecho cru é o que permite distinguir
+  // worker morto de proxy sem abrir log de container.
+  if (status) {
+    return {
+      message: `HTTP ${status}${textoCru ? ` — ${textoCru.slice(0, 200)}` : ' (resposta sem corpo — função não respondeu)'}`,
+      status,
+      corpo,
+      sessaoExpirada: false,
+    }
+  }
+
+  return { message: traduzErro(err, padrao), corpo, sessaoExpirada: false }
+}

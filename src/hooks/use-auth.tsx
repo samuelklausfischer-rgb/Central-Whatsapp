@@ -195,6 +195,59 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [])
 
+  /**
+   * Confere a SESSÃO ao voltar para a aba.
+   *
+   * O `onAuthStateChange` acima só percebe que a sessão morreu quando o
+   * supabase-js tenta renovar o token — e ele só tenta perto do vencimento. Com
+   * token de 1 hora, isso abre uma janela de até ~55 minutos em que o app se acha
+   * logado e o servidor já rejeita: metade das telas funciona (o PostgREST valida
+   * só assinatura e validade do JWT) e a outra metade dá 401 (as edge functions
+   * consultam a sessão). Foi assim em 14/08/2026 — a aba ficou aberta durante um
+   * logout feito em outro lugar.
+   *
+   * A aba esquecida é exatamente onde isso morde, então a hora de conferir é
+   * quando alguém volta para ela. `getUser()` vai ao servidor e valida a sessão
+   * de verdade — diferente de `getSession()`, que só lê o que está guardado
+   * localmente e responderia "logado" mesmo com a sessão destruída.
+   *
+   * SÓ DESLOGA COM RECUSA EXPLÍCITA do servidor (401/403). Queda de rede, Wi-Fi
+   * oscilando ou servidor fora do ar também fazem `getUser()` falhar, e expulsar
+   * o atendente nesses casos seria muito pior que o problema original.
+   */
+  useEffect(() => {
+    let verificando = false
+
+    const verificarSessao = async () => {
+      if (verificando || document.visibilityState !== 'visible') return
+
+      // Sem sessão local não há o que conferir: quem cuida disso é o login.
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) return
+
+      verificando = true
+      try {
+        const { error } = await supabase.auth.getUser()
+        const status = (error as { status?: number } | null)?.status
+        if (status === 401 || status === 403) {
+          // Dispara o `onAuthStateChange` acima, que leva à tela de login.
+          await supabase.auth.signOut({ scope: 'local' })
+        }
+      } catch {
+        /* rede fora — mantém a sessão, tenta de novo no próximo foco */
+      } finally {
+        verificando = false
+      }
+    }
+
+    window.addEventListener('focus', verificarSessao)
+    document.addEventListener('visibilitychange', verificarSessao)
+    return () => {
+      window.removeEventListener('focus', verificarSessao)
+      document.removeEventListener('visibilitychange', verificarSessao)
+    }
+  }, [])
+
   const refreshProfile = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.user) {
@@ -267,7 +320,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // a Análise PRN preenchida, e os iframes seguiriam autenticados como o
     // atendente anterior.
     limparFerramentas()
-    supabase.auth.signOut()
+    /**
+     * ESCOPO LOCAL — sair aqui não pode derrubar as outras máquinas.
+     *
+     * `signOut()` sem argumento usa escopo **global** no supabase-js v2: revoga
+     * TODAS as sessões daquela conta, em todos os aparelhos. Isso nunca foi a
+     * intenção — todo o resto desta função fala em proteger "o próximo atendente
+     * na mesma máquina", que é um problema local.
+     *
+     * O efeito era real e recorrente: em 14/08/2026 havia contas com 8 sessões
+     * simultâneas (`suportelaudos3`, `flaviani`), e um único "Sair" as derrubava
+     * todas. Quem estava do outro lado não recebia aviso nenhum: seguia com um
+     * token válido por até 1 hora, o chat continuava funcionando (o PostgREST só
+     * confere assinatura e validade do JWT) e só as telas que passam por edge
+     * function quebravam, com "Invalid session". Meia quebra, impossível de
+     * reconhecer como problema de sessão.
+     *
+     * Contrapartida assumida: aparelho perdido continua logado até alguém revogar
+     * a sessão no banco. O botão Sair deixou de ser um "sair de todos".
+     */
+    supabase.auth.signOut({ scope: 'local' })
   }, [])
 
   const value = useMemo(() => ({

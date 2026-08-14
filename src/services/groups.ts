@@ -1,4 +1,5 @@
 import supabase from '@/lib/supabase/client'
+import { interpretarErroDeFuncao } from '@/lib/friendly-error'
 import { EvolutionApiError } from './evolution_instances'
 
 /**
@@ -215,10 +216,12 @@ async function invokeGroupWrite<T>(body: Record<string, unknown>): Promise<T> {
     body,
   })
   if (error) {
-    const ctx = (error as any).context
-    const ctxData = typeof ctx === 'object' && ctx ? ctx : {}
-    const message = (ctxData as any).error || error.message
-    throw new EvolutionApiError(message, ctxData, (ctxData as any).diagnostics)
+    // `ctxData` recebia o próprio `Response`, então `.error` era sempre undefined
+    // e a causa real nunca chegava à tela. O helper lê o corpo de verdade e
+    // reconhece sessão encerrada — o `err.details?.code` documentado acima segue
+    // funcionando, porque `info.corpo` é o JSON da resposta.
+    const info = await interpretarErroDeFuncao(error, 'Erro ao alterar o grupo')
+    throw new EvolutionApiError(info.message, info.corpo, info.corpo.diagnostics)
   }
   return data as T
 }

@@ -1,5 +1,6 @@
 import supabase from '@/lib/supabase/client'
 import type { Device } from '@/lib/supabase/types'
+import { interpretarErroDeFuncao } from '@/lib/friendly-error'
 
 export interface EvolutionInstance {
   instanceName: string
@@ -36,12 +37,12 @@ const invoke = async <T>(body: Record<string, unknown>): Promise<T> => {
     body,
   })
   if (error) {
-    const ctx = (error as any).context
-    const ctxData = typeof ctx === 'object' && ctx ? ctx : {}
-    const message = (ctxData as any).error || error.message
-    const details = (ctxData as any).details
-    const diagnostics = (ctxData as any).diagnostics
-    throw new EvolutionApiError(message, details, diagnostics)
+    // Antes, `ctxData` recebia o próprio `Response` e `ctxData.error` era sempre
+    // undefined — ou seja, a causa real NUNCA aparecia, e o atendente via só a
+    // frase genérica do supabase-js. O helper lê o corpo de verdade e ainda
+    // reconhece sessão encerrada, que era o caso do incidente de 14/08.
+    const info = await interpretarErroDeFuncao(error, 'Erro ao falar com a Evolution')
+    throw new EvolutionApiError(info.message, info.corpo.details, info.corpo.diagnostics)
   }
   return data as T
 }
