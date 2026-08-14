@@ -7,6 +7,18 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.210',
+    date: '2026-08-14 16:30',
+    title: 'Agora é PRN Hub, e pegar contato deixa de mexer nas outras instâncias',
+    details: [
+      '🎨 O app passa a se chamar PRN Hub, com a marca nova no login, no cabeçalho, no ícone da área de trabalho e no celular',
+      '📌 O atalho FIXADO na barra de tarefas precisa ser refixado uma vez: ele apontava para o programa com o nome antigo. O da área de trabalho e o do menu iniciar se atualizam sozinhos',
+      '👤 Pegar um contato numa instância marcava o MESMO contato como pego nas outras, e a conversa sumia da aba Geral de quem estava no outro WhatsApp. O atendimento agora é de cada instância, como sempre foi no banco — era só a tela que misturava',
+      '🔔 Mensagem que chega numa instância que você não está vendo volta a notificar. Antes o aviso podia ser silenciado consultando quem tinha pego a conversa em OUTRO WhatsApp',
+      '✅ Sua sessão e suas conversas continuam como estavam: a atualização instala por cima, ninguém precisa entrar de novo',
+    ],
+  },
+  {
     version: '0.0.209',
     date: '2026-08-13 17:00',
     title: 'Contato compartilhado, resposta citada e a mensagem que sumia',
