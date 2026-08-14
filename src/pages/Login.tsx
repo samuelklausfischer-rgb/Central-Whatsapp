@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import logoUrl from '/logo.png'
+import { BrandLogo } from '@/components/BrandLogo'
 import { useAuth } from '@/hooks/use-auth'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
@@ -39,11 +39,8 @@ export default function Login() {
         className="relative z-10 p-8 bg-card rounded-xl shadow-2xl border border-border space-y-6 w-[400px]"
       >
         <div className="text-center space-y-2">
-          <div className="flex items-center justify-center gap-3 mb-4">
-            <img src={logoUrl} alt="Central Whats" className="h-16 w-16 object-contain" />
-            <span className="text-3xl font-display font-bold tracking-tight text-foreground">
-              Central <span className="text-blue-500">Whats</span>
-            </span>
+          <div className="flex items-center justify-center mb-4">
+            <BrandLogo className="h-14 w-auto object-contain" />
           </div>
           <p className="text-sm text-muted-foreground">Faça login com suas credenciais corporativas.</p>
         </div>

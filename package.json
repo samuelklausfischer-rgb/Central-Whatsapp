@@ -1,7 +1,7 @@
 {
   "name": "central-whats",
   "description": "Central de atendimento WhatsApp com React, Supabase e Evolution API",
-  "author": "Central Whats",
+  "author": "PRN Hub",
   "private": true,
   "version": "0.0.209",
   "main": "central-whats-app/main.cjs",
@@ -25,7 +25,8 @@
     "apk:debug": "npm run build:mobile && cd android && gradlew.bat assembleDebug",
     "apk:release": "npm run build:mobile && cd android && gradlew.bat assembleRelease",
     "assets:mobile": "node scripts/gerar-assets-mobile.mjs && capacitor-assets generate --android && node scripts/ajustar-icone-android.mjs",
-    "publish:mobile": "node scripts/publish-mobile-bundle.mjs"
+    "publish:mobile": "node scripts/publish-mobile-bundle.mjs",
+    "assets:marca": "node scripts/gerar-marca.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.2",
@@ -116,6 +117,7 @@
     "oxfmt": "^0.47.0",
     "oxlint": "^1.62.0",
     "postcss": "^8.5.13",
+    "sharp": "^0.32.6",
     "tailwindcss": "^3.4.19",
     "typescript": "^6.0.3",
     "vite": "8.0.10",

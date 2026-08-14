@@ -20,7 +20,7 @@ export default function Licitacoes() {
     } = await supabase.auth.getSession()
 
     if (!session?.access_token) {
-      throw new Error('Sessão não encontrada. Saia e entre novamente no Central Whats.')
+      throw new Error('Sessão não encontrada. Saia e entre novamente no PRN Hub.')
     }
 
     const resp = await fetch(`${appEnv.VITE_LICITACAO_SUPABASE_URL}/functions/v1/licitacao-bridge`, {

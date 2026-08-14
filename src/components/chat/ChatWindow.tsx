@@ -7,7 +7,7 @@ import {
   EMPTY_DRAFT,
   type ConversationDraft,
 } from '@/stores/conversationDrafts'
-import logoUrl from '/logo.png'
+import { BrandLogo } from '@/components/BrandLogo'
 import {
   ChevronLeft,
   Plus,
@@ -2473,7 +2473,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       <div className="hidden md:flex flex-col items-center justify-center h-full bg-chat-conversation/80 backdrop-blur-sm flex-1 relative overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(59,130,246,0.04),transparent_70%)]" />
         <div className="relative z-10 flex flex-col items-center text-center px-8 max-w-sm">
-          <img src={logoUrl} alt="Logo" className="h-24 w-auto mb-8 object-contain drop-shadow-lg" />
+          <BrandLogo className="h-20 w-auto mb-8 object-contain drop-shadow-lg" />
           <p className="text-chat-text/70 text-[15px] leading-relaxed">
             {device
               ? 'Selecione uma conversa para iniciar o atendimento.'

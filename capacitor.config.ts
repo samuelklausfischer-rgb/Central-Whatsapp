@@ -14,7 +14,7 @@ import type { CapacitorConfig } from '@capacitor/cli'
  */
 const config: CapacitorConfig = {
   appId: 'com.centralwhats.app',
-  appName: 'Central Whats',
+  appName: 'PRN Hub',
 
   /**
    * O build do Vite vai para `dist/`, o mesmo que o Electron consome. O
