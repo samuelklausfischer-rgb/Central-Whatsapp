@@ -46,7 +46,7 @@ export function UpdateGate({ children }: { children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-8 bg-background text-foreground">
       <div className="flex flex-col items-center gap-2">
-        <span className="text-2xl font-semibold tracking-tight">Central Whats</span>
+        <span className="text-2xl font-semibold tracking-tight">PRN Hub</span>
         <span className="text-sm text-muted-foreground">Mantendo você na versão mais recente</span>
       </div>
 

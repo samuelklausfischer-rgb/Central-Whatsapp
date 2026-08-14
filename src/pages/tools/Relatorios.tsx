@@ -22,7 +22,7 @@ export default function Relatorios() {
     } = await supabase.auth.getSession()
 
     if (!session?.access_token || !session?.refresh_token) {
-      throw new Error('Sessão não encontrada. Saia e entre novamente no Central Whats.')
+      throw new Error('Sessão não encontrada. Saia e entre novamente no PRN Hub.')
     }
 
     return {

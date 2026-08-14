@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useAuth } from '@/hooks/use-auth'
-import logoUrl from '/logo.png'
+import { BrandLogo } from '@/components/BrandLogo'
 
 /**
  * Barra de cima do celular: logo e avatar, só.
@@ -22,7 +22,7 @@ export function MobileHeader({ onAbrirMais }: { onAbrirMais: () => void }) {
   return (
     <header className="relative z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-background/80 px-3 backdrop-blur-xl">
       <Link to="/dashboard" className="flex shrink-0 items-center">
-        <img src={logoUrl} alt="Central Whats" className="h-8 w-auto object-contain" />
+        <BrandLogo className="h-7 w-auto object-contain" />
       </Link>
 
       <div className="ml-auto">

@@ -36,7 +36,7 @@ function createWindow() {
       contextIsolation: true,
     },
     icon: path.join(__dirname, '../public/logo.png'),
-    title: 'Central Whats',
+    title: 'PRN Hub',
   })
 
   if (isDev) {

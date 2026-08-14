@@ -169,7 +169,7 @@ export function ToolFrame({
           <p className="font-medium text-foreground">{title} não está configurado</p>
           <p className="text-sm text-muted-foreground">
             Defina <code className="rounded bg-muted px-1 py-0.5 text-xs">{envVarName}</code> com a URL do
-            app publicado e reinicie o Central Whats.
+            app publicado e reinicie o PRN Hub.
           </p>
         </div>
       </div>

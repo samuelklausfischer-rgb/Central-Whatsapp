@@ -30,7 +30,7 @@ import { ReleaseNotesDialog } from '@/components/ReleaseNotesDialog'
 import { ReportarProblemaDialog } from '@/components/ReportarProblemaDialog'
 import { NotificationsDialog } from '@/components/NotificationsDialog'
 import { useUpdater } from '@/hooks/use-updater'
-import logoUrl from '/logo.png'
+import { BrandLogo } from '@/components/BrandLogo'
 
 /**
  * O menu era um painel próprio, fechado por um listener de `mousedown` no
@@ -124,7 +124,7 @@ export function Header() {
       <header className="relative z-30 flex h-16 shrink-0 items-center gap-3 border-b border-border bg-background/80 px-4 backdrop-blur-xl sm:px-6">
         {/* Logo */}
         <Link to="/dashboard" className="flex items-center shrink-0 mr-2">
-          <img src={logoUrl} alt="Logo" className="h-12 w-auto object-contain" />
+          <BrandLogo className="h-10 w-auto object-contain" />
         </Link>
 
         {/* Nav links */}
