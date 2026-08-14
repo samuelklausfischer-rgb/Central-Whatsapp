@@ -27,6 +27,11 @@ import type { ConversationAssignment } from '@/lib/supabase/types'
 
 export interface DeviceSnapshot {
   summaries: ConversationSummary[]
+  /**
+   * Chaveado por `chaveDaConversa(aparelho, contato)`, não pelo contato sozinho —
+   * o mesmo número existe em várias instâncias e o atendimento é de cada uma.
+   * Ver o comentário de `getDeviceAssignments` em services/conversation_states.ts.
+   */
   assignments: Map<string, ConversationAssignment>
 }
 

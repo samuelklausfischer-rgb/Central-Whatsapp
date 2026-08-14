@@ -18,6 +18,7 @@ import {
   getDeviceSnapshot,
   setDeviceSnapshot,
   setDeviceSummaries,
+  setDeviceAssignments,
 } from '@/stores/conversationSummaries'
 import {
   chaveDaConversa,
@@ -586,7 +587,14 @@ export default function ChatHub() {
       const remoteSender = e.record.remote_sender as string
       const prefs = uid ? getRawDevicePrefs(uid, deviceId) : { sound: true, background: true }
 
-      const assignment = assignments.get(remoteSender)
+      // `assignments` é só do aparelho ABERTO, e a mensagem pode ser de qualquer um.
+      // Consultá-lo para mensagem de outra instância silenciava a notificação com
+      // base no dono errado. Sem saber quem pegou a conversa lá, o padrão é NOTIFICAR:
+      // perder aviso de mensagem é pior do que um aviso a mais.
+      const assignment =
+        deviceId === selectedDeviceId
+          ? assignments.get(chaveDaConversa(deviceId, remoteSender))
+          : undefined
       const isAssignedToSomeoneElse =
         assignment?.assigned_to != null && assignment.assigned_to !== uid
 
@@ -785,23 +793,66 @@ export default function ChatHub() {
     if (selectedDeviceId) debouncedRefreshSummaries(selectedDeviceId)
   })
 
+  // O canal é a tabela INTEIRA (o `useRealtime` só filtra se receber o 4º
+  // parâmetro), então aqui chega atribuição de todos os aparelhos da empresa. Cada
+  // evento é ROTEADO para o aparelho dono da linha; antes era aplicado cego num mapa
+  // chaveado só pelo contato, e como 494 dos 1.423 contatos existem em mais de uma
+  // instância, pegar um contato no Comercial fazia a conversa sumir da Geral de quem
+  // estava no RH, marcada como pega por alguém que nunca a pegou ali. O handler de
+  // `conversation_user_states`, logo acima, sempre teve a guarda equivalente.
   useRealtime('conversation_assignments', (e) => {
-    if (e.action === 'create' || e.action === 'update') {
-      const row = e.record as ConversationAssignment
+    const row = e.record as ConversationAssignment
+
+    if (e.action === 'delete') {
+      // DELETE traz SÓ a chave primária: a tabela está em REPLICA IDENTITY DEFAULT,
+      // então `device_id`/`remote_sender` chegam `undefined` e a entrada só dá para
+      // localizar pelo `id` — inclusive o snapshot de qual aparelho, daí a varredura.
+      // Caminho defensivo: nenhuma RPC apaga atribuição, o estado vira
+      // 'finished'/'waiting' e a linha fica.
+      const removerPorId = (mapa: Map<string, ConversationAssignment>) => {
+        for (const [chave, a] of mapa) {
+          if (a.id === row.id) {
+            mapa.delete(chave)
+            break
+          }
+        }
+      }
+      for (const id of devicesRef.current.map((d) => d.id)) {
+        const snapshot = getDeviceSnapshot(id)
+        if (!snapshot) continue
+        const mapa = new Map(snapshot.assignments)
+        removerPorId(mapa)
+        setDeviceAssignments(id, mapa)
+      }
       setAssignments((prev) => {
         const next = new Map(prev)
-        next.set(row.remote_sender, row)
+        removerPorId(next)
         return next
       })
-    } else if (e.action === 'delete') {
-      const row = e.record as ConversationAssignment
-      setAssignments((prev) => {
-        const next = new Map(prev)
-        next.delete(row.remote_sender)
-        return next
-      })
+      if (selectedDeviceId) debouncedRefreshSummaries(selectedDeviceId)
+      return
     }
-    if (selectedDeviceId) debouncedRefreshSummaries(selectedDeviceId)
+
+    const chave = chaveDaConversa(row.device_id, row.remote_sender)
+
+    // Grava no snapshot do aparelho DA LINHA, mesmo que não seja o aberto: a troca
+    // de instância pinta na hora com o dado já fresco, em vez de esperar o fetch.
+    const snapshot = getDeviceSnapshot(row.device_id)
+    if (snapshot) {
+      const mapa = new Map(snapshot.assignments)
+      mapa.set(chave, row)
+      setDeviceAssignments(row.device_id, mapa)
+    }
+
+    // Só o aparelho aberto mexe na tela.
+    if (row.device_id !== selectedDeviceId) return
+
+    setAssignments((prev) => {
+      const next = new Map(prev)
+      next.set(chave, row)
+      return next
+    })
+    debouncedRefreshSummaries(selectedDeviceId)
   })
 
   // Copia para o estado o que o store tem NESTA chave. É o único caminho de
@@ -1076,7 +1127,7 @@ export default function ChatHub() {
     if (conversationSummaries.length > 0) {
       const mapped = conversationSummaries.map((summary) => {
         const state = userStatesMap.get(`${selectedDeviceId}|${summary.remote_sender}`)
-        const assignment = assignments.get(summary.remote_sender)
+        const assignment = assignments.get(chaveDaConversa(selectedDeviceId ?? '', summary.remote_sender))
         const assignedToMe = !!assignment
           && (assignment.status === 'taken' || assignment.status === 'assigned')
           && assignment.assigned_to === user?.id
@@ -1145,7 +1196,7 @@ export default function ChatHub() {
     return Array.from(map.values())
       .map((conv) => {
         const state = userStatesMap.get(`${selectedDeviceId}|${conv.remote_sender}`)
-        const assignment = assignments.get(conv.remote_sender)
+        const assignment = assignments.get(chaveDaConversa(selectedDeviceId ?? '', conv.remote_sender))
         const assignedToMe = !!assignment
           && (assignment.status === 'taken' || assignment.status === 'assigned')
           && assignment.assigned_to === user?.id
@@ -1191,8 +1242,9 @@ export default function ChatHub() {
   }, [conversations, selectedContact, conversationMessages])
 
   const currentAssignment = useMemo(() => {
-    return selectedContact ? assignments.get(selectedContact) ?? null : null
-  }, [assignments, selectedContact])
+    if (!selectedContact || !selectedDeviceId) return null
+    return assignments.get(chaveDaConversa(selectedDeviceId, selectedContact)) ?? null
+  }, [assignments, selectedContact, selectedDeviceId])
 
   const containerRef = useRef<HTMLDivElement>(null)
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT)

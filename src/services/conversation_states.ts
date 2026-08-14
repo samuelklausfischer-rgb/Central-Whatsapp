@@ -1,5 +1,6 @@
 import supabase from '@/lib/supabase/client'
 import { buscarTodasAsPaginas } from '@/lib/supabase/paginate'
+import { chaveDaConversa } from '@/stores/conversationMessages'
 import type { ConversationAssignment, TeamMember, ConversationRecentViewer } from '@/lib/supabase/types'
 
 export interface ConversationUserState {
@@ -238,6 +239,15 @@ export async function getConversationRecentViewers(deviceId: string, remoteSende
 // hoje (53% do teto de 1.000 do PostgREST), então ainda não trunca — mas quando
 // cruzar, atribuições sumiriam sem erro nenhum, do mesmo jeito que os contatos
 // sumiram. `id` entra no select só para ancorar o keyset.
+//
+// A chave do Map é `chaveDaConversa(aparelho, contato)`, NÃO o contato sozinho:
+// 494 dos 1.423 contatos existem em mais de uma instância, e o atendimento é por
+// instância (a tabela tem `UNIQUE (device_id, remote_sender)`). Com a chave só
+// pelo contato, o evento de Realtime de "peguei" de um WhatsApp caía por cima da
+// entrada de outro — a conversa sumia da Geral de quem estava no outro aparelho e
+// aparecia como pega por alguém que nunca a pegou ali. Chaveando pelos dois, ler o
+// atendimento da instância errada deixa de ser algo que uma guarda evita e passa a
+// ser impossível por construção, igual ao store de mensagens.
 export async function getDeviceAssignments(deviceId: string): Promise<Map<string, ConversationAssignment>> {
   let linhas: ConversationAssignment[]
   try {
@@ -262,7 +272,7 @@ export async function getDeviceAssignments(deviceId: string): Promise<Map<string
   }
   const map = new Map<string, ConversationAssignment>()
   for (const row of linhas) {
-    map.set(row.remote_sender, row as ConversationAssignment)
+    map.set(chaveDaConversa(deviceId, row.remote_sender), row as ConversationAssignment)
   }
   return map
 }

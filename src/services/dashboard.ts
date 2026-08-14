@@ -288,18 +288,20 @@ export async function getConversationMetrics(deviceIds: string[]): Promise<Conve
   ])
 
   const statesMap = new Map(states.map((s) => [`${s.device_id}|${s.remote_sender}`, s]))
+  // `getDeviceAssignments` já devolve chaveado por `aparelho|contato` (o mesmo
+  // contato existe em várias instâncias e o atendimento é de cada uma), então aqui
+  // é só juntar os mapas dos aparelhos.
   const assignmentsMap = new Map(
-    assignmentsPorAparelho.flatMap(([id, mapa]) =>
-      [...mapa.entries()].map(([remoteSender, a]) => [`${id}|${remoteSender}`, a] as const),
-    ),
+    assignmentsPorAparelho.flatMap(([, mapa]) => [...mapa.entries()]),
   )
 
   const pendentes = allSummaries
     .filter((s) => {
       if (s.last_message_direction !== 'inbound') return false
       if (new Date(s.last_message_created_at) < inicioDeHoje) return false
-      // `as const` porque `assignmentsMap` foi montado com chaves de literal de
+      // `as const` porque `statesMap` foi montado com chaves de literal de
       // template: sem isto o TypeScript alarga para `string` e recusa a busca.
+      // Mesma forma da `chaveDaConversa` que chaveia `assignmentsMap`.
       const chave = `${s.device_id}|${s.remote_sender}` as const
       const respondidoEm = respondidaEm(
         statesMap.get(chave)?.responded_at,

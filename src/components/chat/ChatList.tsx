@@ -45,6 +45,7 @@ import {
 import { useAuth } from '@/hooks/use-auth'
 import type { ConversationUserState } from '@/services/conversation_states'
 import type { ConversationAssignment } from '@/lib/supabase/types'
+import { chaveDaConversa } from '@/stores/conversationMessages'
 import { buildContactIndex, findContactByIdentifier, resolveContactDisplayName } from '@/lib/contacts/normalize'
 
 export interface ChatListProps {
@@ -62,6 +63,7 @@ export interface ChatListProps {
   onToggleArchived: () => void
   onStateChange?: () => void
   noteJids?: Set<string>
+  /** Chaveado por `chaveDaConversa(aparelho, contato)` — atendimento é por instância. */
   assignments?: Map<string, ConversationAssignment>
   currentUserId?: string
   onRefreshAll?: () => void
@@ -490,7 +492,7 @@ export function ChatList({
   const statesByKey = useMemo(() => {
     const map = new Map<string, ConversationUserState>()
     conversationStates.forEach((s) => {
-      map.set(`${s.device_id}:${s.remote_sender}`, s)
+      map.set(chaveDaConversa(s.device_id, s.remote_sender), s)
     })
     return map
   }, [conversationStates])
@@ -503,13 +505,13 @@ export function ChatList({
    */
   const ehMinha = useCallback(
     (remoteSender: string) => {
-      if (!currentUserId) return false
-      const a = assignments?.get(remoteSender)
+      if (!currentUserId || !selectedDeviceId) return false
+      const a = assignments?.get(chaveDaConversa(selectedDeviceId, remoteSender))
       if (!a) return false
       if (a.status === 'finished') return false
       return a.assigned_to === currentUserId || a.invited_to === currentUserId
     },
-    [assignments, currentUserId],
+    [assignments, currentUserId, selectedDeviceId],
   )
 
   const totalMinhas = useMemo(
@@ -528,13 +530,13 @@ export function ChatList({
    */
   const ehDeOutro = useCallback(
     (remoteSender: string) => {
-      if (!currentUserId) return false
-      const a = assignments?.get(remoteSender)
+      if (!currentUserId || !selectedDeviceId) return false
+      const a = assignments?.get(chaveDaConversa(selectedDeviceId, remoteSender))
       if (!a || !a.assigned_to) return false
       if (a.status === 'finished') return false
       return a.assigned_to !== currentUserId
     },
-    [assignments, currentUserId],
+    [assignments, currentUserId, selectedDeviceId],
   )
 
   const filteredConversations = useMemo(() => {
@@ -561,7 +563,7 @@ export function ChatList({
     }
     if (!showArchived) {
       filtered = filtered.filter((conv) => {
-        const state = selectedDeviceId ? statesByKey.get(`${selectedDeviceId}:${conv.remote_sender}`) : undefined
+        const state = selectedDeviceId ? statesByKey.get(chaveDaConversa(selectedDeviceId, conv.remote_sender)) : undefined
         return !state?.archived
       })
     }
@@ -783,7 +785,7 @@ export function ChatList({
                 onStateChange={onStateChange}
                 contactIndex={contactIndex}
                 hasNote={noteJids ? noteJids.has(conv.remote_sender) : false}
-                assignment={assignments?.get(conv.remote_sender)}
+                assignment={selectedDeviceId ? assignments?.get(chaveDaConversa(selectedDeviceId, conv.remote_sender)) : undefined}
                 currentUserId={currentUserId}
                 hasDraft={hasDraft}
                 draftPreview={hasDraft ? getDraft(draftKey)?.text ?? '' : undefined}
