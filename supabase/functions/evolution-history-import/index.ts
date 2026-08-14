@@ -4,7 +4,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || ''
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
 const STORAGE_BUCKET = 'chat-attachments'
 const ALLOWED_INSTANCES = ['Financeiro Medimagem', 'Financeiro PRN', 'WhatsApp Adm']
-const DEFAULT_PAGE_SIZE = 50
+const DEFAULT_PAGE_SIZE = 25
 
 /**
  * Teto do arquivo de mídia, em caracteres de base64 (~4/3 do tamanho real).
@@ -873,7 +873,7 @@ async function insertMessages(rows: JsonRecord[]) {
 async function previewAction(body: JsonRecord) {
   const instanceName = stringFrom(body.instanceName) || ALLOWED_INSTANCES[0]
   validateInstance(instanceName)
-  const pageSize = clampInt(body.pageSize, DEFAULT_PAGE_SIZE, 1, 200)
+  const pageSize = clampInt(body.pageSize, DEFAULT_PAGE_SIZE, 1, 50)
   const device = await getDevice(instanceName)
   const [evolution, localMessages] = await Promise.all([
     fetchEvolutionPage(instanceName, 1, pageSize),
@@ -929,7 +929,7 @@ async function startAction(body: JsonRecord, userId: string) {
     })
   }
 
-  const pageSize = clampInt(body.pageSize, DEFAULT_PAGE_SIZE, 1, 200)
+  const pageSize = clampInt(body.pageSize, DEFAULT_PAGE_SIZE, 1, 50)
   const mode = stringFrom(body.mode) || 'test'
   const recentMediaDays = clampInt(body.recentMediaDays, DEFAULT_RECENT_MEDIA_DAYS, 0, 90)
   const device = await getDevice(instanceName)
@@ -976,8 +976,24 @@ async function runAction(body: JsonRecord) {
     if (!job) return json({ error: 'Falha ao retomar job' }, 500)
   }
 
-  const pagesPerRun = clampInt(body.pagesPerRun, 2, 1, 5)
+  // Teto baixado de 5 para 2, padrão de 2 para 1.
+  //
+  // O worker morria com `memory limit reached` porque a memória acumulava a cada
+  // invocação — não por causa de um dado específico. Quanto menos trabalho por
+  // chamada, mais longe do teto. O driver de terminal (`manutencao-import/`) pedia
+  // 5 páginas de 200 e por isso PIORAVA o problema em vez de resolver; o clamp
+  // agora impede isso mesmo que o parâmetro venha pedindo mais.
+  const pagesPerRun = clampInt(body.pagesPerRun, 1, 1, 2)
   const targetPages = job.target_pages || job.total_pages || 1
+  // Id guardado ANTES do laço, de propósito.
+  //
+  // `job` é reatribuído a cada página com o retorno de `updateJob`, que pode vir
+  // null — e nesse caso o código lança. O `catch` então precisaria de `job.id`
+  // para marcar a falha, mas `job` acabou de virar null: o próprio catch
+  // estouraria, e uma exceção dentro do catch vira 500 sem corpo JSON. Ou seja,
+  // exatamente o erro mudo que custou uma investigação inteira. Com o id numa
+  // constante, o catch sempre consegue registrar o motivo.
+  const jobIdResolvido = job.id
   let inserted = 0
   let skipped = 0
   let failed = 0
@@ -1059,13 +1075,26 @@ async function runAction(body: JsonRecord) {
 
     return json({ job, processedPages, inserted, skipped, failed, done: currentPage > targetPages })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Erro inesperado'
-    job = await updateJob(job.id, {
+    const bruto = error instanceof Error ? error.message : 'Erro inesperado'
+    // A PÁGINA vai junto: sem ela, saber onde morreu exigia cruzar o horário da
+    // falha com o `current_page` no banco. Com ela, a mensagem se explica sozinha.
+    const message = `[página ${currentPage}] ${bruto}`
+    console.error(
+      JSON.stringify({
+        scope: 'import_pagina_falhou',
+        build: BUILD_MARKER,
+        jobId: jobIdResolvido,
+        pagina: currentPage,
+        paginasNestaChamada: processedPages,
+        erro: bruto.slice(0, 300),
+      }),
+    )
+    const atualizado = await updateJob(jobIdResolvido, {
       status: 'failed',
       error_message: message.slice(0, 1000),
-      failed_count: job.failed_count + failed,
+      failed_count: (job?.failed_count ?? 0) + failed,
     })
-    return json({ error: message, job }, 500)
+    return json({ error: message, job: atualizado ?? job }, 500)
   }
 }
 

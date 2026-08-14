@@ -83,6 +83,36 @@ const statusBadge = (normalizedStatus: string) => {
   }
 }
 
+/**
+ * AJUSTES DA IMPORTAÇÃO DE HISTÓRICO — todos existem por uma razão medida.
+ *
+ * O worker da edge function morria com `memory limit reached for the worker`,
+ * confirmado no log do container em 14/08. O padrão era sempre o mesmo: dois jobs
+ * distintos morreram na página 26, um tendo inserido 24 mensagens e o outro 3.
+ * Conteúdo diferente, MESMA quantidade de páginas — ou seja, não era um dado
+ * específico, era ACUMULAÇÃO. O worker é reaproveitado entre requisições, e o laço
+ * abaixo dispara uma atrás da outra: a memória sobe a cada chamada até estourar.
+ *
+ * Os três números atacam a mesma coisa por ângulos diferentes. Mexer neles para
+ * cima "para ir mais rápido" traz o problema de volta.
+ */
+
+/** Metade do que era. Menos objetos vivos por chamada. */
+const HISTORY_PAGE_SIZE = 25
+
+/** Uma página por chamada (era 2): o pico de memória cai pela metade. */
+const HISTORY_PAGES_PER_RUN = 1
+
+/** Dias de mídia real nos modos curtos. Na carga em massa vai 0 — ver `startHistory`. */
+const HISTORY_MEDIA_DAYS = 7
+
+/**
+ * Respiro entre chamadas. Era 250 ms, o que emendava uma invocação na outra e não
+ * dava janela para o runtime reciclar o worker. É o único ajuste que ataca a
+ * acumulação em si, e não apenas o tamanho de cada lote.
+ */
+const HISTORY_INTERVALO_MS = 1500
+
 function formatError(err: unknown): string {
   if (err instanceof EvolutionHistoryImportError) {
     let msg = err.message
@@ -361,8 +391,10 @@ export default function InstancesSettings() {
       const result = await startHistoryImport({
         instanceName: historyInstance,
         mode,
-        pageSize: 50,
-        recentMediaDays: 7,
+        pageSize: HISTORY_PAGE_SIZE,
+        // Carga em massa NÃO baixa mídia (ver HISTORY_MEDIA_DAYS). Modos curtos
+        // continuam trazendo a mídia recente, porque ali o volume é pequeno.
+        recentMediaDays: mode === 'all' ? 0 : HISTORY_MEDIA_DAYS,
       })
       setHistoryJob(result.job)
       toast({ title: 'Importação criada', description: `${historyStatusLabel(result.job.status)} - página ${result.job.current_page}` })
@@ -382,7 +414,7 @@ export default function InstancesSettings() {
       const result = await runHistoryImport({
         instanceName: historyInstance,
         jobId: historyJob.id,
-        pagesPerRun: 2,
+        pagesPerRun: HISTORY_PAGES_PER_RUN,
       })
       setHistoryJob(result.job)
       toast({
@@ -414,7 +446,7 @@ export default function InstancesSettings() {
         const result = await runHistoryImport({
           instanceName: historyInstance,
           jobId: currentJob.id,
-          pagesPerRun: 2,
+          pagesPerRun: HISTORY_PAGES_PER_RUN,
         })
 
         totalInserted += result.inserted
@@ -441,7 +473,7 @@ export default function InstancesSettings() {
           return
         }
 
-        await new Promise((resolve) => setTimeout(resolve, 250))
+        await new Promise((resolve) => setTimeout(resolve, HISTORY_INTERVALO_MS))
       }
 
       if (historyAutoStopRef.current) {
