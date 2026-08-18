@@ -71,10 +71,11 @@ export default function AdminPage() {
   const [isImportingInstances, setIsImportingInstances] = useState(false)
   const [isConfiguringWebhooks, setIsConfiguringWebhooks] = useState(false)
 
-  // Liberação do Licitações: vive em public.tool_access, não em profiles. Uma
-  // coluna em profiles seria auto-atribuível — a policy users_update_own_profile
-  // só trava `is_admin` no WITH CHECK.
+  // Liberações que vivem em public.tool_access, e não em profiles: uma coluna em
+  // profiles seria auto-atribuível — a policy users_update_own_profile só trava
+  // `is_admin` no WITH CHECK.
   const [licitacaoUserIds, setLicitacaoUserIds] = useState<Set<string>>(new Set())
+  const [propostaUserIds, setPropostaUserIds] = useState<Set<string>>(new Set())
 
   const [formData, setFormData] = useState({
     name: '',
@@ -84,6 +85,7 @@ export default function AdminPage() {
     department: '',
     is_admin: false,
     licitacoes_access: false,
+    proposta_comercial_access: false,
     allowed_devices: [] as string[],
   })
 
@@ -121,14 +123,16 @@ export default function AdminPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [uData, dData, licitacaoIds] = await Promise.all([
+      const [uData, dData, licitacaoIds, propostaIds] = await Promise.all([
         getUsers(),
         getDevices(),
         getToolUserIds('licitacoes'),
+        getToolUserIds('proposta-comercial'),
       ])
       setUsers(uData)
       setDevices(dData)
       setLicitacaoUserIds(new Set(licitacaoIds))
+      setPropostaUserIds(new Set(propostaIds))
     } catch (e) {
       console.error(e)
       toast({ title: 'Erro ao carregar equipe', variant: 'destructive' })
@@ -154,6 +158,7 @@ export default function AdminPage() {
       department: '',
       is_admin: false,
       licitacoes_access: false,
+      proposta_comercial_access: false,
       allowed_devices: [],
     })
     setIsDialogOpen(true)
@@ -169,6 +174,7 @@ export default function AdminPage() {
       department: user.department || '',
       is_admin: user.is_admin || false,
       licitacoes_access: licitacaoUserIds.has(user.id),
+      proposta_comercial_access: propostaUserIds.has(user.id),
       allowed_devices: user.allowed_devices || [],
     })
     setIsDialogOpen(true)
@@ -320,13 +326,17 @@ export default function AdminPage() {
       if (editingUser) {
         await updateUser(editingUser.id, dataToSave)
         await setToolAccess(editingUser.id, 'licitacoes', formData.licitacoes_access)
+        await setToolAccess(editingUser.id, 'proposta-comercial', formData.proposta_comercial_access)
         toast({ title: 'Usuário atualizado com sucesso' })
       } else {
         const created = await createUser(dataToSave)
-        // A liberação é gravada depois do usuário existir: tool_access.user_id
+        // As liberações são gravadas depois do usuário existir: tool_access.user_id
         // tem FK para auth.users, então antes disso o insert seria rejeitado.
-        if (created?.id && formData.licitacoes_access) {
-          await setToolAccess(created.id, 'licitacoes', true)
+        if (created?.id) {
+          if (formData.licitacoes_access) await setToolAccess(created.id, 'licitacoes', true)
+          if (formData.proposta_comercial_access) {
+            await setToolAccess(created.id, 'proposta-comercial', true)
+          }
         }
         toast({ title: 'Usuário criado com sucesso' })
       }
@@ -668,6 +678,23 @@ export default function AdminPage() {
             <p className="-mt-1 text-xs text-muted-foreground">
               Libera a ferramenta Licitações e cria a conta da pessoa lá no primeiro acesso. Não
               depende de ser administrador.
+            </p>
+
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="proposta_comercial_access"
+                checked={formData.proposta_comercial_access}
+                onCheckedChange={(checked) =>
+                  setFormData((prev) => ({ ...prev, proposta_comercial_access: checked as boolean }))
+                }
+              />
+              <Label htmlFor="proposta_comercial_access" className="font-medium">
+                Acesso à Proposta Comercial
+              </Label>
+            </div>
+            <p className="-mt-1 text-xs text-muted-foreground">
+              Libera o gerador de proposta comercial em PDF. O histórico é da equipe: quem tem
+              acesso enxerga e reaproveita as propostas de todo mundo.
             </p>
 
             {!formData.is_admin && (

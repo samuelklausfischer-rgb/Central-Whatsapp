@@ -1,7 +1,14 @@
 import supabase from '@/lib/supabase/client'
 
-/** Ferramentas externas liberadas por usuário (tabela public.tool_access). */
-export type ToolName = 'licitacoes'
+/**
+ * Ferramentas liberadas pessoa a pessoa (tabela public.tool_access).
+ *
+ * A coluna `tool` é texto livre, sem CHECK: incluir um nome novo aqui não pede
+ * migration. Quem entra nesta lista precisa aparecer também em
+ * `use-tool-access.tsx` (para o app saber consultar) e na Gestão de Equipe
+ * (para alguém conseguir liberar).
+ */
+export type ToolName = 'licitacoes' | 'proposta-comercial'
 
 /**
  * Ferramentas liberadas para o usuário logado.

@@ -80,7 +80,7 @@ const FinanceiroToolRoute = () => {
 // A liberação das ferramentas externas vem do banco, não do perfil já carregado.
 // Enquanto ela não chega, esperar: redirecionar no `false` inicial jogaria para
 // o dashboard todo mundo que abre a rota direto (link salvo, F5 na própria tela).
-const ExternalToolRoute = ({ tool }: { tool: 'relatorios' | 'licitacoes' }) => {
+const ExternalToolRoute = ({ tool }: { tool: 'relatorios' | 'licitacoes' | 'propostaComercial' }) => {
   const access = useToolAccess()
   if (access.loading)
     return (
@@ -138,6 +138,17 @@ const App = () => {
                 <Route element={<ExternalToolRoute tool="licitacoes" />}>
                   <Route path="/ferramentas/licitacoes" element={<FerramentaHospedada slug="licitacoes" />} />
                 </Route>
+                <Route element={<ExternalToolRoute tool="propostaComercial" />}>
+                  <Route
+                    path="/ferramentas/proposta-comercial"
+                    element={<FerramentaHospedada slug="proposta-comercial" />}
+                  />
+                </Route>
+                {/*
+                  Assinaturas não tem guarda: é assinatura de e-mail, todo mundo
+                  que trabalha aqui precisa gerar a sua.
+                */}
+                <Route path="/ferramentas/assinaturas" element={<FerramentaHospedada slug="assinaturas" />} />
                 <Route path="/settings" element={<SettingsLayout />}>
                   <Route path="general" element={<GeneralSettings />} />
                   <Route path="labels" element={<LabelsSettings />} />

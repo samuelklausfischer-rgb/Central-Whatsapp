@@ -63,3 +63,6 @@ core.[0-9]*
 
 # Saida do build do Electron (806 MB de binarios; vai para o GitHub Releases)
 central-whats-app/release/
+
+# Saída do scripts/conferir-proposta.mjs (HTML de 1 MB para inspeção manual)
+build-proposta/

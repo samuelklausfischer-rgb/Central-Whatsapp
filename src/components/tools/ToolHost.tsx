@@ -14,6 +14,8 @@ const RateioMobilemed = lazy(() => import('@/pages/tools/RateioMobilemed'))
 const RelatorioApp = lazy(() => import('@/pages/tools/RelatorioApp'))
 const Relatorios = lazy(() => import('@/pages/tools/Relatorios'))
 const Licitacoes = lazy(() => import('@/pages/tools/Licitacoes'))
+const Assinaturas = lazy(() => import('@/pages/tools/Assinaturas'))
+const PropostaComercial = lazy(() => import('@/pages/tools/PropostaComercial'))
 
 interface FerramentaHospedavel {
   titulo: string
@@ -37,6 +39,12 @@ export const FERRAMENTAS_HOSPEDADAS: Record<string, FerramentaHospedavel> = {
   'relatorio-app': { titulo: 'Relatório App', url: '/ferramentas/relatorio-app', Componente: RelatorioApp },
   relatorios: { titulo: 'Relatórios', url: '/ferramentas/relatorios', Componente: Relatorios, telaCheia: true },
   licitacoes: { titulo: 'Licitações', url: '/ferramentas/licitacoes', Componente: Licitacoes, telaCheia: true },
+  assinaturas: { titulo: 'Assinaturas', url: '/ferramentas/assinaturas', Componente: Assinaturas },
+  'proposta-comercial': {
+    titulo: 'Proposta Comercial',
+    url: '/ferramentas/proposta-comercial',
+    Componente: PropostaComercial,
+  },
 }
 
 /**
