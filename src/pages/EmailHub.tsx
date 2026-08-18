@@ -270,14 +270,23 @@ export default function EmailHub() {
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId) ?? null
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] overflow-hidden bg-background">
+    // ── UM painel de vidro só, não três ──
+    // Os 3 painéis (sidebar/lista/leitura) eram `bg-background` sólido e juntos
+    // cobriam 100% da largura — mesmo tirando o `bg-background` da raiz antiga,
+    // o fundo do PRN nunca aparecia porque os FILHOS é que tapavam tudo. A
+    // correção é aplicar `.superficie-vidro` UMA vez no contêiner que envolve
+    // os três, e não em cada um: um único `backdrop-blur` para a tela inteira
+    // em vez de três empilhados lado a lado (blur é caro, e blur repetido não
+    // soma nitidez nenhuma — só custo). As divisões viram borda sutil
+    // (`border-border/60`) entre as colunas, não bloco opaco.
+    <div className="flex h-[calc(100vh-4rem)] overflow-hidden superficie-vidro rounded-2xl">
       {/* Painel 1 — Sidebar */}
       <div
-        className="flex flex-col border-r border-border bg-background flex-shrink-0 overflow-hidden"
+        className="flex flex-col border-r border-border/60 flex-shrink-0 overflow-hidden"
         style={{ width: sidebarW }}
       >
         {/* Topo: conta + botão novo */}
-        <div className="p-3 border-b border-border">
+        <div className="p-3 border-b border-border/60">
           <AccountSwitcher
             accounts={accounts}
             selectedAccountId={selectedAccountId}
@@ -319,9 +328,11 @@ export default function EmailHub() {
         </div>
       </div>
 
-      {/* Handle resize sidebar */}
+      {/* Handle resize sidebar — mais largo e mais visível no hover que a borda
+          ao lado dele, para o usuário achar a área de arrasto mesmo sem o
+          bloco opaco de antes marcando o limite do painel. */}
       <div
-        className="w-1 hover:w-1.5 bg-border hover:bg-primary/30 cursor-col-resize flex-shrink-0 transition-all"
+        className="w-1 hover:w-1.5 bg-border/80 hover:bg-primary/40 cursor-col-resize flex-shrink-0 transition-all"
         onMouseDown={() => {
           sidebarResizing.current = true
           document.body.style.userSelect = 'none'
@@ -331,7 +342,7 @@ export default function EmailHub() {
 
       {/* Painel 2 — Lista de emails */}
       <div
-        className="flex flex-col border-r border-border bg-background flex-shrink-0 overflow-hidden"
+        className="flex flex-col border-r border-border/60 flex-shrink-0 overflow-hidden"
         style={{ width: listW }}
       >
         <EmailList
@@ -345,7 +356,7 @@ export default function EmailHub() {
 
       {/* Handle resize lista */}
       <div
-        className="w-1 hover:w-1.5 bg-border hover:bg-primary/30 cursor-col-resize flex-shrink-0 transition-all"
+        className="w-1 hover:w-1.5 bg-border/80 hover:bg-primary/40 cursor-col-resize flex-shrink-0 transition-all"
         onMouseDown={() => {
           listResizing.current = true
           document.body.style.userSelect = 'none'
@@ -353,8 +364,13 @@ export default function EmailHub() {
         }}
       />
 
-      {/* Painel 3 — Leitura */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-background">
+      {/* Painel 3 — Leitura. Fica MAIS opaco que os outros dois de propósito:
+          e-mail é texto denso (corpo inteiro, às vezes HTML de remetente
+          externo) e translucidez sobre esse volume de texto atrapalha a
+          leitura. `bg-background/90` é só opacidade — não é um novo
+          `backdrop-blur` (a regra dura do vidro aninhado continua valendo: o
+          único blur da tela é o do contêiner pai). */}
+      <div className="flex-1 flex flex-col overflow-hidden bg-background/90">
         {selectedEmail ? (
           <EmailReader
             email={selectedEmail}

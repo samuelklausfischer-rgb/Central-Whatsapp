@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Loader2, Download, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { ListRow } from '@/components/ui/list-row'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -92,10 +93,11 @@ export function RateioHistoricoPanel({ historico, loading, error, onDelete }: Ra
         )}
 
         {historico?.map((item) => (
-          <div
-            key={item.id}
-            className="rounded-lg border border-border p-3 transition-colors hover:border-foreground/20"
-          >
+          // Sem borda por item — só o respiro e o `hover:bg-foreground/5` do
+          // `ListRow`, igual ao idioma da home. O item tem dois cliques
+          // próprios (baixar/excluir) então fica `flex-col` em vez do
+          // `items-center` de uma linha só.
+          <ListRow key={item.id} className="flex-col items-stretch gap-0 p-3">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[11px] font-medium text-muted-foreground">{formatDataHora(item.criado_em)}</span>
               <div className="flex shrink-0 items-center gap-1">
@@ -138,7 +140,7 @@ export function RateioHistoricoPanel({ historico, loading, error, onDelete }: Ra
               )}
               {baixandoId === item.id ? 'Baixando…' : 'Baixar planilha'}
             </button>
-          </div>
+          </ListRow>
         ))}
       </div>
     </aside>

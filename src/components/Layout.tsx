@@ -4,7 +4,7 @@ import { Header } from '@/components/Header'
 import { MobileHeader } from '@/components/mobile/MobileHeader'
 import { MobileTabBar } from '@/components/mobile/MobileTabBar'
 import { MobileMoreSheet } from '@/components/mobile/MobileMoreSheet'
-import { GridBackground } from '@/components/ui/grid-background'
+import { PrnBackground } from '@/components/ui/prn-background'
 import { BroadcastListener } from '@/components/BroadcastListener'
 import { ToolHost } from '@/components/tools/ToolHost'
 import { useAppHeartbeat } from '@/hooks/use-app-heartbeat'
@@ -66,7 +66,15 @@ export default function Layout() {
         naAndroid && 'app-safe-areas app-android h-[100dvh]',
       )}
     >
-      <GridBackground />
+      {/*
+        Fica de fora só do /chat: o ChatWindow tem o próprio pattern de fundo
+        (`--chat-pattern`/`chat-conversation-bg-layer`, ver main.css) desenhado
+        para contraste de leitura das bolhas, e sobrepor o fundo do PRN ali
+        criaria duas texturas concorrendo por atenção. Fora do chat — inclusive
+        dentro de `/ferramentas/`, que usa `isFullBleed` para outro motivo (ver
+        comentário acima) — o fundo do PRN é o padrão do app.
+      */}
+      {!location.pathname.startsWith('/chat') && <PrnBackground />}
       <BroadcastListener />
 
       {!semCasca && (noCelular ? <MobileHeader onAbrirMais={() => setMaisAberto(true)} /> : <Header />)}

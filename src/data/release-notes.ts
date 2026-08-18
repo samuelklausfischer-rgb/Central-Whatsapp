@@ -7,6 +7,25 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.212',
+    date: '2026-08-18 16:32',
+    title: 'O app inteiro ganhou cara nova',
+    details: [
+      '🎨 Todas as telas passaram a dividir o mesmo fundo — uma arte azul do PRN Hub, feita dos mesmos quadrados que formam o globo da nossa marca. A tela de Conversas ficou de fora de propósito: lá o que importa é a conversa, não o cenário',
+      '🧊 Os cartões viraram vidro: translúcidos, com o fundo aparecendo por trás. Saiu a barrinha colorida na lateral e a caixinha do ícone, que davam ao app um ar de modelo pronto',
+      '📊 A Visão Geral foi redesenhada por inteiro: os números do topo, Minhas tarefas, Anotações, Aparelhos, Conversas mais ativas, Volume por aparelho e Agendamentos. As listas perderam as bordas e ganharam respiro, e o volume por aparelho agora separa recebidas de enviadas na mesma barra',
+      '📱 Os aparelhos voltaram a mostrar a própria foto do WhatsApp. Quando a foto não existe ou não carrega, entra o globo do PRN no lugar — antes aparecia um ícone de imagem quebrada. E o app busca a foto de novo sozinho quando ela vence',
+      '🌙 O modo escuro acompanha tudo: o mesmo desenho de fundo, repintado para a noite',
+      '🗂️ Configurações, Gestão de Equipe, Anotações, Gatilhos, Agendamentos, CRM, E-mails e as ferramentas de Assinaturas, Proposta e Rateio seguem agora o mesmo padrão da Visão Geral',
+      '🐛 Corrigido em Anotações: quando a internet caía, a tela dizia "Nenhuma anotação" — exatamente o contrário da verdade. Agora avisa que não deu para carregar e oferece tentar de novo',
+      '🖼️ Abrir o app agora tem cenário: seis artes do PRN Hub, uma sorteada a cada vez que você abre. A tela de verificar atualização, a de entrar e a de carregar passaram a usar a mesma arte da vez, com um painel de vidro por cima',
+      '🔄 A verificação de atualização ficou clara: um anel mostra o andamento e, quando há versão nova, o download aparece em porcentagem grande, com um botão de "Instalar e reiniciar" no fim',
+      '⏱️ A abertura fica cinco segundos verificando, de propósito, para dar tempo de ler o que está acontecendo. Quem já está logado cai direto na home quando eles terminam — o app carrega a sua sessão DURANTE a espera, então não é tempo perdido',
+      '🐛 Corrigido: quando a checagem de atualização respondia muito rápido, a abertura ficava dez segundos parada em "Verificando" antes de liberar',
+      '🔐 Entrar continua igual no que importa: mesmo usuário, mesma senha. O botão agora trava enquanto processa, para dois cliques não dispararem dois logins',
+    ],
+  },
+  {
     version: '0.0.211',
     date: '2026-08-18 11:00',
     title: 'Assinatura de e-mail e proposta comercial agora são do app',

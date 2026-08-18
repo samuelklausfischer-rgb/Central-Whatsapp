@@ -1,6 +1,9 @@
 import { lazy, Suspense } from 'react'
+import { Loader2 } from 'lucide-react'
 import { BrowserRouter, HashRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import { isNativeAndroid } from '@/lib/app-info'
+import { AuthShell } from '@/components/auth/AuthShell'
+import { GlassPanel } from '@/components/ui/glass-panel'
 
 /**
  * `HashRouter` onde NÃO existe servidor para resolver rotas.
@@ -48,13 +51,28 @@ const LabelsSettings = lazy(() => import('./pages/settings/LabelsSettings'))
 const AiAssistantSettings = lazy(() => import('./pages/settings/AiAssistantSettings'))
 const InstancesSettings = lazy(() => import('./pages/settings/InstancesSettings'))
 const AdminPage = lazy(() => import('./pages/admin/AdminPage'))
+// Harness de dev para os estados do UpdatePanel que `main.cjs:53` nunca produz
+// fora de dev real (downloading/ready exigem update de verdade). `import.meta.env.DEV`
+// vira a constante `false` no build de produção e o branch morto some antes do
+// bundle ser gerado — por isso o `lazy(() => import(...))` real do harness nunca
+// chega a virar chunk no pacote publicado para a frota.
+const SplashPreview = import.meta.env.DEV ? lazy(() => import('./pages/dev/SplashPreview')) : null
+
 const ProtectedRoute = () => {
   const { isAuthenticated, loading } = useAuth()
+  // Boot-level: só acontece uma vez por abertura do app, enquanto a sessão do
+  // Supabase resolve. Usa a mesma moldura do splash de update e do login
+  // (AuthShell + GlassPanel), então quem já está logado vê uma sequência
+  // visualmente contínua: splash -> "Entrando…" -> dashboard, sempre na mesma
+  // arte de fundo sorteada na abertura.
   if (loading)
     return (
-      <div className="h-screen w-full flex items-center justify-center text-muted-foreground">
-        Carregando...
-      </div>
+      <AuthShell>
+        <GlassPanel className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span>Entrando…</span>
+        </GlassPanel>
+      </AuthShell>
     )
   return isAuthenticated ? <Outlet /> : <Navigate to="/login" replace />
 }
@@ -99,9 +117,25 @@ const App = () => {
           <TooltipProvider>
           <Toaster />
           <Sonner />
-          <Suspense fallback={<div className="h-screen w-full flex items-center justify-center text-muted-foreground">Carregando...</div>}>
+          <Suspense
+            fallback={
+              // Neutro de propósito: este fallback dispara tanto no boot quanto a
+              // cada navegação in-app entre páginas com lazy() (ex.: dashboard ->
+              // /crm), então NÃO pode usar AuthShell — uma foto de praia tropical
+              // apareceria no meio da sessão só porque o usuário trocou de tela.
+              // Só o ProtectedRoute, acima, é boot-level de verdade.
+              <div className="h-screen w-full flex items-center justify-center text-muted-foreground">
+                <Loader2 className="h-6 w-6 animate-spin" />
+              </div>
+            }
+          >
           <Routes>
             <Route path="/login" element={<Login />} />
+            {/* Pública e fora do ProtectedRoute de propósito: é justamente a tela de
+                ANTES do login que precisa ser testada, e só existe fora de produção. */}
+            {import.meta.env.DEV && SplashPreview && (
+              <Route path="/dev/splash" element={<SplashPreview />} />
+            )}
             <Route element={<ProtectedRoute />}>
               <Route element={<Layout />}>
                 <Route path="/" element={<Navigate to="/dashboard" replace />} />

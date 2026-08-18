@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Search, Trash2, Edit2, Zap, MessageSquare } from 'lucide-react'
+import { Plus, Search, Trash2, Edit2, Zap } from 'lucide-react'
 import { useAuth } from '@/hooks/use-auth'
 import {
   getTriggers,
@@ -12,6 +12,10 @@ import { useToast } from '@/hooks/use-toast'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { CardContent } from '@/components/ui/card'
+import { GlassCard } from '@/components/ui/surface'
+import { EstadoPainel } from '@/components/ui/estado-painel'
+import { ListRow } from '@/components/ui/list-row'
 import {
   Dialog,
   DialogContent,
@@ -21,6 +25,7 @@ import {
 } from '@/components/ui/dialog'
 import { useRealtime } from '@/hooks/use-realtime'
 import { extractFieldErrors } from '@/lib/errors'
+import { useIsMobile } from '@/hooks/use-mobile'
 
 export default function Triggers() {
   const { user } = useAuth()
@@ -36,6 +41,11 @@ export default function Triggers() {
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
+
+  // Sem hover no APK Android (Capacitor): um controle só visível em hover é,
+  // na prática, um controle que não existe no toque. No celular ele fica
+  // sempre visível.
+  const noCelular = useIsMobile()
 
   const loadData = async () => {
     try {
@@ -101,6 +111,10 @@ export default function Triggers() {
 
   const filtered = triggers.filter((t) => t.title.toLowerCase().includes(search.toLowerCase()))
 
+  const classesAcoesGatilho = noCelular
+    ? 'flex items-center gap-1 flex-shrink-0 opacity-100'
+    : 'flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity'
+
   return (
     <div className="flex-1 p-8 overflow-auto">
       <div className="max-w-4xl mx-auto space-y-6">
@@ -121,7 +135,9 @@ export default function Triggers() {
           </Button>
         </div>
 
-        <div className="flex items-center gap-2 bg-muted border border-border rounded-xl px-4 py-2 backdrop-blur-xl">
+        {/* `bg-muted` já é opaco — o `backdrop-blur-xl` que existia aqui não
+            borrava nada por baixo, só custava GPU à toa. Removido. */}
+        <div className="flex items-center gap-2 bg-muted border border-border rounded-xl px-4 py-2">
           <Search className="h-5 w-5 text-muted-foreground" />
           <input
             className="flex-1 bg-transparent border-none text-sm text-foreground focus:outline-none"
@@ -131,51 +147,60 @@ export default function Triggers() {
           />
         </div>
 
-        {loading ? (
-          <div className="text-center py-10 text-muted-foreground">Carregando...</div>
-        ) : filtered.length === 0 ? (
-          <div className="text-center py-20 bg-muted border border-border rounded-2xl">
-            <MessageSquare className="h-12 w-12 text-muted-foreground/30 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-foreground">Nenhum gatilho encontrado</h3>
-            <p className="text-sm text-muted-foreground mt-1">
-              Crie seu primeiro gatilho para enviar mensagens mais rápido.
-            </p>
-          </div>
-        ) : (
-          <div className="grid gap-4">
-            {filtered.map((t) => (
-              <div
-                key={t.id}
-                className="bg-muted border border-border rounded-xl p-5 backdrop-blur-sm flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between group hover:border-ring/50 transition-colors"
-              >
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold text-lg text-foreground truncate">{t.title}</h3>
-                  <p className="text-sm text-muted-foreground mt-1 line-clamp-2 whitespace-pre-wrap">
-                    {t.content}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleOpenDialog(t)}
-                    className="text-blue-400 hover:text-blue-300 hover:bg-blue-400/10"
-                  >
-                    <Edit2 className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleDelete(t.id)}
-                    className="text-red-400 hover:text-red-300 hover:bg-red-400/10"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
+        {/*
+          Mesmo idioma de linha da home: um `GlassCard` só (em vez das caixas
+          `bg-muted border` feitas à mão, uma por gatilho) e `ListRow` para
+          cada linha. `EstadoPainel` cobre carregando/vazio — erro já é
+          avisado por toast (comportamento existente, preservado) e por isso
+          fica sempre `erro={false}` aqui.
+        */}
+        <GlassCard>
+          <CardContent className="p-2">
+            <EstadoPainel
+              carregando={loading}
+              erro={false}
+              vazio={filtered.length === 0}
+              mensagemVazio="Nenhum gatilho encontrado. Crie o primeiro para enviar mensagens mais rápido."
+            />
+            {!loading && filtered.length > 0 && (
+              <div className="space-y-0.5">
+                {filtered.map((t) => (
+                  // Sem `onClick` na linha: editar e excluir são dois alvos de
+                  // clique distintos, não dá para aninhar `<button>` dentro de
+                  // `<button>` — por isso `ListRow` aqui é `<div>`.
+                  <ListRow key={t.id} className="items-start">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{t.title}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2 whitespace-pre-wrap">
+                        {t.content}
+                      </p>
+                    </div>
+                    {/* No APK Android não existe hover: sem `useIsMobile()` esses
+                        botões ficariam invisíveis e inalcançáveis no toque. */}
+                    <div className={classesAcoesGatilho}>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleOpenDialog(t)}
+                        className="h-7 w-7 text-blue-400 hover:text-blue-300 hover:bg-blue-400/10"
+                      >
+                        <Edit2 className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleDelete(t.id)}
+                        className="h-7 w-7 text-red-400 hover:text-red-300 hover:bg-red-400/10"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </ListRow>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
+            )}
+          </CardContent>
+        </GlassCard>
       </div>
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

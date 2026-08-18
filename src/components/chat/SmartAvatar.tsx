@@ -1,7 +1,20 @@
 import { useState, useEffect } from 'react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { User, Building2 } from 'lucide-react'
+import { User } from 'lucide-react'
 import { fetchAvatar } from '@/services/contacts'
+import { syncDeviceAvatar } from '@/services/devices'
+import { PrnGlobo } from '@/components/ui/prn-globo'
+
+// Aparelhos cujo resync de foto já foi disparado nesta sessão de página.
+// Módulo, não `useState`/`useRef`: o MESMO aparelho aparece em mais de um
+// lugar da tela ao mesmo tempo (linha do dashboard, cabeçalho do chat, etc.),
+// cada lugar monta uma instância própria de SmartAvatar, e um ref só protege
+// a instância em que vive — a segunda instância do mesmo aparelho não veria
+// o ref da primeira e disparia o resync de novo. É o mesmo raciocínio do
+// cache negativo de `fetchAvatar` (comentado abaixo, para contatos): a
+// dedupe precisa sobreviver entre montagens/instâncias, então vive fora do
+// React, no módulo.
+const devicesResyncDisparados = new Set<string>()
 
 export function SmartAvatar({
   jid,
@@ -69,7 +82,26 @@ export function SmartAvatar({
 
   const handleImageError = () => {
     setImgError(true)
-    if (isInstance || !jid || !instanceKey || jid === 'Unknown Sender') return
+
+    // Caminho de APARELHO: a URL guardada em `devices.avatar_url` é da CDN
+    // do WhatsApp (pps.whatsapp.net) e expira. Quando a imagem falha, pedimos
+    // à edge function `device-avatar` para rebuscar na Evolution e regravar
+    // a coluna — no máximo 1 vez por aparelho por sessão (ver o Set no topo
+    // do módulo). Não tratamos a resposta: o `useRealtime('devices')` já
+    // existente no dashboard propaga a `avatar_url` nova sozinho quando ela
+    // chega. Erro é engolido de propósito, como o caminho de contato abaixo
+    // já faz — uma falha de resync não deve virar erro visível na tela, só
+    // significa que o fallback (globo) continua sendo mostrado.
+    if (isInstance) {
+      const deviceId = deviceRecord?.id
+      if (deviceId && !devicesResyncDisparados.has(deviceId)) {
+        devicesResyncDisparados.add(deviceId)
+        syncDeviceAvatar(deviceId).catch(() => {})
+      }
+      return
+    }
+
+    if (!jid || !instanceKey || jid === 'Unknown Sender') return
     fetchAvatar(jid, instanceKey, { retry: true })
       .then((data) => {
         if (data?.avatar_url) setLocalAvatarUrl(data.avatar_url)
@@ -104,12 +136,17 @@ export function SmartAvatar({
         />
       )}
       <AvatarFallback className={fallbackClassName}>
-        {showInitials ||
-          (isInstance ? (
-            <Building2 className="h-5 w-5 opacity-50" />
-          ) : (
-            <User className="h-5 w-5 opacity-50" />
-          ))}
+        {isInstance ? (
+          // Aparelho NUNCA mostra iniciais nem o ícone genérico de prédio:
+          // "Financeiro PRN" viraria "FI", que não identifica nada — o globo
+          // do PRN é o fallback fixo, foto real por cima quando ela existir
+          // e carregar. Por isso este ramo ignora `showInitials` de propósito
+          // (diferente do ramo de contato abaixo, que é o comportamento
+          // original e não muda).
+          <PrnGlobo className="h-full w-full p-1" />
+        ) : (
+          showInitials || <User className="h-5 w-5 opacity-50" />
+        )}
       </AvatarFallback>
     </Avatar>
   )

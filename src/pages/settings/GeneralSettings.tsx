@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { GlassCard } from '@/components/ui/surface'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -39,7 +40,7 @@ export default function GeneralSettings() {
 
   return (
     <div className="grid gap-6 pb-12">
-      <Card>
+      <GlassCard>
         <CardHeader>
           <CardTitle>Perfil do Usuário</CardTitle>
           <CardDescription>Informações pessoais e perfil.</CardDescription>
@@ -68,7 +69,10 @@ export default function GeneralSettings() {
               <Label htmlFor="userSignature">Assinatura Pessoal</Label>
               <textarea
                 id="userSignature"
-                className="w-full flex min-h-[80px] rounded-md border border-border bg-muted px-3 py-2 text-[14px] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500/50 resize-y text-foreground"
+                // `bg-foreground/5` no lugar de `bg-muted` (opaco): dentro do
+                // GlassCard, um fundo opaco vira um retângulo morto sobre o
+                // vidro — `/5` acompanha o texto e respeita os dois temas.
+                className="w-full flex min-h-[80px] rounded-md border border-border bg-foreground/5 px-3 py-2 text-[14px] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500/50 resize-y text-foreground"
                 value={signature}
                 onChange={(e) => setSignature(e.target.value)}
                 placeholder="Sua assinatura pessoal (usada se o aparelho não tiver uma)"
@@ -79,9 +83,9 @@ export default function GeneralSettings() {
             </Button>
           </div>
         </CardContent>
-      </Card>
+      </GlassCard>
 
-      <Card>
+      <GlassCard>
         <CardHeader>
           <CardTitle>Preferências do Sistema</CardTitle>
           <CardDescription>Configure como o sistema deve se comportar.</CardDescription>
@@ -106,7 +110,7 @@ export default function GeneralSettings() {
             <Switch id="darkMode" checked={theme === 'system'} onCheckedChange={(checked) => setTheme(checked ? 'system' : 'light')} />
           </div>
         </CardContent>
-      </Card>
+      </GlassCard>
     </div>
   )
 }

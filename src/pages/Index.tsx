@@ -25,9 +25,11 @@ import {
   Minus,
   Clock,
   ListTodo,
-  AlertTriangle,
 } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { GlassCard } from '@/components/ui/surface'
+import { EstadoPainel } from '@/components/ui/estado-painel'
+import { ACENTOS } from '@/components/ui/stat-block'
 import {
   Dialog,
   DialogContent,
@@ -36,6 +38,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useNavigate, Link } from 'react-router-dom'
+import { SmartAvatar } from '@/components/chat/SmartAvatar'
 import { getDevices } from '@/services/devices'
 import { getNotes } from '@/services/notes'
 import { getTasks, type TaskWithRelations } from '@/services/tasks'
@@ -94,11 +97,15 @@ function getDateRange(period: Period): { from: Date; to: Date } {
 
 // ─── KPI Card ─────────────────────────────────────────────────────────────────
 
+// `ACENTOS` mora em `@/components/ui/stat-block` — mesmo mapa reaproveitado
+// pelo `StatBlock` (números agrupados em outras telas). Ver o comentário lá
+// para o porquê do formato (ícone + bloom por nome de cor).
+
 function KpiCard({
-  label, value, valueText, sub, icon, accentBg, accentText, trend, onClick,
+  label, value, valueText, sub, icon, acento, trend, onClick,
 }: {
   label: string; value: number; sub?: string; icon: React.ReactNode
-  accentBg: string; accentText: string
+  acento: keyof typeof ACENTOS
   trend?: 'up' | 'down' | 'neutral'
   /** Texto no lugar do número — para valores que não são contagem, como duração. */
   valueText?: string
@@ -107,20 +114,29 @@ function KpiCard({
 }) {
   const TrendIcon = trend === 'up' ? TrendingUp : trend === 'down' ? TrendingDown : Minus
   const trendColor = trend === 'up' ? 'text-emerald-500' : trend === 'down' ? 'text-rose-500' : 'text-muted-foreground'
+  const { icone, bloom } = ACENTOS[acento]
   return (
-    <Card
-      className={`relative overflow-hidden border-border bg-card ${onClick ? 'cursor-pointer hover:bg-accent/40 transition-colors' : ''}`}
+    <GlassCard
+      className={`relative overflow-hidden ${onClick ? 'cursor-pointer hover:bg-foreground/5 transition-colors' : ''}`}
       onClick={onClick}
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
       onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } : undefined}
     >
-      <div className={`absolute top-0 left-0 w-1 h-full ${accentBg}`} />
-      <CardContent className="pt-5 pb-4 pl-5">
+      {/* Bloom radial no canto superior direito — no lugar da barra colorida e
+          do chip de ícone antigos, que eram justamente o par datado que o
+          usuário apontou. `pointer-events-none` porque é decoração pura, não
+          pode roubar o clique do card quando ele é um botão. */}
+      <div
+        className="absolute -top-8 -right-8 h-28 w-28 rounded-full pointer-events-none"
+        style={{ background: bloom }}
+        aria-hidden="true"
+      />
+      <CardContent className="relative pt-5 pb-4 pl-5">
         <div className="flex items-start justify-between">
           <div>
             <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">{label}</p>
-            <p className="text-3xl font-bold text-foreground tabular-nums">
+            <p className="text-3xl font-semibold text-foreground tracking-tight tabular-nums">
               {valueText ?? value.toLocaleString('pt-BR')}
             </p>
             {sub && (
@@ -130,10 +146,12 @@ function KpiCard({
               </p>
             )}
           </div>
-          <div className={`p-2.5 rounded-xl ${accentBg} bg-opacity-10`}>{icon}</div>
+          {/* Ícone solto sobre o bloom, sem caixa por baixo — a cor vem do
+              mesmo mapa que define o bloom, então basta trocar `acento`. */}
+          <div className={icone}>{icon}</div>
         </div>
       </CardContent>
-    </Card>
+    </GlassCard>
   )
 }
 
@@ -153,51 +171,6 @@ function formatarDuracao(segundos: number | null): string {
   const h = Math.floor(segundos / 3600)
   const m = Math.round((segundos % 3600) / 60)
   return m ? `${h}h ${m}min` : `${h}h`
-}
-
-// ─── Estado dos painéis de trabalho ───────────────────────────────────────────
-
-/**
- * Carregando, erro e vazio são TRÊS coisas diferentes e cada uma tem a sua
- * mensagem. O Dashboard antigo tratava as três como vazio, então uma queda de
- * rede virava "nada pendente" — a leitura oposta à realidade, justamente num
- * painel cuja função é avisar do que falta fazer.
- */
-function EstadoPainel({
-  carregando, erro, vazio, mensagemVazio, aoTentarDeNovo,
-}: {
-  carregando: boolean; erro: boolean; vazio: boolean
-  mensagemVazio: string; aoTentarDeNovo?: () => void
-}) {
-  if (carregando) {
-    return (
-      <div className="space-y-2" aria-busy="true">
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="h-11 rounded-lg bg-muted/40 animate-pulse" />
-        ))}
-      </div>
-    )
-  }
-  if (erro) {
-    return (
-      <div className="flex flex-col items-center justify-center py-6 text-center gap-2">
-        <AlertTriangle className="h-6 w-6 text-amber-500" />
-        <p className="text-xs text-muted-foreground">Não deu para carregar agora.</p>
-        {aoTentarDeNovo && (
-          <button
-            onClick={aoTentarDeNovo}
-            className="text-xs font-medium text-foreground underline underline-offset-2 hover:opacity-80"
-          >
-            Tentar de novo
-          </button>
-        )}
-      </div>
-    )
-  }
-  if (vazio) {
-    return <p className="text-xs text-muted-foreground text-center py-6">{mensagemVazio}</p>
-  }
-  return null
 }
 
 // ─── Tooltip ──────────────────────────────────────────────────────────────────
@@ -328,6 +301,14 @@ export default function Index() {
 
   const deviceNameMap = useMemo(
     () => Object.fromEntries(devices.map((d) => [d.id, d.name])),
+    [devices]
+  )
+
+  // Mesmo padrão do `deviceNameMap` acima — aqui para alimentar o `SmartAvatar`
+  // de contato no card "Conversas mais ativas", que precisa da instância dona
+  // da conversa para saber onde buscar/atualizar a foto.
+  const deviceInstanceMap = useMemo(
+    () => Object.fromEntries(devices.map((d) => [d.id, d.instance_key])),
     [devices]
   )
 
@@ -509,6 +490,24 @@ export default function Index() {
     ? devices.filter((d) => d.id === selectedDeviceId)
     : devices
 
+  /**
+   * Linhas do card "Volume por aparelho" já ordenadas, com o maior total do
+   * conjunto calculado UMA vez. A versão anterior recalculava esse máximo
+   * dentro do `.map()` de cada linha — um `Math.max` percorrendo todos os
+   * aparelhos, repetido para cada aparelho, sem necessidade nenhuma porque o
+   * maior total não muda entre linhas do mesmo card.
+   */
+  const volumePorAparelho = useMemo(() => {
+    const linhas = visibleDevices
+      .map((d) => {
+        const s = stats.byDevice[d.id] || { inbound: 0, outbound: 0, sentByMe: 0 }
+        return { ...d, inbound: s.inbound, outbound: s.outbound, total: s.inbound + s.outbound }
+      })
+      .sort((a, b) => b.total - a.total)
+    const maxTotal = Math.max(...linhas.map((l) => l.total), 1)
+    return { linhas, maxTotal }
+  }, [visibleDevices, stats])
+
   const connectedCount = devices.filter((d) => d.status === 'open' || d.status === 'connected').length
   const now = new Date()
   const dateLabel = now.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
@@ -572,9 +571,8 @@ export default function Index() {
               ? 'carregando...'
               : selectedDeviceId ? 'neste aparelho' : `em ${connectedCount} aparelhos`
           }
-          icon={<Users className="h-5 w-5 text-blue-500" />}
-          accentBg="bg-blue-500"
-          accentText="text-blue-500"
+          icon={<Users className="h-5 w-5" />}
+          acento="azul"
           trend="neutral"
         />
         <KpiCard
@@ -585,9 +583,8 @@ export default function Index() {
           // de mediana. Meia dúzia de conversas esquecidas de madrugada desloca a
           // média inteira e faz o número parar de descrever o atendimento.
           sub="mediana até a primeira resposta"
-          icon={<Clock className="h-5 w-5 text-emerald-500" />}
-          accentBg="bg-emerald-500"
-          accentText="text-emerald-500"
+          icon={<Clock className="h-5 w-5" />}
+          acento="esmeralda"
           trend="neutral"
         />
         <KpiCard
@@ -600,18 +597,16 @@ export default function Index() {
                 ? `${convMetrics.myToday} chegaram hoje`
                 : 'nada novo hoje'
           }
-          icon={<Inbox className="h-5 w-5 text-violet-500" />}
-          accentBg="bg-violet-500"
-          accentText="text-violet-500"
+          icon={<Inbox className="h-5 w-5" />}
+          acento="violeta"
           trend={convMetrics.myOpen === 0 ? 'up' : convMetrics.myOpen > 10 ? 'down' : 'neutral'}
         />
         <KpiCard
           label="Não lidas agora"
           value={convMetrics.unreadConversations}
           sub={convMetrics.unreadConversations === 0 ? 'Tudo em dia' : 'clique para ver quem'}
-          icon={<Bell className="h-5 w-5 text-amber-500" />}
-          accentBg="bg-amber-500"
-          accentText="text-amber-500"
+          icon={<Bell className="h-5 w-5" />}
+          acento="ambar"
           trend={convMetrics.unreadConversations === 0 ? 'up' : convMetrics.unreadConversations > 20 ? 'down' : 'neutral'}
           onClick={convMetrics.unreadConversations > 0 ? () => setPainelNaoLidas(true) : undefined}
         />
@@ -619,9 +614,8 @@ export default function Index() {
           label="Não respondidas hoje"
           value={convMetrics.pendingReplies}
           sub={convMetrics.pendingReplies === 0 ? 'Todas respondidas' : 'clique para ver quem'}
-          icon={<Clock className="h-5 w-5 text-rose-500" />}
-          accentBg="bg-rose-500"
-          accentText="text-rose-500"
+          icon={<Clock className="h-5 w-5" />}
+          acento="rosa"
           trend={convMetrics.pendingReplies === 0 ? 'up' : convMetrics.pendingReplies > 10 ? 'down' : 'neutral'}
           onClick={convMetrics.pendingReplies > 0 ? () => setPainelPendentes(true) : undefined}
         />
@@ -634,7 +628,7 @@ export default function Index() {
         e ainda assim só se tivesse contato vinculado.
       */}
       <div className="grid gap-4 md:grid-cols-2">
-        <Card className="border-border">
+        <GlassCard>
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
@@ -663,40 +657,53 @@ export default function Index() {
               }}
             />
             {!trabalhoCarregando && !erroTarefas && minhasTarefas.length > 0 && (
-              <div className="space-y-2">
+              <div className="space-y-0.5">
                 {minhasTarefas.slice(0, 4).map((t) => {
                   const atrasada = !!t.due_date && t.due_date < hojeISO
+                  const venceHoje = !!t.due_date && t.due_date === hojeISO
+                  // Ponto de status substitui a borda: rosa = atrasada, âmbar =
+                  // vence hoje, ardósia = futura ou sem prazo. Não vira checkbox
+                  // de propósito — clicar navega para o CRM, e um checkbox aqui
+                  // sugeriria "concluir" sem passar por lá (controle inerte).
+                  const corPonto = atrasada ? 'bg-rose-500' : venceHoje ? 'bg-amber-500' : 'bg-slate-400'
+                  const corPill = atrasada
+                    ? 'bg-rose-500/15 text-rose-500'
+                    : venceHoje
+                      ? 'bg-amber-500/15 text-amber-500'
+                      : 'bg-muted text-muted-foreground'
                   return (
                     <div
                       key={t.id}
                       onClick={() => navigate('/crm')}
-                      className="p-2.5 rounded-lg border border-border bg-muted/20 hover:bg-accent cursor-pointer transition-colors"
+                      className="group flex items-center gap-2.5 px-2 py-2 rounded-xl hover:bg-foreground/5 cursor-pointer transition-colors"
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="text-xs font-medium text-foreground line-clamp-1 flex-1">{t.title}</p>
-                        {t.due_date && (
-                          <span className={`text-[10px] font-medium flex-shrink-0 ${atrasada ? 'text-rose-500' : 'text-muted-foreground'}`}>
-                            {t.due_date.split('-').reverse().slice(0, 2).join('/')}
-                          </span>
+                      <span className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${corPonto}`} aria-hidden="true" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-foreground line-clamp-1">{t.title}</p>
+                        {t.contact?.name && (
+                          <p className="text-[11px] text-muted-foreground truncate mt-0.5">{t.contact.name}</p>
                         )}
                       </div>
-                      {t.contact?.name && (
-                        <p className="text-[11px] text-muted-foreground truncate mt-0.5">{t.contact.name}</p>
+                      {t.due_date && (
+                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0 ${corPill}`}>
+                          {t.due_date.split('-').reverse().slice(0, 2).join('/')}
+                        </span>
                       )}
+                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
                     </div>
                   )
                 })}
                 {minhasTarefas.length > 4 && (
-                  <p className="text-[11px] text-muted-foreground text-center pt-0.5">
+                  <p className="text-[11px] text-muted-foreground text-center pt-1">
                     e mais {minhasTarefas.length - 4}
                   </p>
                 )}
               </div>
             )}
           </CardContent>
-        </Card>
+        </GlassCard>
 
-        <Card className="border-border">
+        <GlassCard>
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
@@ -720,38 +727,45 @@ export default function Index() {
               }}
             />
             {!trabalhoCarregando && !erroNotas && recentNotes.length > 0 && (
-              <div className="space-y-2">
+              <div className="space-y-0.5">
                 {recentNotes.map((note) => (
                   <div
                     key={note.id}
                     onClick={() => navigate('/notes')}
-                    className="p-2.5 rounded-lg border border-border bg-muted/20 hover:bg-accent cursor-pointer transition-colors"
+                    className="group flex items-center gap-2.5 px-2 py-2 rounded-xl hover:bg-foreground/5 cursor-pointer transition-colors"
                   >
-                    <div className="flex items-center gap-2">
-                      <p className="text-xs font-medium text-foreground truncate flex-1">
-                        {note.contact_name || note.title}
-                      </p>
-                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${
-                        note.category === 'financeiro' ? 'bg-emerald-500/15 text-emerald-500' :
-                        note.category === 'rh' ? 'bg-blue-500/15 text-blue-500' :
-                        note.category === 'administrativo' ? 'bg-amber-500/15 text-amber-500' :
-                        'bg-muted text-muted-foreground'
-                      }`}>
-                        {note.category === 'financeiro' ? 'Fin' : note.category === 'rh' ? 'RH' : note.category === 'administrativo' ? 'Adm' : 'Ger'}
-                      </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs font-medium text-foreground truncate flex-1">
+                          {note.contact_name || note.title}
+                        </p>
+                        {/* Selo em tom mais suave que os outros do arquivo — era
+                            o `/15` de sempre, mas texto+fundo na mesma família
+                            de cor sobre vidro competia com o "Fin"/"RH" que é
+                            a informação real da pílula. */}
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${
+                          note.category === 'financeiro' ? 'bg-emerald-500/10 text-emerald-500' :
+                          note.category === 'rh' ? 'bg-blue-500/10 text-blue-500' :
+                          note.category === 'administrativo' ? 'bg-amber-500/10 text-amber-500' :
+                          'bg-muted/60 text-muted-foreground'
+                        }`}>
+                          {note.category === 'financeiro' ? 'Fin' : note.category === 'rh' ? 'RH' : note.category === 'administrativo' ? 'Adm' : 'Ger'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">{note.content}</p>
                     </div>
-                    <p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">{note.content}</p>
+                    <ChevronRight className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
                 ))}
               </div>
             )}
           </CardContent>
-        </Card>
+        </GlassCard>
       </div>
 
       {/* ── Chart + Devices ── */}
       <div className="grid gap-4 md:grid-cols-7">
-        <Card className="md:col-span-5 border-border">
+        <GlassCard className="md:col-span-5">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <CardTitle className="text-sm font-semibold text-foreground">
@@ -822,10 +836,10 @@ export default function Index() {
               )}
             </div>
           </CardContent>
-        </Card>
+        </GlassCard>
 
         {/* Devices panel */}
-        <Card className="md:col-span-2 border-border flex flex-col">
+        <GlassCard className="md:col-span-2 flex flex-col">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm font-semibold text-foreground">Aparelhos</CardTitle>
@@ -847,18 +861,24 @@ export default function Index() {
                   <button
                     key={device.id}
                     onClick={() => navigate(`/chat?device=${device.id}`)}
-                    className="w-full flex items-center gap-3 p-2.5 rounded-lg hover:bg-accent transition-colors text-left"
+                    // Offline perde opacidade e a foto vai para cinza — a lista
+                    // inteira precisa se ler num relance, sem ter que caçar o
+                    // ponto vermelho/verde linha por linha.
+                    className={`w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-foreground/5 transition-colors text-left ${!isOnline ? 'opacity-60' : ''}`}
                   >
                     <div className="relative flex-shrink-0">
-                      {device.avatar_url ? (
-                        <img src={device.avatar_url} alt={device.name}
-                          className="w-8 h-8 rounded-full object-cover border border-border" />
-                      ) : (
-                        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-                          <Smartphone className="h-4 w-4 text-primary" />
-                        </div>
-                      )}
-                      <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-card ${isOnline ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                      {/* `SmartAvatar` cobre os dois ramos que existiam antes
+                          (`<img>` cru e o `<div><Smartphone/></div>` de
+                          fallback): mostra a foto real quando ela existe e
+                          carrega, e busca de novo sozinha se a URL (da CDN do
+                          WhatsApp) tiver expirado. */}
+                      <SmartAvatar
+                        isInstance
+                        deviceRecord={device}
+                        name={device.name}
+                        className={`h-8 w-8 ${!isOnline ? 'grayscale' : ''}`}
+                      />
+                      <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-background ${isOnline ? 'bg-emerald-500' : 'bg-slate-400'}`} />
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-medium text-foreground truncate">{device.name}</p>
@@ -870,7 +890,9 @@ export default function Index() {
                       </div>
                     </div>
                     {(device.unread_count || 0) > 0 && (
-                      <span className="flex-shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-amber-500 text-amber-950 text-[10px] font-bold flex items-center justify-center">
+                      // Selo âmbar suave — igual aos outros selos do arquivo,
+                      // no lugar do `bg-amber-500 text-amber-950` chapado.
+                      <span className="flex-shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-amber-500/15 text-amber-500 text-[10px] font-bold flex items-center justify-center">
                         {device.unread_count}
                       </span>
                     )}
@@ -879,13 +901,13 @@ export default function Index() {
               })}
             </div>
           </CardContent>
-        </Card>
+        </GlassCard>
       </div>
 
       {/* ── Bottom row ── */}
       <div className="grid gap-4 md:grid-cols-7">
         {/* Top conversations */}
-        <Card className="md:col-span-4 border-border">
+        <GlassCard className="md:col-span-4">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm font-semibold text-foreground">
@@ -908,32 +930,41 @@ export default function Index() {
               </div>
             ) : (
               <div className="space-y-1">
-                {topConvos.map((conv, i) => {
+                {/* Sem coluna `#n`: a ordem da lista já é o ranking — o número
+                    era redundante com a própria posição. */}
+                {topConvos.map((conv) => {
                   const pct = topConvos[0]?.total > 0 ? Math.round((conv.total / topConvos[0].total) * 100) : 0
                   const name = conv.sender_name || conv.remote_sender.split('@')[0] || conv.remote_sender
                   return (
                     <button
                       key={`${conv.device_id}|${conv.remote_sender}`}
                       onClick={() => navigate(`/chat?device=${conv.device_id}`)}
-                      className="w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-accent transition-colors text-left"
+                      className="w-full flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-foreground/5 transition-colors text-left"
                     >
-                      <span className="w-5 text-xs font-semibold text-muted-foreground text-right flex-shrink-0">
-                        #{i + 1}
-                      </span>
-                      <div className="w-7 h-7 rounded-full bg-accent flex items-center justify-center text-xs font-bold text-foreground flex-shrink-0">
-                        {name.charAt(0).toUpperCase()}
-                      </div>
+                      {/* Foto real do WhatsApp no lugar do círculo com a
+                          inicial — a instância vem do mapa `deviceInstanceMap`
+                          (mesmo padrão do `deviceNameMap` já existente aqui). */}
+                      <SmartAvatar
+                        jid={conv.remote_sender}
+                        name={name}
+                        instanceKey={deviceInstanceMap[conv.device_id]}
+                        className="h-7 w-7 flex-shrink-0"
+                      />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between mb-1">
                           <p className="text-xs font-medium text-foreground truncate">{name}</p>
-                          <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-                            <span className="text-[10px] text-muted-foreground">{conv.inbound}↓ {conv.outbound}↑</span>
+                          <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-500">{conv.inbound}↓</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-500/10 text-violet-500">{conv.outbound}↑</span>
                             <span className="text-[10px] font-semibold text-foreground">{conv.total}</span>
                           </div>
                         </div>
                         <div className="flex items-center gap-1.5">
-                          <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden">
-                            <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${pct}%` }} />
+                          <div className="flex-1 h-1.5 rounded-full bg-muted/50 overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-gradient-to-r from-blue-500 to-violet-500 transition-all"
+                              style={{ width: `${pct}%` }}
+                            />
                           </div>
                           {!selectedDeviceId && conv.device_name && (
                             <span className="text-[10px] text-muted-foreground flex-shrink-0 max-w-[80px] truncate">
@@ -948,49 +979,54 @@ export default function Index() {
               </div>
             )}
           </CardContent>
-        </Card>
+        </GlassCard>
 
         {/* Right column */}
         <div className="md:col-span-3 flex flex-col gap-4">
           {/* Volume by device */}
-          <Card className="border-border">
+          <GlassCard>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-semibold text-foreground">Volume por aparelho</CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-semibold text-foreground">Volume por aparelho</CardTitle>
+                {/* Legenda única no topo — antes cada linha repetia a mesma
+                    cor/rótulo, e a barra virou empilhada (recebidas + enviadas
+                    no mesmo segmento), então a legenda por linha não fazia
+                    mais sentido individualmente. */}
+                <div className="flex items-center gap-3 text-[10px] text-muted-foreground flex-shrink-0">
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />Recebidas</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-violet-500 flex-shrink-0" />Enviadas</span>
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="pt-0">
-              {visibleDevices.length === 0 ? (
+              {volumePorAparelho.linhas.length === 0 ? (
                 <p className="text-xs text-muted-foreground text-center py-3">Sem dados</p>
               ) : (
                 <div className="space-y-2.5">
-                  {visibleDevices
-                    .map((d) => {
-                      const s = stats.byDevice[d.id] || { inbound: 0, outbound: 0, sentByMe: 0 }
-                      return { ...d, total: s.inbound + s.outbound, ...s }
-                    })
-                    .sort((a, b) => b.total - a.total)
-                    .map((d) => {
-                      const maxTotal = Math.max(...visibleDevices.map((dev) => {
-                        const s = stats.byDevice[dev.id] || { inbound: 0, outbound: 0, sentByMe: 0 }
-                        return s.inbound + s.outbound
-                      }), 1)
-                      const pct = Math.round((d.total / maxTotal) * 100)
-                      return (
-                        <div key={d.id} className="flex items-center gap-2">
-                          <p className="text-[11px] text-muted-foreground w-24 truncate flex-shrink-0">{d.name}</p>
-                          <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                            <div className="h-full rounded-full bg-blue-500/70 transition-all" style={{ width: `${pct}%` }} />
-                          </div>
-                          <span className="text-[11px] font-semibold text-foreground w-8 text-right flex-shrink-0">{d.total}</span>
+                  {volumePorAparelho.linhas.map((d) => {
+                    const pctIn = Math.round((d.inbound / volumePorAparelho.maxTotal) * 100)
+                    const pctOut = Math.round((d.outbound / volumePorAparelho.maxTotal) * 100)
+                    return (
+                      <div key={d.id} className="flex items-center gap-2">
+                        {/* Mini-avatar amarra visualmente esta linha ao card
+                            "Aparelhos" acima — mesmo aparelho, mesma foto. */}
+                        <SmartAvatar isInstance deviceRecord={d} name={d.name} className="h-5 w-5 flex-shrink-0" />
+                        <p className="text-[11px] text-muted-foreground w-20 truncate flex-shrink-0">{d.name}</p>
+                        <div className="flex-1 h-1.5 rounded-full bg-muted/50 overflow-hidden flex">
+                          <div className="h-full bg-blue-500 transition-all" style={{ width: `${pctIn}%` }} />
+                          <div className="h-full bg-violet-500 transition-all" style={{ width: `${pctOut}%` }} />
                         </div>
-                      )
-                    })}
+                        <span className="text-[11px] font-semibold text-foreground w-8 text-right flex-shrink-0">{d.total}</span>
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </CardContent>
-          </Card>
+          </GlassCard>
 
           {/* Pending scheduled */}
-          <Card className="border-border flex-1">
+          <GlassCard className="flex-1">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
@@ -1006,20 +1042,20 @@ export default function Index() {
               {pendingScheduled.length === 0 ? (
                 <p className="text-xs text-muted-foreground text-center py-4">Nenhum pendente</p>
               ) : (
-                <div className="space-y-1.5">
+                <div className="space-y-0.5">
                   {pendingScheduled.slice(0, 4).map((msg) => {
                     const when = new Date(msg.scheduled_at)
                     const isToday = when.toDateString() === new Date().toDateString()
                     return (
-                      <div key={msg.id} className="flex items-start gap-2.5 px-2 py-2 rounded-lg border border-border bg-muted/20">
-                        <div className="w-1.5 h-1.5 rounded-full bg-amber-500 mt-1.5 flex-shrink-0" />
+                      <div key={msg.id} className="flex items-center gap-2.5 px-2 py-2 rounded-xl hover:bg-foreground/5 transition-colors">
+                        <span className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${isToday ? 'bg-amber-500' : 'bg-slate-400'}`} aria-hidden="true" />
                         <div className="flex-1 min-w-0">
                           <p className="text-xs font-medium text-foreground truncate">
                             {msg.contact_name || msg.remote_sender.split('@')[0]}
                           </p>
                           <p className="text-[10px] text-muted-foreground truncate">{msg.content}</p>
                         </div>
-                        <span className={`text-[10px] flex-shrink-0 font-medium ${isToday ? 'text-amber-500' : 'text-muted-foreground'}`}>
+                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0 ${isToday ? 'bg-amber-500/15 text-amber-500' : 'bg-muted text-muted-foreground'}`}>
                           {when.toLocaleDateString('pt-BR', {
                             day: '2-digit', month: '2-digit',
                             ...(isToday ? { hour: '2-digit', minute: '2-digit' } : {}),
@@ -1031,7 +1067,7 @@ export default function Index() {
                 </div>
               )}
             </CardContent>
-          </Card>
+          </GlassCard>
         </div>
       </div>
 
@@ -1061,7 +1097,7 @@ export default function Index() {
                   // mensagem.
                   navigate(`/chat?device=${p.device_id}&jid=${encodeURIComponent(p.remote_sender)}`)
                 }}
-                className="w-full text-left p-2.5 rounded-lg border border-border bg-muted/20 hover:bg-accent transition-colors"
+                className="w-full text-left p-2.5 rounded-xl hover:bg-accent/60 transition-colors"
               >
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-medium text-foreground truncate">
@@ -1110,7 +1146,7 @@ export default function Index() {
                 onClick={() => {
                   navigate(`/chat?device=${p.device_id}&jid=${encodeURIComponent(p.remote_sender)}`)
                 }}
-                className="w-full text-left p-2.5 rounded-lg border border-border bg-muted/20 hover:bg-accent transition-colors"
+                className="w-full text-left p-2.5 rounded-xl hover:bg-accent/60 transition-colors"
               >
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-medium text-foreground truncate">

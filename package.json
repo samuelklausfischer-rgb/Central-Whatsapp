@@ -3,7 +3,7 @@
   "description": "Central de atendimento WhatsApp com React, Supabase e Evolution API",
   "author": "PRN Hub",
   "private": true,
-  "version": "0.0.211",
+  "version": "0.0.212",
   "main": "central-whats-app/main.cjs",
   "type": "module",
   "scripts": {
@@ -28,7 +28,8 @@
     "apk:release": "npm run build:mobile && cd android && gradlew.bat assembleRelease",
     "assets:mobile": "node scripts/gerar-assets-mobile.mjs && capacitor-assets generate --android && node scripts/ajustar-icone-android.mjs",
     "publish:mobile": "node scripts/publish-mobile-bundle.mjs",
-    "assets:marca": "node scripts/gerar-marca.mjs"
+    "assets:marca": "node scripts/gerar-marca.mjs",
+    "assets:backgrounds": "node scripts/gerar-backgrounds.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.2",

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Megaphone, Send, ShieldAlert, Check, X, Loader2 } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { GlassCard } from '@/components/ui/surface'
+import { ListRow } from '@/components/ui/list-row'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -116,8 +118,13 @@ export function SuperAdminPanel() {
 
   return (
     <div className="space-y-6">
-      {/* Enviar mensagem para todos */}
-      <Card className="border-primary/30">
+      {/*
+        Enviar mensagem para todos. Sem o `border-primary/30` que existia
+        antes: `GlassCard` já força `border-0` (a borda visível é a do
+        próprio `.superficie-vidro`) — um `border-<cor>` por cima não tem
+        largura para aparecer, então era um destaque morto.
+      */}
+      <GlassCard>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Megaphone className="h-5 w-5 text-primary" /> Enviar mensagem para todos
@@ -200,10 +207,11 @@ export function SuperAdminPanel() {
             </Accordion>
           )}
         </CardContent>
-      </Card>
+      </GlassCard>
 
-      {/* Revogar acesso por instância */}
-      <Card className="border-destructive/30">
+      {/* Revogar acesso por instância — mesmo motivo do card acima para
+          soltar o `border-destructive/30` que não tinha largura para aparecer. */}
+      <GlassCard>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <ShieldAlert className="h-5 w-5 text-destructive" /> Acesso ao WhatsApp por usuário
@@ -217,21 +225,31 @@ export function SuperAdminPanel() {
           {manageableUsers.length === 0 ? (
             <p className="text-sm text-muted-foreground">Nenhum usuário para gerenciar.</p>
           ) : (
-            <div className="space-y-4">
-              {manageableUsers.map((u) => {
+            // Cada usuário era uma caixa `rounded-lg border p-3` (idioma antigo).
+            // Agora é um cabeçalho `ListRow` (nome + badge + switch "Acesso
+            // total", sem onClick porque só o Switch é acionável) seguido, se
+            // houver grade, de uma `ListRow` por celular — mesma linguagem das
+            // listas da home. Separador fino no lugar da borda ao redor de
+            // cada usuário, porque a "caixa" inteira não é mais um bloco
+            // fechado, é uma sequência de linhas do mesmo card de vidro.
+            <div className="space-y-1">
+              {manageableUsers.map((u, idx) => {
                 // Mostra a grade de instâncias quando: não-admin (sempre) OU admin restrito.
                 const showGrid = !u.is_admin || !!u.devices_restricted
                 return (
-                  <div key={u.id} className="rounded-lg border p-3">
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <span className="text-sm font-medium">
+                  <div
+                    key={u.id}
+                    className={idx > 0 ? 'pt-3 mt-3 border-t border-border/50' : ''}
+                  >
+                    <ListRow>
+                      <span className="flex-1 text-sm font-medium">
                         {userLabel(u)}
                         {u.is_admin && (
                           <Badge variant="secondary" className="ml-2 text-[10px]">admin</Badge>
                         )}
                       </span>
                       {u.is_admin && (
-                        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <label className="flex items-center gap-2 text-xs text-muted-foreground flex-shrink-0">
                           Acesso total
                           {savingCell === `${u.id}:restrict` ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
@@ -243,32 +261,29 @@ export function SuperAdminPanel() {
                           )}
                         </label>
                       )}
-                    </div>
+                    </ListRow>
                     {showGrid ? (
-                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      <div className="grid grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-3 pl-2">
                         {devices.map((d) => {
                           const allowed = u.allowed_devices.includes(d.id)
                           const cell = `${u.id}:${d.id}`
                           return (
-                            <label
-                              key={d.id}
-                              className="flex items-center justify-between gap-2 rounded-md bg-muted/40 px-3 py-2 text-sm"
-                            >
-                              <span className="truncate">{d.name}</span>
+                            <ListRow key={d.id} className="py-1.5">
+                              <span className="flex-1 truncate text-sm">{d.name}</span>
                               {savingCell === cell ? (
-                                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground flex-shrink-0" />
                               ) : (
                                 <Switch
                                   checked={allowed}
                                   onCheckedChange={(v) => toggleAccess(u, d, v)}
                                 />
                               )}
-                            </label>
+                            </ListRow>
                           )
                         })}
                       </div>
                     ) : (
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-muted-foreground pl-2">
                         Acesso a todas as instâncias. Desligue "Acesso total" para escolher instâncias específicas.
                       </p>
                     )}
@@ -278,7 +293,7 @@ export function SuperAdminPanel() {
             </div>
           )}
         </CardContent>
-      </Card>
+      </GlassCard>
     </div>
   )
 }

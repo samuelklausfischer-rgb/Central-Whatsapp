@@ -13,7 +13,9 @@ import {
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { CardContent } from '@/components/ui/card'
+import { GlassCard } from '@/components/ui/surface'
+import { ListRow } from '@/components/ui/list-row'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -203,7 +205,7 @@ export default function PropostaComercial() {
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px] items-start">
         <div className="space-y-5">
-          <Card>
+          <GlassCard>
             <CardContent className="pt-6 space-y-4">
               <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
                 Dados da proposta
@@ -261,9 +263,9 @@ export default function PropostaComercial() {
                 </div>
               </div>
             </CardContent>
-          </Card>
+          </GlassCard>
 
-          <Card>
+          <GlassCard>
             <CardContent className="pt-6 space-y-3">
               <div className="flex items-center justify-between">
                 <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
@@ -333,9 +335,9 @@ export default function PropostaComercial() {
                 </div>
               ))}
             </CardContent>
-          </Card>
+          </GlassCard>
 
-          <Card>
+          <GlassCard>
             <CardContent className="pt-6 space-y-3">
               <div className="flex items-center justify-between">
                 <div>
@@ -390,7 +392,7 @@ export default function PropostaComercial() {
                 </p>
               )}
             </CardContent>
-          </Card>
+          </GlassCard>
 
           <div className="flex flex-wrap items-center gap-3">
             <Button onClick={gerar} disabled={gerando} size="lg">
@@ -411,7 +413,9 @@ export default function PropostaComercial() {
           </div>
 
           {previaPdf && (
-            <Card>
+            // Vidro só no `Card` — o `<iframe>` é o visualizador de PDF nativo
+            // do navegador/Electron, conteúdo dele não é nosso pra estilizar.
+            <GlassCard>
               <CardContent className="p-2">
                 <iframe
                   src={previaPdf}
@@ -419,11 +423,11 @@ export default function PropostaComercial() {
                   className="w-full h-[560px] rounded-md border-0"
                 />
               </CardContent>
-            </Card>
+            </GlassCard>
           )}
         </div>
 
-        <Card>
+        <GlassCard>
           <CardContent className="pt-6 space-y-3">
             <div className="flex items-center justify-between">
               <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
@@ -443,9 +447,13 @@ export default function PropostaComercial() {
               </p>
             )}
 
-            <div className="divide-y">
+            {/* `divide-y` virou `ListRow`: cada linha tem DOIS alvos de clique
+                (abrir / excluir), então a linha continua `<div>` — um `ListRow`
+                com `onClick` viraria `<button>` e um `<button>` dentro de
+                `<button>` é HTML inválido. */}
+            <div className="space-y-0.5">
               {historico.map((item) => (
-                <div key={item.slug} className="flex items-center gap-2 py-2.5">
+                <ListRow key={item.slug}>
                   <button
                     type="button"
                     onClick={() => abrirDoHistorico(item.slug)}
@@ -468,11 +476,11 @@ export default function PropostaComercial() {
                   >
                     <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
                   </Button>
-                </div>
+                </ListRow>
               ))}
             </div>
           </CardContent>
-        </Card>
+        </GlassCard>
       </div>
     </div>
   )

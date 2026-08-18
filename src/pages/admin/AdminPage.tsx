@@ -23,15 +23,17 @@ import {
   type EvolutionSyncInstance,
 } from '@/services/instances'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { GlassCard } from '@/components/ui/surface'
+import { ListRow, ListRowPill } from '@/components/ui/list-row'
 import {
   Dialog,
-  DialogContent,
   DialogHeader,
   DialogTitle,
   DialogFooter,
   DialogDescription,
 } from '@/components/ui/dialog'
+import { GlassDialogContent } from '@/components/ui/glass-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -393,7 +395,12 @@ export default function AdminPage() {
 
       {currentUser?.is_super_admin && <SuperAdminPanel />}
 
-      <Card className="bg-muted backdrop-blur-sm border-border">
+      {/*
+        Era `bg-muted backdrop-blur-sm` — `bg-muted` é opaco, então o blur não
+        tinha nada translúcido para borrar (o mesmo problema do
+        `LabelsSettings` antigo). `GlassCard` é o vidro de verdade.
+      */}
+      <GlassCard>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Smartphone className="h-5 w-5 text-primary" /> Gerenciar Celulares por Setor
@@ -403,22 +410,31 @@ export default function AdminPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+          {/*
+            Cada celular era uma caixa `rounded-lg border bg-card p-3` (mais
+            um fundo opaco chapado dentro do vidro) — vira `ListRow`, sem
+            onClick porque a linha inteira não navega, só o `Select` dentro
+            dela é acionável. O nome vai no lugar do "conteúdo" central, o
+            setor atual vira `ListRowPill`, e o `Select` (que precisa ficar
+            visível e clicável) vem depois, fora do fluxo em linha, dentro da
+            própria linha.
+          */}
+          <div className="grid gap-1 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
             {devices.map((device) => (
-              <div key={device.id} className="rounded-lg border border-border bg-card p-3 space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="font-medium text-foreground">{device.name}</p>
-                    <p className="text-xs text-muted-foreground">{device.instance_key || device.id}</p>
+              <ListRow key={device.id} className="flex-col items-stretch gap-2">
+                <div className="flex items-start justify-between gap-3 w-full">
+                  <div className="min-w-0">
+                    <p className="font-medium text-foreground truncate">{device.name}</p>
+                    <p className="text-xs text-muted-foreground truncate">{device.instance_key || device.id}</p>
                   </div>
-                  <Badge variant="secondary">{getDepartmentLabel(device.department)}</Badge>
+                  <ListRowPill tom="azul">{getDepartmentLabel(device.department)}</ListRowPill>
                 </div>
                 <Select
                   value={device.department || NO_DEPARTMENT}
                   onValueChange={(value) => handleDeviceDepartmentChange(device.id, value)}
                   disabled={savingDeviceId === device.id}
                 >
-                  <SelectTrigger className="bg-muted">
+                  <SelectTrigger className="bg-foreground/5 w-full">
                     <SelectValue placeholder="Selecione o setor" />
                   </SelectTrigger>
                   <SelectContent>
@@ -430,7 +446,7 @@ export default function AdminPage() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
+              </ListRow>
             ))}
             {devices.length === 0 && (
               <div className="col-span-full py-8 text-center text-muted-foreground border border-dashed border-border rounded-xl">
@@ -439,7 +455,7 @@ export default function AdminPage() {
             )}
           </div>
         </CardContent>
-      </Card>
+      </GlassCard>
 
       <div className="space-y-6">
         {groupedUsers.map(([department, departmentUsers]) => (
@@ -451,7 +467,11 @@ export default function AdminPage() {
             </div>
             <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
               {departmentUsers.map((user) => (
-                <Card key={user.id} className="bg-muted backdrop-blur-sm border-border">
+                // Mesmo caso do card de celulares acima: `bg-muted
+                // backdrop-blur-sm` era opaco + blur morto. Aqui o card
+                // continua fazendo sentido como card (tem cabeçalho, corpo e
+                // ações) — só troca a pele para `GlassCard`.
+                <GlassCard key={user.id}>
                   <CardHeader className="pb-3">
                     <div className="flex justify-between items-start gap-3">
                       <div className="flex items-center gap-3 min-w-0">
@@ -544,7 +564,7 @@ export default function AdminPage() {
                       </div>
                     </div>
                   </CardContent>
-                </Card>
+                </GlassCard>
               ))}
             </div>
           </section>
@@ -557,7 +577,11 @@ export default function AdminPage() {
       </div>
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-lg bg-card border-border">
+        {/* `bg-card border-border` saiu daqui: `GlassDialogContent` já define
+            o próprio fundo (`bg-background/95` + blur) — deixar o antigo
+            `bg-card` por cima anularia o vidro do modal (`className` do
+            `cn()` vence por último). */}
+        <GlassDialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{editingUser ? 'Editar Usuário' : 'Novo Usuário'}</DialogTitle>
             <DialogDescription>
@@ -733,11 +757,11 @@ export default function AdminPage() {
             </Button>
             <Button onClick={handleSave}>Salvar</Button>
           </DialogFooter>
-        </DialogContent>
+        </GlassDialogContent>
       </Dialog>
 
       <Dialog open={isSyncDialogOpen} onOpenChange={setIsSyncDialogOpen}>
-        <DialogContent className="sm:max-w-3xl bg-card border-border">
+        <GlassDialogContent className="sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>Atualizar Instâncias da Evolution</DialogTitle>
             <DialogDescription>
@@ -847,7 +871,7 @@ export default function AdminPage() {
               Importar Selecionadas
             </Button>
           </DialogFooter>
-        </DialogContent>
+        </GlassDialogContent>
       </Dialog>
     </div>
   )

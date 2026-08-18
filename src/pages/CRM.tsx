@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { GripVertical, Trash2, Plus, CalendarClock, Loader2 } from 'lucide-react'
+import { GripVertical, Trash2, Plus, Loader2 } from 'lucide-react'
 import type { Task } from '@/lib/supabase/types'
 import {
   AlertDialog,
@@ -13,7 +13,6 @@ import {
 } from '@/components/ui/alert-dialog'
 import {
   Dialog,
-  DialogContent,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -24,11 +23,13 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { GlassDialogContent } from '@/components/ui/glass-dialog'
+import { ListRow, ListRowPill } from '@/components/ui/list-row'
 import { useAuth } from '@/hooks/use-auth'
 import { useRealtime } from '@/hooks/use-realtime'
 import { useToast } from '@/hooks/use-toast'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { cn } from '@/lib/utils'
 import {
   getTasks,
   createTask,
@@ -81,6 +82,11 @@ export default function CRM() {
   const [newAssignee, setNewAssignee] = useState('')
   const [newDueDate, setNewDueDate] = useState('')
   const [isSavingNewTask, setIsSavingNewTask] = useState(false)
+
+  // Sem hover no APK Android (Capacitor): um controle só visível em hover é,
+  // na prática, um controle que não existe no toque. No celular ele fica
+  // sempre visível.
+  const noCelular = useIsMobile()
 
   const fetchTasks = async () => {
     try {
@@ -233,8 +239,12 @@ export default function CRM() {
 
   const today = todayIso()
 
+  const classesAcoesTarefa = noCelular
+    ? 'flex items-center gap-1 opacity-100 flex-shrink-0'
+    : 'flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity flex-shrink-0'
+
   return (
-    <div className="flex-1 h-full flex flex-col min-w-0 bg-card relative overflow-hidden">
+    <div className="flex-1 h-full flex flex-col min-w-0 relative overflow-hidden">
       <div className="p-6 pb-2 flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
@@ -260,109 +270,132 @@ export default function CRM() {
         </Tabs>
       </div>
 
+      {/*
+        Quadro kanban: arrastar-e-soltar é HTML5 nativo (draggable + onDragStart/
+        onDragOver/onDrop), sem lib — nada aqui depende de ref, classe ou
+        estrutura de um DnD framework, então dava para trocar bg/borda à vontade
+        sem risco de quebrar o arrasto. O que preservamos ao pé da letra: os três
+        handlers (`handleDragStart/End/Over`, `handleDrop`) seguem presos aos
+        mesmos elementos DOM de antes — coluna recebe `onDragOver`/`onDrop`,
+        cartão recebe `draggable`/`onDragStart`/`onDragEnd`.
+      */}
       <div className="flex-1 overflow-x-auto p-6 flex gap-6">
         {columns.map((col) => {
           const columnTasks = visibleTasks.filter((t) => t.status === col.id)
           return (
             <div
               key={col.id}
-              className="flex-shrink-0 w-80 bg-muted border border-border rounded-xl flex flex-col overflow-hidden"
+              // `.superficie-vidro` na COLUNA (painel), não no cartão — é o
+              // quadro que precisa se ler como quadro (referência de onde
+              // soltar), não a linha de tarefa. Colunas são vizinhas com
+              // respiro (`gap-6`) entre si, não um bloco só cobrindo 100% da
+              // largura como os painéis do EmailHub — por isso cada uma pode
+              // ter a própria camada de vidro sem o custo de blur empilhado:
+              // não há sobreposição, e o cartão por dentro não tem blur
+              // nenhum (seria o vidro aninhado que a regra dura proíbe).
+              className="flex-shrink-0 w-80 superficie-vidro rounded-xl flex flex-col overflow-hidden"
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, col.id)}
             >
               <div
-                className={`px-4 py-3 border-b border-border flex items-center justify-between ${col.color.split(' ')[0]}`}
+                className={`px-4 py-3 border-b border-border/60 flex items-center justify-between ${col.color.split(' ')[0]}`}
               >
                 <h3 className={`font-semibold text-sm ${col.color.split(' ')[2]}`}>{col.title}</h3>
-                <span className="text-xs bg-muted px-2 py-0.5 rounded-full text-foreground/70">
+                <span className="text-xs bg-foreground/10 px-2 py-0.5 rounded-full text-foreground/70">
                   {columnTasks.length}
                 </span>
               </div>
-              <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
+              <div className="flex-1 overflow-y-auto p-2 space-y-0.5 custom-scrollbar">
                 {columnTasks.map((task) => {
                   const contactName = task.contact
                     ? task.contact.nickname || task.contact.name || `+${task.contact.remote_jid}`
                     : null
                   const assigneeName = task.assignee?.name || 'Sem responsável'
                   const isOverdue = !!task.due_date && task.due_date < today && task.status !== 'completed'
+                  // Mesmo vocabulário de ponto/pílula do card "Minhas tarefas"
+                  // da home: rosa = atrasada, âmbar = vence hoje, ardósia =
+                  // futura ou sem prazo.
+                  const venceHoje = !!task.due_date && task.due_date === today
+                  const tom = isOverdue ? 'rosa' : venceHoje ? 'ambar' : 'ardosia'
                   return (
-                    <div
+                    // Cartão vira linha (`ListRow`): sem borda própria, hover
+                    // sutil (`hover:bg-foreground/5`), ponto de status no
+                    // lugar da barra colorida antiga. `draggable`/`onDrag*`
+                    // passam direto pelo `...resto` do `ListRow` — o mesmo
+                    // elemento DOM que já tinha esses handlers antes.
+                    <ListRow
                       key={task.id}
+                      status={tom}
                       draggable
                       onDragStart={(e) => handleDragStart(e, task.id)}
                       onDragEnd={handleDragEnd}
-                      className="bg-accent border border-border p-3 rounded-lg cursor-grab active:cursor-grabbing hover:bg-accent transition-colors group"
+                      className="items-start cursor-grab active:cursor-grabbing"
                     >
-                      <div className="flex items-start justify-between gap-2 mb-2">
-                        <h4 className="font-medium text-sm text-foreground/90 leading-tight">
-                          {task.title}
-                        </h4>
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mt-0.5">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setTaskToDelete(task.id)
-                            }}
-                            onPointerDown={(e) => e.stopPropagation()}
-                            className="p-1 hover:bg-red-500/20 rounded text-red-400 hover:text-red-500 transition-colors"
-                            title="Apagar tarefa"
-                            type="button"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                          <GripVertical className="h-4 w-4 text-muted-foreground" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-xs font-medium text-foreground line-clamp-2">
+                            {task.title}
+                          </p>
+                          {/* No APK Android não existe hover: sem `useIsMobile()` esse
+                              botão ficaria invisível e inalcançável no toque. */}
+                          <div className={classesAcoesTarefa}>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setTaskToDelete(task.id)
+                              }}
+                              onPointerDown={(e) => e.stopPropagation()}
+                              className="p-1 hover:bg-rose-500/15 rounded text-muted-foreground hover:text-rose-500 transition-colors"
+                              title="Apagar tarefa"
+                              type="button"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                            <GripVertical className="h-3.5 w-3.5 text-muted-foreground" />
+                          </div>
                         </div>
-                      </div>
-                      {task.description && (
-                        <p className="text-xs text-muted-foreground line-clamp-2 mb-3 break-words">
-                          {task.description}
-                        </p>
-                      )}
-                      {contactName && (
-                        <div className="flex items-center gap-2 mb-2 max-w-full">
-                          <Avatar className="h-5 w-5 border border-border">
-                            <AvatarImage src={task.contact?.avatar_url || ''} />
-                            <AvatarFallback className="text-[9px] bg-blue-500/20 text-blue-400">
-                              {contactName.charAt(0).toUpperCase()}
-                            </AvatarFallback>
-                          </Avatar>
-                          <span className="text-[11px] text-muted-foreground truncate" title={contactName}>
-                            {contactName}
-                          </span>
-                        </div>
-                      )}
-                      <div className="flex items-center justify-between gap-2 mt-auto pt-3 border-t border-border">
-                        <div className="flex items-center gap-2 min-w-0 max-w-[60%]">
-                          <Avatar className="h-5 w-5 border border-border">
-                            <AvatarImage src={task.assignee?.avatar_url || ''} />
-                            <AvatarFallback className="text-[9px] bg-purple-500/20 text-purple-400">
-                              {getInitials(task.assignee?.name)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <span className="text-[11px] text-muted-foreground truncate" title={assigneeName}>
-                            {assigneeName}
-                          </span>
-                        </div>
-                        {task.due_date && (
-                          <span
-                            className={cn(
-                              'flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0',
-                              isOverdue
-                                ? 'bg-red-500/15 text-red-400 font-medium'
-                                : 'text-muted-foreground/70',
-                            )}
-                            title={isOverdue ? 'Prazo vencido' : 'Prazo'}
-                          >
-                            <CalendarClock className="h-3 w-3" />
-                            {formatDueDate(task.due_date)}
-                          </span>
+                        {task.description && (
+                          <p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5 break-words">
+                            {task.description}
+                          </p>
                         )}
+                        {contactName && (
+                          <div className="flex items-center gap-1.5 mt-1.5 max-w-full">
+                            <Avatar className="h-4 w-4 flex-shrink-0">
+                              <AvatarImage src={task.contact?.avatar_url || ''} />
+                              <AvatarFallback className="text-[8px] bg-blue-500/15 text-blue-500">
+                                {contactName.charAt(0).toUpperCase()}
+                              </AvatarFallback>
+                            </Avatar>
+                            <span className="text-[11px] text-muted-foreground truncate" title={contactName}>
+                              {contactName}
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex items-center justify-between gap-2 mt-1.5">
+                          <div className="flex items-center gap-1.5 min-w-0 max-w-[60%]">
+                            <Avatar className="h-4 w-4 flex-shrink-0">
+                              <AvatarImage src={task.assignee?.avatar_url || ''} />
+                              <AvatarFallback className="text-[8px] bg-violet-500/15 text-violet-500">
+                                {getInitials(task.assignee?.name)}
+                              </AvatarFallback>
+                            </Avatar>
+                            <span className="text-[11px] text-muted-foreground truncate" title={assigneeName}>
+                              {assigneeName}
+                            </span>
+                          </div>
+                          {task.due_date && (
+                            <ListRowPill tom={isOverdue ? 'rosa' : 'ardosia'}>
+                              {formatDueDate(task.due_date)}
+                            </ListRowPill>
+                          )}
+                        </div>
                       </div>
-                    </div>
+                    </ListRow>
                   )
                 })}
                 {columnTasks.length === 0 && !loading && (
-                  <div className="h-24 flex items-center justify-center text-sm text-muted-foreground/50 border border-dashed border-border rounded-lg">
+                  <div className="h-24 flex items-center justify-center text-sm text-muted-foreground/50 border border-dashed border-border/60 rounded-lg">
                     Vazio
                   </div>
                 )}
@@ -400,7 +433,7 @@ export default function CRM() {
       </AlertDialog>
 
       <Dialog open={isNewTaskOpen} onOpenChange={setIsNewTaskOpen}>
-        <DialogContent className="sm:max-w-[425px]">
+        <GlassDialogContent className="sm:max-w-[425px]">
           <DialogHeader>
             <DialogTitle>Nova tarefa</DialogTitle>
           </DialogHeader>
@@ -463,7 +496,7 @@ export default function CRM() {
               Criar tarefa
             </Button>
           </DialogFooter>
-        </DialogContent>
+        </GlassDialogContent>
       </Dialog>
     </div>
   )

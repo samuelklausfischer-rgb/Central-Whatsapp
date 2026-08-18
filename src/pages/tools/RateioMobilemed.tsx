@@ -1,7 +1,9 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { Loader2, UploadCloud, Download, FileSpreadsheet } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { CardContent } from '@/components/ui/card'
+import { GlassCard } from '@/components/ui/surface'
+import { ListRow } from '@/components/ui/list-row'
 import { useToast } from '@/hooks/use-toast'
 import { FinanceiroAuthProvider, useFinanceiroAuth } from '@/contexts/financeiro-auth-context'
 import { useRateioUpload, useRateioHistorico } from '@/hooks/use-rateio'
@@ -112,7 +114,10 @@ function RateioInner() {
           </p>
         </header>
 
-        <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+        {/* Caixa de upload — vidro no lugar de `bg-card` sólido, seguindo o
+            idioma da home. O dropzone logo abaixo continua com seus próprios
+            estados de borda (arrastando/hover): vidro só na moldura externa. */}
+        <GlassCard className="p-5">
           <div className="mb-4">
             <span className="mb-2 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Empresa
@@ -183,12 +188,12 @@ function RateioInner() {
             </p>
           )}
           {erro && <p className="mt-3 text-xs font-medium text-destructive">Erro: {erro}</p>}
-        </section>
+        </GlassCard>
 
         {r && (
           <section className="mt-6 space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <Card>
+              <GlassCard>
                 <CardContent className="p-4">
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Total do rateio
@@ -198,8 +203,8 @@ function RateioInner() {
                     {EMPRESAS.find((e) => e.key === r.empresa)?.label || r.empresa}
                   </p>
                 </CardContent>
-              </Card>
-              <Card>
+              </GlassCard>
+              <GlassCard>
                 <CardContent className="p-4">
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Exames (variável)
@@ -207,27 +212,29 @@ function RateioInner() {
                   <p className="mt-1 text-2xl font-bold text-foreground">{fmt(r.total_variavel)}</p>
                   <p className="mt-0.5 text-xs text-muted-foreground">{fmtNum(r.total_exames)} exames</p>
                 </CardContent>
-              </Card>
-              <Card>
+              </GlassCard>
+              <GlassCard>
                 <CardContent className="p-4">
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Taxas fixas</p>
                   <p className="mt-1 text-2xl font-bold text-foreground">{fmt(r.total_encargos)}</p>
                   <p className="mt-0.5 text-xs text-muted-foreground">{fmtNum(r.n_unidades)} unidades</p>
                 </CardContent>
-              </Card>
+              </GlassCard>
             </div>
 
-            <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+            <GlassCard className="p-5">
               <h3 className="mb-3 text-sm font-semibold text-foreground">Detalhamento das taxas fixas</h3>
-              <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
+              {/* Grade de taxas trocou `border-b` por `ListRow`: sem linha
+                  entre itens, só o respiro e o hover — mesmo idioma da home. */}
+              <div className="grid grid-cols-1 gap-x-6 sm:grid-cols-3">
                 {Object.entries(r.totais_taxa || {}).map(([tipo, valor]) => (
-                  <div key={tipo} className="flex items-center justify-between border-b border-border py-1">
-                    <span className="text-muted-foreground">{TAXA_LABELS[tipo] || tipo}</span>
-                    <span className="font-medium text-foreground">{fmt(valor)}</span>
-                  </div>
+                  <ListRow key={tipo} className="justify-between">
+                    <span className="text-sm text-muted-foreground">{TAXA_LABELS[tipo] || tipo}</span>
+                    <span className="text-sm font-medium text-foreground">{fmt(valor)}</span>
+                  </ListRow>
                 ))}
               </div>
-            </div>
+            </GlassCard>
 
             {pendencias.length > 0 && (
               <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-5">

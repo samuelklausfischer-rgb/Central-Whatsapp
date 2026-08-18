@@ -1,12 +1,12 @@
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   CalendarClock,
-  CheckCircle,
   Clock,
   RefreshCw,
   Trash2,
   XCircle,
   AlertCircle,
+  CheckCircle,
   Smartphone,
   Paperclip,
 } from 'lucide-react'
@@ -21,22 +21,46 @@ import {
 import { useRealtime } from '@/hooks/use-realtime'
 import { useToast } from '@/hooks/use-toast'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { GlassCard } from '@/components/ui/surface'
+import { ListRow, ListRowPill, type ListRowTom } from '@/components/ui/list-row'
+import { useIsMobile } from '@/hooks/use-mobile'
+
+// Mesmo mapa de tom que o resto do idioma de listas usa (`ListRowTom`) — o
+// "ponto de status" pedido para esta tela é justamente este mapa aplicado ao
+// `status` de 5 valores da mensagem agendada, e não só hoje/não-hoje como a
+// prévia da home usa (lá só existem itens pendentes).
+const STATUS_TOM: Record<ScheduledMessageWithContact['status'], ListRowTom> = {
+  pending: 'ambar',
+  sent: 'esmeralda',
+  processing: 'azul',
+  failed: 'rosa',
+  cancelled: 'ardosia',
+}
+const STATUS_LABEL: Record<ScheduledMessageWithContact['status'], string> = {
+  pending: 'Pendente',
+  sent: 'Enviada',
+  processing: 'Processando',
+  failed: 'Falha',
+  cancelled: 'Cancelada',
+}
+const STATUS_ICON: Record<ScheduledMessageWithContact['status'], typeof Clock> = {
+  pending: Clock,
+  sent: CheckCircle,
+  processing: Clock,
+  failed: AlertCircle,
+  cancelled: XCircle,
+}
 
 export default function ScheduledMessages() {
   const [messages, setMessages] = useState<ScheduledMessageWithContact[]>([])
   const [loading, setLoading] = useState(true)
   const { toast } = useToast()
+
+  // Sem hover no APK Android (Capacitor): um controle só visível em hover é,
+  // na prática, um controle que não existe no toque. No celular ele fica
+  // sempre visível.
+  const noCelular = useIsMobile()
 
   const loadMessages = async () => {
     try {
@@ -84,42 +108,9 @@ export default function ScheduledMessages() {
     }
   }
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'pending':
-        return (
-          <Badge className="bg-amber-500/20 text-amber-500 border-amber-500/30 gap-1.5 flex items-center">
-            <Clock className="w-3.5 h-3.5" /> Pendente
-          </Badge>
-        )
-      case 'sent':
-        return (
-          <Badge className="bg-emerald-500/20 text-emerald-500 border-emerald-500/30 gap-1.5 flex items-center">
-            <CheckCircle className="w-3.5 h-3.5" /> Enviada
-          </Badge>
-        )
-      case 'processing':
-        return (
-          <Badge className="bg-blue-500/20 text-blue-500 border-blue-500/30 gap-1.5 flex items-center">
-            <Clock className="w-3.5 h-3.5" /> Processando
-          </Badge>
-        )
-      case 'failed':
-        return (
-          <Badge className="bg-red-500/20 text-red-500 border-red-500/30 gap-1.5 flex items-center">
-            <AlertCircle className="w-3.5 h-3.5" /> Falha
-          </Badge>
-        )
-      case 'cancelled':
-        return (
-          <Badge className="bg-zinc-500/20 text-zinc-400 border-zinc-500/30 gap-1.5 flex items-center">
-            <XCircle className="w-3.5 h-3.5" /> Cancelada
-          </Badge>
-        )
-      default:
-        return <Badge variant="outline">{status}</Badge>
-    }
-  }
+  const classesAcoesMensagem = noCelular
+    ? 'flex items-center gap-0.5 opacity-100'
+    : 'flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity'
 
   const formatDateTime = (dateStr: string) => {
     return new Intl.DateTimeFormat('pt-BR', {
@@ -132,7 +123,7 @@ export default function ScheduledMessages() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-muted p-8">
+    <div className="flex-1 overflow-y-auto p-8">
       <div className="max-w-6xl mx-auto space-y-6">
         <div className="flex flex-col gap-2">
           <h1 className="text-3xl font-display font-bold text-foreground tracking-tight flex items-center gap-3">
@@ -144,7 +135,14 @@ export default function ScheduledMessages() {
           </p>
         </div>
 
-        <Card className="bg-card border-border backdrop-blur-xl">
+        {/*
+          `GlassCard` no lugar do `<Card className="bg-card border-border
+          backdrop-blur-xl">` que envolvia a página inteira: `bg-card` é
+          opaco (sem alpha), então aquele `backdrop-blur-xl` era morto — não
+          havia nada por baixo para borrar, só GPU gasta à toa. `GlassCard`
+          já resolve vidro + fundo translúcido corretos para os dois temas.
+        */}
+        <GlassCard>
           <CardHeader>
             <CardTitle>Histórico de Agendamentos</CardTitle>
             <CardDescription>
@@ -153,114 +151,100 @@ export default function ScheduledMessages() {
           </CardHeader>
           <CardContent>
             {loading ? (
-              <div className="text-center py-10 text-muted-foreground">Carregando...</div>
+              <div className="space-y-2" aria-busy="true">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="h-14 rounded-xl bg-foreground/10 animate-pulse" />
+                ))}
+              </div>
             ) : messages.length === 0 ? (
               <div className="text-center py-16 text-muted-foreground flex flex-col items-center gap-3">
                 <CalendarClock className="w-10 h-10 opacity-20" />
                 <p>Nenhuma mensagem agendada encontrada.</p>
               </div>
             ) : (
-              <div className="rounded-md border border-border overflow-hidden">
-                <Table>
-                  <TableHeader className="bg-accent">
-                    <TableRow className="border-border hover:bg-transparent">
-                      <TableHead>Contato</TableHead>
-                      <TableHead>Dispositivo</TableHead>
-                      <TableHead>Mensagem</TableHead>
-                      <TableHead>Agendado para</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Ações</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {messages.map((msg) => (
-                      <TableRow
-                        key={msg.id}
-                        className="border-border hover:bg-accent transition-colors"
-                      >
-                        <TableCell className="font-medium">
-                          <span>{msg.contact_name || msg.remote_sender}</span>
-                          {msg.contact_name && (
-                            <span className="block text-xs text-muted-foreground font-normal">{msg.remote_sender}</span>
+              // Tabela HTML antiga virou lista de linhas — mesmo idioma do
+              // card "Agendamentos pendentes" da home: ponto de status (aqui
+              // generalizado para os 5 status possíveis, não só hoje/não-hoje)
+              // + conteúdo + pílula de data. Nenhuma coluna original ficou de
+              // fora: Contato e Mensagem no corpo, Dispositivo e Status na
+              // legenda abaixo, Agendado para na pílula, Ações reveladas no
+              // hover — sem apertar layout nenhum.
+              <div className="space-y-0.5">
+                {messages.map((msg) => {
+                  const StatusIcon = STATUS_ICON[msg.status]
+                  return (
+                    <ListRow key={msg.id} status={STATUS_TOM[msg.status]} className="items-start">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-foreground truncate">
+                          {msg.contact_name || msg.remote_sender}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground truncate mt-0.5 flex items-center gap-1">
+                          {msg.attachments && msg.attachments.length > 0 && (
+                            <Paperclip className="h-3 w-3 flex-shrink-0" />
                           )}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Avatar className="h-6 w-6 rounded-md bg-blue-500/20 border border-blue-500/30">
-                              <AvatarFallback className="bg-transparent">
-                                <Smartphone className="h-3 w-3 text-blue-400" />
-                              </AvatarFallback>
-                            </Avatar>
-                            <span className="text-xs text-muted-foreground">
-                              {msg.device_name || 'Desconhecido'}
-                            </span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="max-w-[250px]">
-                          <div
-                            className="truncate text-sm text-foreground/80 flex items-center gap-1.5"
-                            title={msg.content}
-                          >
-                            {msg.attachments && msg.attachments.length > 0 && (
-                              <Paperclip className="h-3.5 w-3.5 flex-shrink-0 text-blue-400" />
-                            )}
-                            <span>
-                              {msg.content === '[Anexo]' ? 'Mensagem com Anexo(s)' : msg.content}
-                            </span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-sm whitespace-nowrap">
-                          {formatDateTime(msg.scheduled_at)}
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-1">
-                            {getStatusBadge(msg.status)}
-                            {msg.status === 'failed' && msg.error_message && (
-                              <p className="text-xs text-red-400 max-w-[220px] truncate" title={msg.error_message}>
-                                {msg.error_message}
-                              </p>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right whitespace-nowrap space-x-2">
+                          <span className="truncate">
+                            {msg.content === '[Anexo]' ? 'Mensagem com Anexo(s)' : msg.content}
+                          </span>
+                        </p>
+                        {msg.status === 'failed' && msg.error_message && (
+                          <p className="text-[10px] text-rose-500 truncate mt-0.5" title={msg.error_message}>
+                            {msg.error_message}
+                          </p>
+                        )}
+                        <p className="text-[10px] text-muted-foreground/70 mt-1 flex items-center gap-1.5">
+                          <StatusIcon className="h-2.5 w-2.5 flex-shrink-0" />
+                          {STATUS_LABEL[msg.status]}
+                          <span aria-hidden="true">·</span>
+                          <Smartphone className="h-2.5 w-2.5 flex-shrink-0" />
+                          {msg.device_name || 'Desconhecido'}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                        <ListRowPill tom={STATUS_TOM[msg.status]}>{formatDateTime(msg.scheduled_at)}</ListRowPill>
+                        {/* No APK Android não existe hover: sem `useIsMobile()` esses
+                            botões ficariam invisíveis e inalcançáveis no toque. */}
+                        <div className={classesAcoesMensagem}>
                           {msg.status === 'pending' && (
                             <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-8 bg-transparent border-border hover:bg-accent"
+                              variant="ghost"
+                              size="icon"
+                              title="Cancelar"
+                              className="h-6 w-6 text-muted-foreground hover:text-amber-500"
                               onClick={() => handleCancel(msg.id!)}
                             >
-                              Cancelar
+                              <XCircle className="h-3.5 w-3.5" />
                             </Button>
                           )}
                           {msg.status === 'failed' && (
                             <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-8 bg-transparent border-border hover:bg-accent"
+                              variant="ghost"
+                              size="icon"
+                              title="Reenviar"
+                              className="h-6 w-6 text-muted-foreground hover:text-blue-400"
                               onClick={() => handleRetry(msg.id!)}
                             >
-                              <RefreshCw className="h-3.5 w-3.5 mr-1" />
-                              Reenviar
+                              <RefreshCw className="h-3.5 w-3.5" />
                             </Button>
                           )}
                           <Button
                             variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0 text-red-400 hover:text-red-300 hover:bg-red-400/10"
+                            size="icon"
+                            title="Excluir"
+                            className="h-6 w-6 text-muted-foreground hover:text-red-400"
                             onClick={() => handleDelete(msg.id!)}
                           >
-                            <Trash2 className="h-4 w-4" />
+                            <Trash2 className="h-3.5 w-3.5" />
                           </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                        </div>
+                      </div>
+                    </ListRow>
+                  )
+                })}
               </div>
             )}
           </CardContent>
-        </Card>
+        </GlassCard>
       </div>
     </div>
   )

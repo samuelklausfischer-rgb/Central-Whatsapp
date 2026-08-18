@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Copy, Download, Loader2, MousePointerClick } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { CardContent } from '@/components/ui/card'
+import { GlassCard } from '@/components/ui/surface'
+import { ListRow } from '@/components/ui/list-row'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -215,7 +217,7 @@ export default function Assinaturas() {
 
         <TabsContent value="uma" className="mt-4">
           <div className="grid gap-5 lg:grid-cols-[340px_1fr] items-start">
-            <Card>
+            <GlassCard>
               <CardContent className="pt-6 space-y-5">
                 <div className="space-y-2">
                   <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
@@ -330,17 +332,24 @@ export default function Assinaturas() {
                   sem sombra e sem a fonte Poppins, que o Outlook não carrega.
                 </p>
               </CardContent>
-            </Card>
+            </GlassCard>
 
             <div className="space-y-4">
-              <Card>
+              {/* Vidro só no `GlassCard` externo — o `<Preview>` (SVG cru via
+                  `dangerouslySetInnerHTML`) troca de conteúdo a cada marca
+                  escolhida, e `backdrop-blur` teria que refazer o borrão nesse
+                  ritmo. Ele mora direto no `CardContent`, sem blur próprio. */}
+              <GlassCard>
                 <CardContent className="p-2 overflow-auto">
                   <Preview svg={svg} />
                 </CardContent>
-              </Card>
+              </GlassCard>
 
               <Accordion type="single" collapsible>
-                <AccordionItem value="instalar" className="border rounded-lg px-4">
+                {/* Borda aliviada para `/40` — o mesmo tom suave que o divisor
+                    de colunas do `StatBlock`, em vez do `border-border` cheio
+                    que competia com a moldura do `GlassCard` ao lado. */}
+                <AccordionItem value="instalar" className="border border-border/40 rounded-lg px-4">
                   <AccordionTrigger className="text-sm">
                     Como instalar no Outlook e no Gmail
                   </AccordionTrigger>
@@ -372,7 +381,7 @@ export default function Assinaturas() {
         </TabsContent>
 
         <TabsContent value="lote" className="mt-4 space-y-5">
-          <Card>
+          <GlassCard>
             <CardContent className="pt-6 space-y-3">
               <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
                 Uma pessoa por linha
@@ -390,14 +399,17 @@ export default function Assinaturas() {
               />
               <Button onClick={gerarLote}>Gerar assinaturas</Button>
             </CardContent>
-          </Card>
+          </GlassCard>
 
           {pessoasDoLote.length > 0 && (
-            <Card>
-              <CardContent className="pt-6 divide-y">
+            <GlassCard>
+              {/* `divide-y` virou espaço entre `ListRow`s: o idioma novo separa
+                  itens por respiro + hover, não por linha desenhada — mesmo
+                  princípio do resto do kit (`ListRow`/`StatBlock`). */}
+              <CardContent className="pt-6 space-y-1">
                 {pessoasDoLote.map((p, i) => (
-                  <div key={`${p.nome}-${i}`} className="py-5 first:pt-0">
-                    <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
+                  <ListRow key={`${p.nome}-${i}`} className="flex-col items-stretch gap-2 py-3">
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
                       <span className="text-xs text-muted-foreground">
                         {p.nome || '(sem nome)'} — {MARCAS[p.marca].rotulo}
                       </span>
@@ -425,10 +437,10 @@ export default function Assinaturas() {
                     <div className="overflow-auto">
                       <Preview svg={montarSVG(p, assets)} />
                     </div>
-                  </div>
+                  </ListRow>
                 ))}
               </CardContent>
-            </Card>
+            </GlassCard>
           )}
         </TabsContent>
       </Tabs>

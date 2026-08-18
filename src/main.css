@@ -65,6 +65,23 @@
     --chat-conversation-pattern: url('/backgrounds/chat-pattern.webp');
     --chat-conversation-pattern-opacity: 0.038;
     --chat-conversation-pattern-size: 360px auto;
+
+    /* ── Fundo PRN e superfícies de vidro ── */
+    --bg-campo-de: 214 100% 97%;
+    --bg-campo-para: 210 60% 98%;
+    --bg-forma-1: 213 94% 68%;
+    --bg-forma-2: 199 89% 74%;
+    --bg-forma-3: 221 83% 53%;
+    --bg-brilho: 213 94% 68%;
+    --bg-traco: 214 60% 75%;
+
+    --vidro-fundo: 0 0% 100%;
+    --vidro-opacidade: 0.72;
+    --vidro-borda-opacidade: 0.6;
+    --vidro-anel: 222 47% 11%;
+    --vidro-anel-opacidade: 0.06;
+    --vidro-luz-opacidade: 0.8;
+    --vidro-sombra: 0 1px 2px rgb(16 24 40 / 0.04), 0 8px 24px -8px rgb(16 24 40 / 0.10);
   }
 
   .dark {
@@ -123,6 +140,22 @@
     --chat-bubble-shadow: 0 1px 0.5px rgb(0 0 0 / 0.35);
     --chat-pattern: radial-gradient(ellipse at 50% -10%, rgba(59, 130, 246, 0.045) 0%, transparent 65%);
     --chat-conversation-pattern-opacity: 0.035;
+
+    --bg-campo-de: 222 47% 7%;
+    --bg-campo-para: 215 40% 10%;
+    --bg-forma-1: 217 60% 35%;
+    --bg-forma-2: 199 70% 40%;
+    --bg-forma-3: 221 83% 53%;
+    --bg-brilho: 217 91% 60%;
+    --bg-traco: 213 40% 45%;
+
+    --vidro-fundo: 215 40% 12%;
+    --vidro-opacidade: 0.55;
+    --vidro-borda-opacidade: 0.10;
+    --vidro-anel: 0 0% 100%;
+    --vidro-anel-opacidade: 0.05;
+    --vidro-luz-opacidade: 0.15;
+    --vidro-sombra: 0 1px 2px rgb(0 0 0 / 0.30), 0 8px 24px -8px rgb(0 0 0 / 0.50);
   }
 
   body {
@@ -163,6 +196,38 @@
 }
 
 @layer utilities {
+  /**
+   * Superfície de vidro do app (cards, painéis) sobre o fundo do PRN.
+   *
+   * O blur fica em 12px de propósito — não é escolha estética, é limite de
+   * performance. Uma dúzia de cards com `backdrop-filter` em 24px ou 40px
+   * sobre um fundo `fixed` (que o compositor tem que recalcular a cada scroll)
+   * trava a rolagem no Electron/Windows, onde a GPU já é compartilhada com o
+   * resto do sistema. 12px ainda lê como vidro; a opacidade de preenchimento
+   * alta (`--vidro-opacidade`) é o que compensa não borrar mais.
+   */
+  .superficie-vidro {
+    position: relative;
+    background-color: hsl(var(--vidro-fundo) / var(--vidro-opacidade));
+    -webkit-backdrop-filter: blur(12px) saturate(150%);
+    backdrop-filter: blur(12px) saturate(150%);
+    border: 1px solid hsl(0 0% 100% / var(--vidro-borda-opacidade));
+    box-shadow: var(--vidro-sombra), inset 0 0 0 1px hsl(var(--vidro-anel) / var(--vidro-anel-opacidade));
+  }
+
+  /* Linha de luz no topo do vidro, simulando reflexo. `border-radius: inherit`
+     no elemento evita que a linha escape do canto arredondado do card. */
+  .superficie-vidro::before {
+    content: '';
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, hsl(0 0% 100% / var(--vidro-luz-opacidade)), transparent);
+    pointer-events: none;
+    border-radius: inherit;
+  }
+
   .bg-chat-pattern {
     background-image: var(--chat-pattern);
   }
@@ -227,5 +292,47 @@
 
   .animate-pulse-border {
     animation: pulse-border 2s ease-in-out infinite;
+  }
+
+  /**
+   * Ken Burns lento para o fundo do AuthShell (splash de atualização + login).
+   * `alternate` evita o salto de voltar ao tamanho original a cada ciclo.
+   * Desligado em prefers-reduced-motion logo abaixo — primeira animação do
+   * projeto a respeitar essa preferência, vale replicar nas próximas.
+   */
+  @keyframes ken-burns {
+    0% {
+      transform: scale(1);
+    }
+    100% {
+      transform: scale(1.06);
+    }
+  }
+
+  .animate-ken-burns {
+    animation: ken-burns 24s ease-in-out infinite alternate;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-ken-burns {
+      animation: none;
+    }
+
+    /**
+     * As telas de entrada (AuthShell) têm mais movimento além do ken burns: o
+     * pulso do anel quando a verificação estoura o piso de 5s e a entrada do
+     * painel de vidro. Os dois param aqui. O escopo é o `.auth-shell` de
+     * propósito: desligar `.animate-pulse`/`.animate-in` no projeto inteiro
+     * apagaria também os skeletons e a entrada dos diálogos, que é mudança de
+     * comportamento fora desta tarefa.
+     *
+     * O `animate-spin` do Loader2 fica de FORA de propósito: ele é indicador de
+     * atividade, não decoração. Um spinner congelado não parece "acessível",
+     * parece app travado — e é justo na tela onde o usuário está esperando.
+     */
+    .auth-shell .animate-pulse,
+    .auth-shell .animate-in {
+      animation: none;
+    }
   }
 }

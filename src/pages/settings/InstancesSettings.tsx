@@ -8,8 +8,6 @@ import {
   Edit,
   DownloadCloud,
   CheckCircle2,
-  Clock,
-  AlertCircle,
   Smartphone,
   QrCode,
   History,
@@ -17,15 +15,19 @@ import {
   Square,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { GlassCard } from '@/components/ui/surface'
+import { StatBlock } from '@/components/ui/stat-block'
+import { ListRow, ListRowPill } from '@/components/ui/list-row'
+import { EstadoPainel } from '@/components/ui/estado-painel'
 import {
   Dialog,
-  DialogContent,
   DialogHeader,
   DialogTitle,
   DialogFooter,
   DialogDescription,
 } from '@/components/ui/dialog'
+import { GlassDialogContent } from '@/components/ui/glass-dialog'
 import {
   AlertDialog,
   AlertDialogContent,
@@ -66,20 +68,20 @@ import {
   type EvolutionHistoryPreview,
 } from '@/services/evolution_history_import'
 
-const statusBadge = (normalizedStatus: string) => {
+// Rótulo em texto puro do status da instância — antes vinha dentro de um
+// `Badge` colorido (`statusBadge`, removido); agora a cor já é o ponto de
+// `ListRow` (`status={tomStatus}` na linha), então só falta o texto por
+// extenso ao lado, inclusive para quem lê a tela por leitor de tela.
+const instanceStatusLabel = (normalizedStatus: string) => {
   switch (normalizedStatus) {
     case 'connected':
-      return <Badge className="bg-green-500/10 text-green-500 border-green-500/20">Conectado</Badge>
+      return 'Conectado'
     case 'disconnected':
-      return <Badge variant="secondary">Desconectado</Badge>
+      return 'Desconectado'
     case 'connecting':
-      return (
-        <Badge className="bg-yellow-500/10 text-yellow-500 border-yellow-500/20 gap-1">
-          <Clock className="h-3 w-3 animate-spin" /> Conectando
-        </Badge>
-      )
+      return 'Conectando'
     default:
-      return <Badge variant="outline" className="gap-1"><AlertCircle className="h-3 w-3" /> {normalizedStatus}</Badge>
+      return normalizedStatus
   }
 }
 
@@ -161,6 +163,11 @@ export default function InstancesSettings() {
   const { toast } = useToast()
   const [instances, setInstances] = useState<EvolutionInstance[]>([])
   const [loading, setLoading] = useState(true)
+  // Erro separado de "lista vazia": antes, uma falha ao buscar na Evolution
+  // deixava `instances` como estava (vazio no primeiro load) e a tela dizia
+  // "Nenhuma instância encontrada" — a mesma leitura errada que o Dashboard
+  // tinha antes do `EstadoPainel` existir.
+  const [erroInstances, setErroInstances] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
 
   // Create modal
@@ -199,7 +206,9 @@ export default function InstancesSettings() {
     try {
       const result = await listEvolutionInstances()
       setInstances(result.instances)
+      setErroInstances(false)
     } catch (err: unknown) {
+      setErroInstances(true)
       toast({ title: 'Erro ao carregar instâncias', description: formatError(err), variant: 'destructive' })
     } finally {
       setLoading(false)
@@ -534,26 +543,28 @@ export default function InstancesSettings() {
         </div>
       </div>
 
-      <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
-        <Card className="bg-muted backdrop-blur-sm border-border">
-          <CardHeader className="pb-2"><CardTitle className="text-2xl">{stats.total}</CardTitle></CardHeader>
-          <CardContent><p className="text-xs text-muted-foreground">Total na Evolution</p></CardContent>
-        </Card>
-        <Card className="bg-muted backdrop-blur-sm border-border">
-          <CardHeader className="pb-2"><CardTitle className="text-2xl text-green-500">{stats.connected}</CardTitle></CardHeader>
-          <CardContent><p className="text-xs text-muted-foreground">Conectadas</p></CardContent>
-        </Card>
-        <Card className="bg-muted backdrop-blur-sm border-border">
-          <CardHeader className="pb-2"><CardTitle className="text-2xl">{stats.disconnected}</CardTitle></CardHeader>
-          <CardContent><p className="text-xs text-muted-foreground">Desconectadas</p></CardContent>
-        </Card>
-        <Card className="bg-muted backdrop-blur-sm border-border">
-          <CardHeader className="pb-2"><CardTitle className="text-2xl text-yellow-500">{stats.notImported}</CardTitle></CardHeader>
-          <CardContent><p className="text-xs text-muted-foreground">Não importadas</p></CardContent>
-        </Card>
-      </div>
+      {/*
+        Eram 4 `Card` irmãos, cada um com `bg-muted backdrop-blur-sm` (opaco +
+        blur morto, igual aos outros pontos deste arquivo) — quatro vidros
+        colados por quatro números é ruído visual e um blur repetido à toa.
+        `StatBlock` é UM `GlassCard` com os 4 números lado a lado, divisores
+        finos entre colunas.
+      */}
+      <StatBlock
+        itens={[
+          { label: 'Total na Evolution', value: stats.total },
+          { label: 'Conectadas', value: stats.connected, acento: 'esmeralda' },
+          { label: 'Desconectadas', value: stats.disconnected },
+          { label: 'Não importadas', value: stats.notImported, acento: 'ambar' },
+        ]}
+      />
 
-      <Card className="bg-muted backdrop-blur-sm border-border">
+      {/*
+        Era `bg-muted backdrop-blur-sm` — mesmo blur morto de sempre. Este é
+        o único `GlassCard` de verdade da tela, com as linhas em `ListRow` por
+        dentro (nada de vidro aninhado).
+      */}
+      <GlassCard>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Smartphone className="h-5 w-5 text-primary" /> Instâncias Cadastradas
@@ -561,106 +572,110 @@ export default function InstancesSettings() {
           <CardDescription>Instâncias encontradas na Evolution API.</CardDescription>
         </CardHeader>
         <CardContent>
-          {loading ? (
-            <div className="py-10 flex flex-col items-center gap-3 text-muted-foreground">
-              <RefreshCw className="h-6 w-6 animate-spin" />
-              Buscando instâncias...
-            </div>
-          ) : instances.length === 0 ? (
-            <div className="py-10 text-center text-muted-foreground border border-dashed border-border rounded-xl">
-              Nenhuma instância encontrada na Evolution API.
-            </div>
-          ) : (
-            <div className="rounded-xl border border-border overflow-hidden">
-              <div className="hidden sm:grid sm:grid-cols-[1fr_1fr_auto_auto_auto] gap-3 px-3 py-2 bg-muted text-xs font-medium text-muted-foreground border-b border-border">
-                <span>Instância</span>
-                <span>Status</span>
-                <span>Sistema</span>
-                <span className="text-right">Ações</span>
-                <span />
-              </div>
-              <div className="divide-y divide-border">
-                {instances.map((instance, index) => {
-                  const name = instance.instanceName
-                  const displayName = instance.device?.name || name || 'Desconhecida'
-                  const isActionLoading = actionLoading === name
-                  const isInvalid = !name
-                  return (
-                    <div key={name || `invalid-${index}`} className={`grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto_auto_auto] gap-2 px-3 py-3 items-start sm:items-center ${isInvalid ? 'opacity-50' : ''}`}>
-                      <div className="min-w-0">
-                        <p className="font-medium truncate">{displayName}</p>
-                        <div className="flex flex-wrap gap-1 mt-1 text-xs text-muted-foreground">
-                          {name ? (
-                            <Badge variant="outline" className="text-[10px]">{name}</Badge>
-                          ) : (
-                            <Badge variant="destructive" className="text-[10px]">Sem nome técnico</Badge>
-                          )}
-                          {instance.profileName && <span>Perfil: {instance.profileName}</span>}
-                          {instance.ownerJid && <span>{instance.ownerJid}</span>}
-                        </div>
-                      </div>
-                      <div>{statusBadge(instance.normalizedStatus)}</div>
-                      <div>
-                        {instance.alreadyImported ? (
-                          <Badge className="bg-blue-500/10 text-blue-500 border-blue-500/20 gap-1">
-                            <CheckCircle2 className="h-3 w-3" /> Importado
-                          </Badge>
+          <EstadoPainel
+            carregando={loading}
+            erro={erroInstances}
+            vazio={instances.length === 0}
+            mensagemVazio="Nenhuma instância encontrada na Evolution API."
+            aoTentarDeNovo={loadInstances}
+          />
+          {!loading && !erroInstances && instances.length > 0 && (
+            // `divide-y divide-border` (idioma antigo) virou uma lista de
+            // `ListRow`. O cabeçalho de colunas old-school (Instância/Status/
+            // Sistema/Ações) saiu junto: `ListRow` é uma linha flexível, não
+            // uma grade com colunas fixas — um cabeçalho alinhado por coluna
+            // não fazia mais sentido em cima dela.
+            <div className="space-y-1">
+              {instances.map((instance, index) => {
+                const name = instance.instanceName
+                const displayName = instance.device?.name || name || 'Desconhecida'
+                const isActionLoading = actionLoading === name
+                const isInvalid = !name
+                // Ponto de status no lugar do `Badge` colorido de sempre — a
+                // cor já entrega "conectado/desconectado/conectando" de
+                // relance; o rótulo por extenso continua ao lado para quem
+                // precisar do texto (leitor de tela incluso).
+                const tomStatus =
+                  instance.normalizedStatus === 'connected' ? 'esmeralda'
+                  : instance.normalizedStatus === 'connecting' ? 'ambar'
+                  : instance.normalizedStatus === 'disconnected' ? 'ardosia'
+                  : 'rosa'
+                return (
+                  <ListRow
+                    key={name || `invalid-${index}`}
+                    status={tomStatus}
+                    className={`items-start sm:items-center flex-wrap sm:flex-nowrap ${isInvalid ? 'opacity-50' : ''}`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium truncate">{displayName}</p>
+                      <div className="flex flex-wrap gap-1 mt-1 text-xs text-muted-foreground items-center">
+                        {name ? (
+                          <Badge variant="outline" className="text-[10px]">{name}</Badge>
                         ) : (
-                          <Badge variant="outline" className="gap-1">
-                            <DownloadCloud className="h-3 w-3" /> Novo
-                          </Badge>
+                          <Badge variant="destructive" className="text-[10px]">Sem nome técnico</Badge>
                         )}
+                        <span>{instanceStatusLabel(instance.normalizedStatus)}</span>
+                        {instance.profileName && <span>Perfil: {instance.profileName}</span>}
+                        {instance.ownerJid && <span>{instance.ownerJid}</span>}
                       </div>
-                      <div className="flex flex-wrap gap-1 justify-end">
-                        {instance.normalizedStatus === 'connected' ? (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 text-xs gap-1"
-                            disabled={!name || isActionLoading}
-                            onClick={() => name && handleDisconnect(name)}
-                          >
-                            {isActionLoading ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Unlink className="h-3 w-3" />}
-                            <span className="hidden sm:inline">Desconectar</span>
-                          </Button>
-                        ) : (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 text-xs gap-1"
-                            disabled={!name || isActionLoading}
-                            onClick={() => name && handleConnect(name)}
-                          >
-                            {isActionLoading ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Link className="h-3 w-3" />}
-                            <span className="hidden sm:inline">Conectar</span>
-                          </Button>
-                        )}
-                        {name && instance.device && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 text-xs gap-1"
-                            disabled={!name || isActionLoading}
-                            onClick={() => openHistoryImport(name)}
-                          >
-                            <History className="h-3 w-3" />
-                            <span className="hidden sm:inline">Histórico</span>
-                          </Button>
-                        )}
-                      </div>
-                      <div />
                     </div>
-                  )
-                })}
-              </div>
+                    {instance.alreadyImported ? (
+                      <ListRowPill tom="azul">
+                        <span className="inline-flex items-center gap-1"><CheckCircle2 className="h-3 w-3" /> Importado</span>
+                      </ListRowPill>
+                    ) : (
+                      <ListRowPill tom="ardosia">
+                        <span className="inline-flex items-center gap-1"><DownloadCloud className="h-3 w-3" /> Novo</span>
+                      </ListRowPill>
+                    )}
+                    <div className="flex flex-wrap gap-1 justify-end flex-shrink-0">
+                      {instance.normalizedStatus === 'connected' ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs gap-1"
+                          disabled={!name || isActionLoading}
+                          onClick={() => name && handleDisconnect(name)}
+                        >
+                          {isActionLoading ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Unlink className="h-3 w-3" />}
+                          <span className="hidden sm:inline">Desconectar</span>
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs gap-1"
+                          disabled={!name || isActionLoading}
+                          onClick={() => name && handleConnect(name)}
+                        >
+                          {isActionLoading ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Link className="h-3 w-3" />}
+                          <span className="hidden sm:inline">Conectar</span>
+                        </Button>
+                      )}
+                      {name && instance.device && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs gap-1"
+                          disabled={!name || isActionLoading}
+                          onClick={() => openHistoryImport(name)}
+                        >
+                          <History className="h-3 w-3" />
+                          <span className="hidden sm:inline">Histórico</span>
+                        </Button>
+                      )}
+                    </div>
+                  </ListRow>
+                )
+              })}
             </div>
           )}
         </CardContent>
-      </Card>
+      </GlassCard>
 
       {/* Create Modal */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="sm:max-w-md bg-card border-border">
+        <GlassDialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Criar Instância</DialogTitle>
             <DialogDescription>
@@ -698,12 +713,12 @@ export default function InstancesSettings() {
               Criar
             </Button>
           </DialogFooter>
-        </DialogContent>
+        </GlassDialogContent>
       </Dialog>
 
       {/* QR Modal */}
       <Dialog open={qrOpen} onOpenChange={setQrOpen}>
-        <DialogContent className="sm:max-w-sm bg-card border-border">
+        <GlassDialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>Conectar WhatsApp</DialogTitle>
             <DialogDescription>
@@ -752,12 +767,12 @@ export default function InstancesSettings() {
               Fechar
             </Button>
           </DialogFooter>
-        </DialogContent>
+        </GlassDialogContent>
       </Dialog>
 
       {/* History Import Modal */}
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
-        <DialogContent className="sm:max-w-2xl bg-card border-border">
+        <GlassDialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Importar histórico</DialogTitle>
             <DialogDescription>
@@ -873,12 +888,12 @@ export default function InstancesSettings() {
               Cancelar
             </Button>
           </DialogFooter>
-        </DialogContent>
+        </GlassDialogContent>
       </Dialog>
 
       {/* Rename Modal */}
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
-        <DialogContent className="sm:max-w-md bg-card border-border">
+        <GlassDialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Renomear Instância</DialogTitle>
             <DialogDescription>
@@ -907,10 +922,14 @@ export default function InstancesSettings() {
               Salvar
             </Button>
           </DialogFooter>
-        </DialogContent>
+        </GlassDialogContent>
       </Dialog>
 
-      {/* Delete Confirmation */}
+      {/* Delete Confirmation — `AlertDialogContent` vem de
+          `@/components/ui/alert-dialog`, componente diferente do
+          `Dialog`/`DialogContent` que o resto do arquivo usa. Não force o
+          kit de vidro num componente que não é o dele: fica sólido mesmo,
+          como pedido. */}
       <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => !open && setDeleteConfirm(null)}>
         <AlertDialogContent className="bg-card border-border">
           <AlertDialogHeader>

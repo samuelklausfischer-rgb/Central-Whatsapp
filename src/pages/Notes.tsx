@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Plus, StickyNote, Search, Trash2 } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Plus, Search, Trash2 } from 'lucide-react'
+import { CardContent } from '@/components/ui/card'
+import { GlassCard } from '@/components/ui/surface'
+import { EstadoPainel } from '@/components/ui/estado-painel'
+import { ListRow, ListRowPill } from '@/components/ui/list-row'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -17,6 +20,24 @@ import { useToast } from '@/hooks/use-toast'
 import { useAuth } from '@/hooks/use-auth'
 import { getNotes, createNote, deleteNote, Note } from '@/services/notes'
 import { useRealtime } from '@/hooks/use-realtime'
+import { useIsMobile } from '@/hooks/use-mobile'
+
+// Mesmo mapa de categoria do card "Anotações" na home (Index.tsx), com o
+// `/10` mais suave em vez do `/15` padrão do `ListRowPill` — comentário lá
+// explica o porquê: aqui o selo compete com texto de categoria, não só um
+// número, então o padrão mais forte destoava.
+const CATEGORIA_PILL: Record<Note['category'], string> = {
+  financeiro: 'bg-emerald-500/10 text-emerald-500',
+  rh: 'bg-blue-500/10 text-blue-500',
+  administrativo: 'bg-amber-500/10 text-amber-500',
+  geral: 'bg-muted/60 text-muted-foreground',
+}
+const CATEGORIA_LABEL: Record<Note['category'], string> = {
+  financeiro: 'Fin',
+  rh: 'RH',
+  administrativo: 'Adm',
+  geral: 'Ger',
+}
 
 export default function Notes() {
   const { toast } = useToast()
@@ -27,12 +48,28 @@ export default function Notes() {
   const [newTitle, setNewTitle] = useState('')
   const [newContent, setNewContent] = useState('')
 
+  // Carregando e erro SEPARADOS de "lista vazia" — o bug aprovado pelo
+  // usuário. Antes, `catch { /* ignore */ }` engolia qualquer falha de rede
+  // sem tocar em nenhum estado, e a lista simplesmente ficava vazia: uma
+  // queda de conexão se lia como "nenhuma anotação encontrada", a leitura
+  // oposta da verdade. Mesmo padrão que a home já usa (`EstadoPainel`).
+  const [carregando, setCarregando] = useState(true)
+  const [erroNotas, setErroNotas] = useState(false)
+
+  // Sem hover no APK Android (Capacitor): um controle só visível em hover é,
+  // na prática, um controle que não existe no toque. No celular ele fica
+  // sempre visível.
+  const noCelular = useIsMobile()
+
   const loadNotes = async () => {
     try {
       const data = await getNotes()
       setNotes(data)
+      setErroNotas(false)
     } catch (error) {
-      // ignore
+      setErroNotas(true)
+    } finally {
+      setCarregando(false)
     }
   }
 
@@ -75,6 +112,10 @@ export default function Notes() {
       n.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       n.content.toLowerCase().includes(searchTerm.toLowerCase()),
   )
+
+  const classesBotaoExcluir = noCelular
+    ? 'h-7 w-7 flex-shrink-0 text-muted-foreground hover:text-red-400 opacity-100'
+    : 'h-7 w-7 flex-shrink-0 text-muted-foreground hover:text-red-400 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity'
 
   return (
     <div className="flex flex-col gap-6">
@@ -137,41 +178,63 @@ export default function Notes() {
         </div>
       </div>
 
-      <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
-        {filteredNotes.map((note) => (
-          <Card
-            key={note.id}
-            className="group relative overflow-hidden transition-all hover:-translate-y-1"
-          >
-            <CardHeader className="pb-3 pr-10">
-              <CardTitle className="text-lg leading-tight">{note.title}</CardTitle>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="absolute top-4 right-4 h-8 w-8 text-muted-foreground hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                onClick={() => handleDelete(note.id)}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed line-clamp-6">
-                {note.content}
-              </p>
-              <div className="text-[10px] text-muted-foreground pt-2 border-t border-border">
-                {new Date(note.created_at).toLocaleDateString('pt-BR')}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {filteredNotes.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-20 text-muted-foreground border border-border border-dashed rounded-xl bg-card backdrop-blur-sm">
-          <StickyNote className="h-12 w-12 mb-4 opacity-20" />
-          <p>Nenhuma anotação encontrada.</p>
-        </div>
-      )}
+      {/*
+        Mesmo idioma de linha do card "Anotações" na home: um `GlassCard` só
+        (em vez da grade de cards isolados com borda que existia aqui antes),
+        linha sem borda, `rounded-xl`, pílula de categoria à direita, hover
+        sutil. `EstadoPainel` separa carregando / erro / vazio — é o que
+        corrige o bug: rede fora do ar agora mostra "Não deu para carregar
+        agora" com "Tentar de novo", não "Nenhuma anotação ainda".
+      */}
+      <GlassCard>
+        <CardContent className="p-2">
+          <EstadoPainel
+            carregando={carregando}
+            erro={erroNotas}
+            vazio={filteredNotes.length === 0}
+            mensagemVazio={searchTerm ? 'Nenhuma anotação encontrada.' : 'Nenhuma anotação ainda.'}
+            aoTentarDeNovo={() => {
+              setErroNotas(false)
+              setCarregando(true)
+              loadNotes()
+            }}
+          />
+          {!carregando && !erroNotas && filteredNotes.length > 0 && (
+            <div className="space-y-0.5">
+              {filteredNotes.map((note) => (
+                // Sem `onClick`: vira `<div>`, não `<button>` — não existe
+                // tela de detalhe de anotação para navegar. Só o ícone de
+                // lixeira, dentro da linha, é clicável.
+                <ListRow key={note.id} className="items-start">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs font-medium text-foreground truncate flex-1">{note.title}</p>
+                      <ListRowPill className={CATEGORIA_PILL[note.category]}>
+                        {CATEGORIA_LABEL[note.category]}
+                      </ListRowPill>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground line-clamp-2 whitespace-pre-wrap mt-0.5">
+                      {note.content}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground/70 mt-1">
+                      {note.contact_name ? `${note.contact_name} · ` : ''}
+                      {new Date(note.created_at).toLocaleDateString('pt-BR')}
+                    </p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={classesBotaoExcluir}
+                    onClick={() => handleDelete(note.id)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </ListRow>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </GlassCard>
     </div>
   )
 }

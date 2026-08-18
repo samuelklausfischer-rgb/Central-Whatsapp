@@ -29,7 +29,9 @@ const sentimentColors: Record<string, string> = {
   urgente: 'bg-red-500',
   reclamacao: 'bg-orange-500',
   positivo: 'bg-green-500',
-  neutro: 'bg-gray-400',
+  // Token em vez de cor fixa (`bg-gray-400`): sem isso o ponto "neutro" some
+  // no tema escuro, muito próximo do fundo.
+  neutro: 'bg-muted-foreground',
 }
 
 interface Props {
@@ -49,7 +51,10 @@ export function EmailList({ emails, selectedEmailId, onSelect, onSearch, isLoadi
   }
 
   return (
-    <div className="flex flex-col h-full border-r border-border">
+    // Sem `border-r` aqui: o painel pai (`EmailHub.tsx`) já desenha a divisão
+    // entre as colunas — duplicar a borda deixava uma linha dupla exatamente
+    // onde fica o handle de redimensionar.
+    <div className="flex flex-col h-full">
       {/* Barra de busca */}
       <div className="p-3 border-b border-border">
         <div className="relative">
@@ -101,7 +106,7 @@ export function EmailList({ emails, selectedEmailId, onSelect, onSearch, isLoadi
                       )}
                       {email.ai_sentiment && (
                         <span
-                          className={`h-1.5 w-1.5 rounded-full ${sentimentColors[email.ai_sentiment] ?? 'bg-gray-300'}`}
+                          className={`h-1.5 w-1.5 rounded-full ${sentimentColors[email.ai_sentiment] ?? 'bg-muted-foreground/70'}`}
                           title={email.ai_sentiment}
                         />
                       )}

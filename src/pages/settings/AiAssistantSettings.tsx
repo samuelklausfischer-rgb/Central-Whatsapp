@@ -14,12 +14,15 @@ import {
 } from '@/services/ai_prompts'
 import {
   Dialog,
-  DialogContent,
   DialogHeader,
   DialogTitle,
   DialogFooter,
   DialogDescription,
 } from '@/components/ui/dialog'
+import { GlassDialogContent } from '@/components/ui/glass-dialog'
+import { CardContent } from '@/components/ui/card'
+import { GlassCard } from '@/components/ui/surface'
+import { EstadoPainel } from '@/components/ui/estado-painel'
 import {
   Table,
   TableBody,
@@ -28,7 +31,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Pencil, Trash2, Plus, Loader2 } from 'lucide-react'
+import { Pencil, Trash2, Plus } from 'lucide-react'
 import { extractFieldErrors } from '@/lib/errors'
 
 export default function AiAssistantSettings() {
@@ -36,6 +39,11 @@ export default function AiAssistantSettings() {
   const { toast } = useToast()
   const [prompts, setPrompts] = useState<AiPrompt[]>([])
   const [loading, setLoading] = useState(true)
+  // Antes o erro só virava um `toast` — que some sozinho — e a tabela ficava
+  // com "Nenhuma ação configurada.", igual a uma lista realmente vazia. Erro
+  // separado permite `EstadoPainel` mostrar a mensagem certa e um "Tentar de
+  // novo".
+  const [erroPrompts, setErroPrompts] = useState(false)
 
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
@@ -57,7 +65,9 @@ export default function AiAssistantSettings() {
       setLoading(true)
       const data = await getAiPrompts()
       setPrompts(data)
+      setErroPrompts(false)
     } catch (err) {
+      setErroPrompts(true)
       toast({ title: 'Erro ao carregar ações', variant: 'destructive' })
     } finally {
       setLoading(false)
@@ -133,8 +143,18 @@ export default function AiAssistantSettings() {
         </Button>
       </div>
 
-      <div className="border border-border rounded-md">
-        <Table>
+      {/*
+        A tabela ficava "nua" na página, sem a pele de vidro do resto do app.
+        `GlassCard` por fora — sem `backdrop-blur` em nada dentro dela, é
+        regra dura do kit (blur aninhado trava a rolagem no Electron).
+        O `<thead>` do shadcn (`table.tsx`) não recebe `sticky` aqui: a tabela
+        não vive dentro de um contêiner de altura fixa com rolagem própria,
+        então não há cabeçalho flutuando sobre linha nenhuma — não precisou de
+        fundo opaco extra.
+      */}
+      <GlassCard>
+        <CardContent className="p-0">
+          <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Label (Exibição)</TableHead>
@@ -145,16 +165,20 @@ export default function AiAssistantSettings() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading ? (
+            {loading || erroPrompts || prompts.length === 0 ? (
+              // Carregando/erro/vazio via `EstadoPainel`, dentro de uma única
+              // célula que ocupa a tabela inteira — a diferença real de
+              // antes é a mensagem de erro deixar de ser só um `toast` que
+              // some sozinho, com um "Tentar de novo" que chama `loadPrompts`.
               <TableRow>
-                <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                  <Loader2 className="h-6 w-6 animate-spin mx-auto" />
-                </TableCell>
-              </TableRow>
-            ) : prompts.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                    Nenhuma ação configurada.
+                <TableCell colSpan={5} className="py-2">
+                  <EstadoPainel
+                    carregando={loading}
+                    erro={erroPrompts}
+                    vazio={prompts.length === 0}
+                    mensagemVazio="Nenhuma ação configurada."
+                    aoTentarDeNovo={loadPrompts}
+                  />
                 </TableCell>
               </TableRow>
             ) : (
@@ -200,11 +224,12 @@ export default function AiAssistantSettings() {
               ))
             )}
           </TableBody>
-        </Table>
-      </div>
+          </Table>
+        </CardContent>
+      </GlassCard>
 
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="sm:max-w-[600px]">
+        <GlassDialogContent className="sm:max-w-[600px]">
           <DialogHeader>
             <DialogTitle>{editingId ? 'Editar Ação de IA' : 'Nova Ação de IA'}</DialogTitle>
           </DialogHeader>
@@ -283,11 +308,11 @@ export default function AiAssistantSettings() {
             </Button>
             <Button onClick={handleSave}>Salvar</Button>
           </DialogFooter>
-        </DialogContent>
+        </GlassDialogContent>
       </Dialog>
 
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent>
+        <GlassDialogContent>
           <DialogHeader>
             <DialogTitle>Excluir Ação?</DialogTitle>
             <DialogDescription>
@@ -303,7 +328,7 @@ export default function AiAssistantSettings() {
               Excluir
             </Button>
           </DialogFooter>
-        </DialogContent>
+        </GlassDialogContent>
       </Dialog>
     </div>
   )
