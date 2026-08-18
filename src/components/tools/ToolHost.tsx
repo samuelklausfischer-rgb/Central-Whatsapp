@@ -2,6 +2,7 @@ import { lazy, Suspense, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import {
   subscreverFerramentas,
   lerFerramentas,
@@ -45,6 +46,31 @@ export const FERRAMENTAS_HOSPEDADAS: Record<string, FerramentaHospedavel> = {
     url: '/ferramentas/proposta-comercial',
     Componente: PropostaComercial,
   },
+}
+
+/**
+ * O que aparece no lugar de uma ferramenta que quebrou.
+ *
+ * Precisa ser CONTIDO: a tela padrão do `ErrorBoundary` é `fixed inset-0`, feita
+ * para falha do app inteiro. Usada aqui, ela cobriria tudo — exatamente o que
+ * esta barreira existe para evitar.
+ */
+function FerramentaQuebrou({ titulo }: { titulo: string }) {
+  return (
+    <div className="flex h-full min-h-[50vh] flex-col items-center justify-center gap-3 p-6 text-center">
+      <span className="font-medium">A ferramenta {titulo} não abriu</span>
+      <p className="max-w-sm text-sm text-muted-foreground">
+        O resto do app continua funcionando. Feche a aba da ferramenta e abra de novo; se insistir,
+        use o botão "Reportar problema".
+      </p>
+      <button
+        onClick={() => window.location.reload()}
+        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+      >
+        Recarregar
+      </button>
+    </div>
+  )
 }
 
 /**
@@ -156,15 +182,29 @@ export function ToolHost() {
               )}
             >
               <div className={f.telaCheia ? 'h-full' : 'mx-auto w-full max-w-7xl'}>
-                <Suspense
-                  fallback={
-                    <div className="h-full w-full flex items-center justify-center text-muted-foreground">
-                      Carregando...
-                    </div>
-                  }
+                {/*
+                  Uma barreira POR FERRAMENTA, e não só a do app inteiro.
+
+                  Sem ela, um erro de runtime dentro de uma ferramenta sobe até o
+                  `ErrorBoundary` do `App` e apaga a tela toda — a pessoa perde as
+                  conversas abertas por causa de um bug numa ferramenta que ela nem
+                  estava usando. Com a barreira aqui, o estrago fica dentro do painel
+                  da ferramenta e o resto do app continua de pé.
+                */}
+                <ErrorBoundary
+                  label={`ferramenta:${slug}`}
+                  fallback={<FerramentaQuebrou titulo={f.titulo} />}
                 >
-                  <Componente />
-                </Suspense>
+                  <Suspense
+                    fallback={
+                      <div className="h-full w-full flex items-center justify-center text-muted-foreground">
+                        Carregando...
+                      </div>
+                    }
+                  >
+                    <Componente />
+                  </Suspense>
+                </ErrorBoundary>
               </div>
             </div>
           )
