@@ -7,12 +7,15 @@ interface ToolAccessValue {
   relatorios: boolean
   /** PRN Licitações — liberado pela chave em public.tool_access. */
   licitacoes: boolean
+  /** Proposta Comercial — liberada pela chave em public.tool_access. */
+  propostaComercial: boolean
   loading: boolean
 }
 
 const ToolAccessContext = createContext<ToolAccessValue>({
   relatorios: false,
   licitacoes: false,
+  propostaComercial: false,
   loading: true,
 })
 
@@ -28,12 +31,14 @@ export function ToolAccessProvider({ children }: { children: ReactNode }) {
   const userId = user?.id
   const [relatorios, setRelatorios] = useState(false)
   const [licitacoes, setLicitacoes] = useState(false)
+  const [propostaComercial, setPropostaComercial] = useState(false)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!userId) {
       setRelatorios(false)
       setLicitacoes(false)
+      setPropostaComercial(false)
       setLoading(false)
       return
     }
@@ -43,10 +48,14 @@ export function ToolAccessProvider({ children }: { children: ReactNode }) {
 
     // allSettled: uma das duas falhar (schema fora do ar, RLS) não pode esconder
     // a outra ferramenta — cada uma responde por si.
+    // `getMyTools` traz TODAS as chaves de uma vez: cada ferramenta nova sai
+    // desta mesma resposta, sem outra ida ao banco.
     Promise.allSettled([hasRelatoriosProfile(userId), getMyTools(userId)]).then(([perfil, tools]) => {
       if (!mounted) return
+      const liberadas = tools.status === 'fulfilled' ? tools.value : []
       setRelatorios(perfil.status === 'fulfilled' && perfil.value)
-      setLicitacoes(tools.status === 'fulfilled' && tools.value.includes('licitacoes'))
+      setLicitacoes(liberadas.includes('licitacoes'))
+      setPropostaComercial(liberadas.includes('proposta-comercial'))
       setLoading(false)
     })
 
@@ -56,8 +65,8 @@ export function ToolAccessProvider({ children }: { children: ReactNode }) {
   }, [userId])
 
   const value = useMemo(
-    () => ({ relatorios, licitacoes, loading }),
-    [relatorios, licitacoes, loading],
+    () => ({ relatorios, licitacoes, propostaComercial, loading }),
+    [relatorios, licitacoes, propostaComercial, loading],
   )
 
   return <ToolAccessContext.Provider value={value}>{children}</ToolAccessContext.Provider>

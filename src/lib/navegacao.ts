@@ -11,7 +11,9 @@ import {
   Percent,
   Activity,
   FileText,
+  FileSignature,
   Gavel,
+  PenLine,
   ShieldAlert,
   Settings,
 } from 'lucide-react'
@@ -63,11 +65,11 @@ export const DESTINOS_PRINCIPAIS: DestinoNav[] = [
 ]
 
 /**
- * O que é do PRÓPRIO app: mexe nas conversas, nas tarefas e nas notas que vivem
- * aqui dentro. Sempre visíveis, para qualquer usuário.
- *
- * Estas não passam por gate porque não há o que liberar — quem entrou no Central
- * Whats já pode usar todas.
+ * O que roda DENTRO do app e não tem o que liberar: quem entrou no PRN Hub já
+ * pode usar todas. A maioria mexe nas conversas, nas tarefas e nas notas daqui;
+ * Assinaturas entra no grupo pelo mesmo critério — não é uma tela de WhatsApp,
+ * mas é interna, não depende de sistema nenhum e todo funcionário precisa dela
+ * para montar a própria assinatura de e-mail.
  */
 const FERRAMENTAS_DO_APP: DestinoNav[] = [
   { title: 'Tarefas', description: 'Kanban interno', icon: ListTodo, url: '/crm' },
@@ -78,6 +80,12 @@ const FERRAMENTAS_DO_APP: DestinoNav[] = [
     description: 'Envios futuros',
     icon: CalendarClock,
     url: '/scheduled-messages',
+  },
+  {
+    title: 'Assinaturas',
+    description: 'Assinatura de e-mail',
+    icon: PenLine,
+    url: '/ferramentas/assinaturas',
   },
 ]
 
@@ -118,6 +126,18 @@ const LICITACOES: DestinoNav = {
   url: '/ferramentas/licitacoes',
 }
 
+/**
+ * Roda dentro do app, mas fica em "Sistemas PRN" e não em "Do app": é liberada
+ * pessoa a pessoa (`public.tool_access`), como Licitações — o critério do grupo
+ * é o gate, não onde o código mora.
+ */
+const PROPOSTA_COMERCIAL: DestinoNav = {
+  title: 'Proposta Comercial',
+  description: 'PDF de 13 slides',
+  icon: FileSignature,
+  url: '/ferramentas/proposta-comercial',
+}
+
 type UsuarioDeNav = Pick<Profile, 'is_admin' | 'department'> & { is_super_admin?: boolean | null }
 
 /**
@@ -129,6 +149,7 @@ type UsuarioDeNav = Pick<Profile, 'is_admin' | 'department'> & { is_super_admin?
 export interface AcessoFerramentasExternas {
   relatorios: boolean
   licitacoes: boolean
+  propostaComercial: boolean
 }
 
 export interface GrupoDeFerramentas {
@@ -157,6 +178,7 @@ export function gruposDeFerramentas(
 ): GrupoDeFerramentas[] {
   const sistemas: DestinoNav[] = [
     ...(canAccessFinanceiroTools(user) ? [ANALISE_PRN, RATEIO] : []),
+    ...(externas?.propostaComercial ? [PROPOSTA_COMERCIAL] : []),
     ...(externas?.relatorios ? [RELATORIOS] : []),
     ...(externas?.licitacoes ? [LICITACOES] : []),
     ...(user?.is_super_admin ? [RELATORIO_APP] : []),

@@ -7,6 +7,17 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.211',
+    date: '2026-08-18 11:00',
+    title: 'Assinatura de e-mail e proposta comercial agora são do app',
+    details: [
+      '✍️ Nova ferramenta Assinaturas: monte a sua assinatura de e-mail, escolha entre cinco desenhos e as três empresas, e copie direto para o Outlook ou o Gmail. Tem também "Vários de uma vez", para gerar a equipe inteira de uma vez. Liberada para todo mundo — ninguém precisa mais pedir o arquivo por anexo',
+      '📄 Nova ferramenta Proposta Comercial: preencha cliente, volumetria e cases e saia com o PDF de 13 slides pronto para enviar. Liberada pessoa a pessoa na Gestão de Equipe',
+      '🗂️ As propostas geradas ficam num histórico compartilhado: clicar numa proposta antiga traz o formulário de volta preenchido, para montar a do próximo cliente sem digitar tudo outra vez',
+      '🖨️ No app instalado o PDF baixa sozinho, já com o nome certo. Pelo navegador abre a caixa de impressão para salvar como PDF',
+    ],
+  },
+  {
     version: '0.0.210',
     date: '2026-08-14 16:30',
     title: 'Agora é PRN Hub, e pegar contato deixa de mexer nas outras instâncias',
