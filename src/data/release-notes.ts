@@ -7,6 +7,14 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.213',
+    date: '2026-08-18 17:05',
+    title: 'A cara nova chega para todo mundo',
+    details: [
+      '🔁 Mesmas novidades da 0.0.212 — o app inteiro com fundo próprio e cartões de vidro. Quem tinha instalado uma versão de teste com o mesmo número 0.0.212 não recebia a atualização, porque o app compara os números e concluía que já estava em dia. Esta versão corrige a entrega e coloca todo mundo na mesma tela',
+    ],
+  },
+  {
     version: '0.0.212',
     date: '2026-08-18 16:32',
     title: 'O app inteiro ganhou cara nova',

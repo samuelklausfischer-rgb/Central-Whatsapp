@@ -3,7 +3,7 @@
   "description": "Central de atendimento WhatsApp com React, Supabase e Evolution API",
   "author": "PRN Hub",
   "private": true,
-  "version": "0.0.212",
+  "version": "0.0.213",
   "main": "central-whats-app/main.cjs",
   "type": "module",
   "scripts": {
