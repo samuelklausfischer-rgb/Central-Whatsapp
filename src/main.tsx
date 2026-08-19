@@ -31,6 +31,12 @@ import { getAppPlatform } from './lib/app-info'
  *    reload infinito e o app fica inutilizável. A flag é de sessão (por aba),
  *    não por deploy: um deploy legítimo mais tarde abre uma sessão nova e volta
  *    a ter direito à sua tentativa.
+ *
+ * Com o precache do PWA ativo (build web), o Workbox mantém os chunks da
+ * versão instalada no cache e os serve mesmo se o `/assets/` já tiver sido
+ * trocado no servidor — então este evento passa a quase nunca disparar na
+ * prática. A trava "uma tentativa por aba" acima segue valendo do mesmo jeito
+ * para os casos em que ainda dispara (ex.: SW desatualizando em background).
  */
 const CHAVE_RECARGA = 'preload-error-recarregado'
 
@@ -58,3 +64,40 @@ createRoot(document.getElementById('root')!).render(<App />)
 // executou, não se o app terminou de montar a tela. Ver `mobile-updater.ts`
 // para o porquê disto ser obrigatório (sem isto, rollback automático do OTA).
 notifyMobileUpdaterReady()
+
+/**
+ * Registro do service worker — SÓ na web.
+ *
+ * O import de `virtual:pwa-register` é dinâmico de propósito: o módulo só
+ * existe quando `VitePWA` está ativo (`PWA=1`, só no script `build`). Em
+ * `build:electron`/`build:mobile` (sem a flag) e em `npm run dev` o módulo não
+ * existe — o `import()` rejeita em tempo de execução e o `.catch()` engole o
+ * erro silenciosamente, sem quebrar o app. O guard de plataforma abaixo é a
+ * defesa principal (Electron e o WebView do Android, que roda em
+ * `https://localhost` — contexto seguro — nunca devem registrar um SW, que
+ * brigaria com o OTA do `@capgo/capacitor-updater`); o `.catch()` é só para
+ * não estourar em builds web sem a flag (dev, `build:dev`).
+ *
+ * Sobre o `@ts-expect-error` abaixo: os tipos de `virtual:pwa-register` vêm
+ * de `vite-plugin-pwa/client`, referenciado normalmente via triple-slash em
+ * `src/vite-env.d.ts` — arquivo que esta tarefa não autoriza editar. Uma
+ * `declare module 'virtual:pwa-register' {...}` direto aqui em `main.tsx` não
+ * funciona: como este arquivo já é um módulo ES (tem imports no topo), o
+ * compilador trata `declare module` como AUGMENTATION de um módulo existente
+ * (erro TS2664 "Invalid module name in augmentation"), não como declaração de
+ * um módulo novo — isso só é válido dentro de um arquivo `.d.ts`. O
+ * `@ts-expect-error` é o jeito de suprimir o TS2307 ("Cannot find module")
+ * sem inventar tipos incorretos; `registerSW` fica com tipo implícito, o que
+ * o `tsconfig` já permite (`noImplicitAny: false`).
+ */
+if (getAppPlatform() === 'web') {
+  // @ts-expect-error - módulo virtual só existe com VitePWA ativo (PWA=1); ver comentário acima
+  import('virtual:pwa-register')
+    .then(({ registerSW }) => {
+      registerSW({ immediate: true })
+    })
+    .catch(() => {
+      // Plugin de PWA desligado neste build (dev local ou build:dev) — sem
+      // service worker é o comportamento esperado.
+    })
+}

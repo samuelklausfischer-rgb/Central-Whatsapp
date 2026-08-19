@@ -21,8 +21,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useAuth } from '@/hooks/use-auth'
 import { useToolAccess } from '@/hooks/use-tool-access'
+import { useInstalarPwa } from '@/hooks/use-instalar-pwa'
 import { DESTINOS_PRINCIPAIS, gruposDeFerramentas, itensDeConta, ehAcao } from '@/lib/navegacao'
 import { cn } from '@/lib/utils'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
@@ -31,6 +33,12 @@ import { ReportarProblemaDialog } from '@/components/ReportarProblemaDialog'
 import { NotificationsDialog } from '@/components/NotificationsDialog'
 import { useUpdater } from '@/hooks/use-updater'
 import { BrandLogo } from '@/components/BrandLogo'
+
+// Mesma pílula visual do botão de atualização do Electron logo abaixo — só
+// muda o conteúdo. Extraído para não repetir a string gigante de classes nos
+// dois ramos (Chrome/Edge vs. iOS) do botão de instalar.
+const ESTILO_BOTAO_INSTALAR =
+  'flex items-center gap-1.5 rounded-full border border-border px-3 h-8 text-xs font-medium text-muted-foreground transition-all duration-200 hover:bg-accent hover:text-foreground'
 
 /**
  * O menu era um painel próprio, fechado por um listener de `mousedown` no
@@ -108,6 +116,7 @@ export function Header() {
   const { resolvedTheme, setTheme } = useTheme()
   const location = useLocation()
   const { isElectron, status, version, checkForUpdates, installUpdate } = useUpdater()
+  const { podeInstalar, jaInstalado, ehIOS, instalar } = useInstalarPwa()
   // Notificações saiu do menu de ferramentas e virou item de conta, então o
   // diálogo passa a ser aberto daqui.
   const [notifOpen, setNotifOpen] = useState(false)
@@ -184,6 +193,55 @@ export function Header() {
                 </span>
               </button>
             )}
+
+          {/*
+            `podeInstalar` só vira true quando o Chrome/Edge decidiu que o app
+            é instalável E o `beforeinstallprompt` já chegou — no Safari/iOS
+            isso nunca acontece (a Apple não expõe esse evento), então sem o
+            ramo `ehIOS` o botão simplesmente nunca apareceria lá e a pessoa
+            ficava sem saber que dava para instalar. `jaInstalado` cobre os
+            dois: o botão some assim que o app entra em modo standalone.
+          */}
+          {!jaInstalado && podeInstalar && (
+            <button
+              type="button"
+              onClick={instalar}
+              title="Instalar o app neste dispositivo"
+              className={ESTILO_BOTAO_INSTALAR}
+            >
+              <Download className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="hidden sm:inline">Instalar app</span>
+            </button>
+          )}
+
+          {!jaInstalado && ehIOS && (
+            // Não existe instalação programática no Safari — o único caminho
+            // é o usuário abrir o menu de Compartilhar dele mesmo. Um
+            // Popover (já usado em ConversationFilters) encaixa melhor que um
+            // toast aqui: a instrução tem duas etapas e o usuário pode querer
+            // reler enquanto segue o passo a passo, então fica melhor um
+            // painel que ele mesmo fecha do que algo que some sozinho.
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  title="Instalar o app neste iPhone/iPad"
+                  className={ESTILO_BOTAO_INSTALAR}
+                >
+                  <Download className="h-3.5 w-3.5 flex-shrink-0" />
+                  <span className="hidden sm:inline">Instalar app</span>
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-64 text-sm bg-popover border-border">
+                <p className="font-medium text-foreground mb-1">Instalar no iPhone/iPad</p>
+                <p className="text-muted-foreground">
+                  Toque em <strong className="text-foreground">Compartilhar</strong> na barra do
+                  Safari e depois em{' '}
+                  <strong className="text-foreground">Adicionar à Tela de Início</strong>.
+                </p>
+              </PopoverContent>
+            </Popover>
+          )}
 
           <Button
             variant="ghost"

@@ -1,11 +1,21 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LogOut, Sun, Moon, Sparkles, MessageSquarePlus, ChevronRight } from 'lucide-react'
+import {
+  LogOut,
+  Sun,
+  Moon,
+  Sparkles,
+  MessageSquarePlus,
+  ChevronRight,
+  Download,
+} from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useAuth } from '@/hooks/use-auth'
 import { useToolAccess } from '@/hooks/use-tool-access'
+import { useInstalarPwa } from '@/hooks/use-instalar-pwa'
+import { useToast } from '@/hooks/use-toast'
 import { gruposDeFerramentas, itensDeConta, ehAcao, type ItemDeFerramenta } from '@/lib/navegacao'
 import { NotificationsDialog } from '@/components/NotificationsDialog'
 import { ReleaseNotesDialog } from '@/components/ReleaseNotesDialog'
@@ -33,6 +43,8 @@ export function MobileMoreSheet({
   const navigate = useNavigate()
   const { user, signOut } = useAuth()
   const { resolvedTheme, setTheme } = useTheme()
+  const { podeInstalar, jaInstalado, ehIOS, instalar } = useInstalarPwa()
+  const { toast } = useToast()
   const [notifAberto, setNotifAberto] = useState(false)
   const [notasAberto, setNotasAberto] = useState(false)
   const [problemaAberto, setProblemaAberto] = useState(false)
@@ -123,6 +135,34 @@ export function MobileMoreSheet({
                 onClick={() => setTheme(escuro ? 'light' : 'dark')}
                 mantemAberta
               />
+              {/*
+                No Chrome/Android `podeInstalar` liga quando o navegador
+                oferece o `beforeinstallprompt`; no Safari/iOS esse evento não
+                existe, então `ehIOS` é o que garante que a linha ainda
+                apareça — só que apontando para o passo a passo manual em vez
+                de um instalador. `mantemAberta` porque nenhum dos dois casos
+                navega para outra tela: um dispara o prompt nativo do
+                navegador, o outro só mostra um toast.
+              */}
+              {!jaInstalado && (podeInstalar || ehIOS) && (
+                <Linha
+                  icone={Download}
+                  titulo="Instalar app"
+                  descricao={ehIOS ? 'Toque para ver como instalar' : 'Adicionar à tela inicial'}
+                  onClick={() => {
+                    if (podeInstalar) {
+                      instalar()
+                      return
+                    }
+                    toast({
+                      title: 'Instalar no iPhone/iPad',
+                      description:
+                        'Toque em Compartilhar na barra do Safari e depois em "Adicionar à Tela de Início".',
+                    })
+                  }}
+                  mantemAberta
+                />
+              )}
             </Secao>
 
             <Secao titulo="Sobre">

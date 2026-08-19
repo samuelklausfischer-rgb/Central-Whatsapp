@@ -17,9 +17,21 @@
     <title>PRN Hub</title>
     <meta name="description" content="Central de atendimento WhatsApp integrada ao Supabase e Evolution API" />
     <meta name="author" content="PRN Hub" />
-    <link rel="icon" href="/favicon.ico?v=3" sizes="any" />
-    <link rel="icon" type="image/png" href="/logo.png?v=3" />
-    <link rel="apple-touch-icon" href="/logo.png?v=3" />
+    <!-- theme-color por esquema. Os valores são o TOPO DO FUNDO de cada tema, não
+         o `--background` puro: desde o `PrnBackground`, o app não é branco liso no
+         claro, e sim o campo azul de `--bg-campo-de` (214 100% 97%). Usar #ffffff
+         aqui criaria uma emenda visível entre a barra do navegador e a tela.
+         No escuro, `--bg-campo-de` (222 47% 7%) fica junto do `--background`. -->
+    <meta name="theme-color" content="#f0f6ff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0a0a0b" media="(prefers-color-scheme: dark)" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="icon" href="/favicon.ico?v=5" sizes="any" />
+    <link rel="icon" type="image/png" href="/favicon-96.png?v=5" sizes="96x96" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=5" />
+    <!-- O link do manifesto NÃO é declarado aqui: o vite-plugin-pwa injeta o dele
+         durante o build web. Declarar também neste arquivo duplicava a tag no HTML
+         final. (Sem escrever a tag literal no comentário, para não confundir busca
+         por texto nem ferramenta que leia o HTML de forma ingênua.) -->
     <meta property="og:image" content="/og-image.png" />
   </head>
 
