@@ -214,6 +214,16 @@
    * trava a rolagem no Electron/Windows, onde a GPU já é compartilhada com o
    * resto do sistema. 12px ainda lê como vidro; a opacidade de preenchimento
    * alta (`--vidro-opacidade`) é o que compensa não borrar mais.
+   *
+   * ⚠️ O `position: relative` abaixo existe só porque o `::before` precisa de
+   * referência, e hoje TODO consumidor desta classe é o `GlassCard`, um elemento
+   * de fluxo normal. Cuidado ao aplicá-la em algo já posicionado: esta regra
+   * VENCE a utilitária do Tailwind (mesma especificidade, e o que está aqui sai
+   * depois no CSS emitido). Foi assim que a variante `.superficie-vidro-chat`
+   * derrubou o `fixed` do painel de info do contato e o fez sumir da tela —
+   * lá o `position` acabou removido por isso. Se precisar de vidro em elemento
+   * `fixed`/`absolute`, não use esta classe direto: tire o `position` dela e
+   * deixe o posicionamento com quem aplica.
    */
   .superficie-vidro {
     position: relative;
@@ -249,9 +259,21 @@
    * nesta superfície EXTERNA — nenhum elemento dentro do painel (linhas,
    * cartões, o Dialog de gerenciar etiquetas) pode ter seu próprio
    * `backdrop-filter`. Blur aninhado é o que trava a rolagem no Electron.
+   *
+   * NÃO DECLARE `position` AQUI. Já quebrou uma vez: a classe tinha
+   * `position: relative`, o `SheetContent` do painel de info é `fixed` (ver
+   * `sheetVariants` em `components/ui/sheet.tsx`), e as duas regras têm a MESMA
+   * especificidade — um seletor de classe cada. Quem vence é a ordem no CSS
+   * emitido, e o que está aqui sai DEPOIS das utilitárias do Tailwind. O painel
+   * perdia o `fixed`, caía no fim do `<body>` fora da área visível, e sobrava só
+   * o overlay escurecendo a tela: parecia que abria vazio.
+   *
+   * Utilitária de SUPERFÍCIE cuida de preenchimento, borda e sombra.
+   * Posicionamento é do layout de quem usa. Se o `::before` desta classe
+   * precisar de referência, quem aplica é que deve estar posicionado — o
+   * `SheetContent` já está, por ser `fixed`.
    */
   .superficie-vidro-chat {
-    position: relative;
     background-color: hsl(var(--chat-panel) / var(--chat-vidro-opacidade));
     -webkit-backdrop-filter: blur(12px) saturate(150%);
     backdrop-filter: blur(12px) saturate(150%);
