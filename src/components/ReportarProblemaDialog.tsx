@@ -5,10 +5,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { useAuth } from '@/hooks/use-auth'
 import { useToast } from '@/hooks/use-toast'
 import { enviarHubReport, type HubReportTipo } from '@/services/hub_reports'
 import { releaseNotes } from '@/data/release-notes'
+import { MeusHubReports } from '@/components/MeusHubReports'
 
 const tipos: { value: HubReportTipo; label: string; icon: React.ElementType; hint: string }[] = [
   { value: 'problema', label: 'Problema', icon: MessageSquareWarning, hint: 'Algo não está funcionando' },
@@ -36,6 +38,7 @@ export function ReportarProblemaDialog({
   const [titulo, setTitulo] = useState('')
   const [descricao, setDescricao] = useState('')
   const [enviando, setEnviando] = useState(false)
+  const [aba, setAba] = useState<'reportar' | 'meus'>('reportar')
 
   // O Header só renderiza autenticado, mas sem usuário não há como identificar
   // quem reportou — e a identificação é o ponto do recurso.
@@ -48,6 +51,7 @@ export function ReportarProblemaDialog({
     setTipo('problema')
     setTitulo('')
     setDescricao('')
+    setAba('reportar')
   }
 
   async function handleEnviar() {
@@ -114,7 +118,13 @@ export function ReportarProblemaDialog({
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <Tabs value={aba} onValueChange={(v) => setAba(v as 'reportar' | 'meus')}>
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="reportar">Reportar</TabsTrigger>
+            <TabsTrigger value="meus">Meus reportes</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="reportar" className="space-y-4">
           <div className="space-y-1.5">
             <Label>Tipo</Label>
             <div className="grid grid-cols-2 gap-2">
@@ -175,7 +185,12 @@ export function ReportarProblemaDialog({
           <p className="text-center text-[11px] text-muted-foreground">
             Enviado como <span className="text-foreground">{nome}</span> para a fila do PRN Hub
           </p>
-        </div>
+          </TabsContent>
+
+          <TabsContent value="meus">
+            <MeusHubReports ativo={aba === 'meus'} userId={user.id} userEmail={user.email} />
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
   )

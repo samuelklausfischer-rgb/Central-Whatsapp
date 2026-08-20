@@ -48,6 +48,7 @@ import {
   Search,
   Forward,
   Settings,
+  Captions,
 } from 'lucide-react'
 import {
   Dialog,
@@ -115,14 +116,14 @@ import { traduzErro } from '@/lib/friendly-error'
 import { getParticipantesDoGrupo, escolherConversaDoParticipante } from '@/services/groups'
 import { AudioMessage } from '@/components/chat/AudioMessage'
 import { MediaViewer, type ViewerMedia } from '@/components/chat/MediaViewer'
-import { downloadFile } from '@/lib/download'
+import { downloadFile, nomeParaDownload, tipoPeloNome } from '@/lib/download'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { getTriggers } from '@/services/message_triggers'
-import { getLabels } from '@/services/labels'
+import { getLabels, createLabel, updateLabel, deleteLabel } from '@/services/labels'
 import { getContactTags, toggleContactTag } from '@/services/contact_tags'
 import { useRealtime } from '@/hooks/use-realtime'
 import { useAuth } from '@/hooks/use-auth'
@@ -130,7 +131,7 @@ import { sendMessage, reactToMessage, deleteMessage, editMessage } from '@/servi
 import { updateContactByJid } from '@/services/contacts'
 import { createNote, getNotesByContact, deleteNote } from '@/services/notes'
 import { createTask, getTaskAssignees, type TaskAssignee } from '@/services/tasks'
-import type { Note, ConversationAssignment } from '@/lib/supabase/types'
+import type { Note, ConversationAssignment, Label as EtiquetaTipo } from '@/lib/supabase/types'
 import { ContactNoteIcon } from '@/components/ui/ContactNoteIcon'
 import { TeamAssignDialog } from '@/components/chat/TeamAssignDialog'
 import { markConversationRead, markConversationReadGlobal, getConversationViewers, getConversationAssignment, registrarProgressoDeLeitura, type ConversationViewer } from '@/services/conversation_states'
@@ -151,6 +152,7 @@ import {
   apagaveis,
 } from '@/lib/selection-actions'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Switch } from '@/components/ui/switch'
 import { isNativeAndroid } from '@/lib/app-info'
 import { registrarVoltar } from '@/lib/android-back'
 import { TOP_EMOJIS, getEmojiImageUrl } from '@/lib/emojis'
@@ -709,6 +711,331 @@ const getDateLabel = (value: string) => {
   return format(date, 'dd/MM/yyyy')
 }
 
+/**
+ * ITEM 6 — três blocos de apoio ao painel de info do contato.
+ *
+ * O diagnóstico do levantamento era que TUDO no painel usava o mesmo botão
+ * `h-12 outline`, navegação, alternador e dado somente-leitura misturados sem
+ * diferença visual. Estes três componentes separam por comportamento:
+ *  - `SecaoInfoPainel`: só título + espaço, para agrupar por categoria.
+ *  - `BotaoAcaoPainel`: sai do painel (busca, abre diálogo, compartilha) —
+ *    sem borda, com seta à direita indicando "isto leva a outro lugar".
+ *  - `BotaoExpansivelPainel`: abre/fecha conteúdo AQUI DENTRO — mantém uma
+ *    borda sutil de propósito, para marcar que é um módulo, não uma saída.
+ * Dado somente-leitura (mídia da conversa, atribuição, anotações) segue sem
+ * nenhum dos dois: é renderizado direto como linha/cartão, nunca como botão.
+ */
+function SecaoInfoPainel({ titulo, children }: { titulo: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <h4 className="px-1 text-[11px] font-semibold uppercase tracking-wider text-chat-muted/70">
+        {titulo}
+      </h4>
+      <div className="space-y-1">{children}</div>
+    </div>
+  )
+}
+
+function BotaoAcaoPainel({
+  icon: Icon,
+  label,
+  hint,
+  iconClassName,
+  onClick,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  label: string
+  hint?: string
+  iconClassName?: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full flex items-center gap-3 h-11 px-3 rounded-lg text-sm text-chat-text hover:bg-chat-hover/70 transition-colors"
+    >
+      <Icon className={cn('h-4 w-4 flex-shrink-0', iconClassName ?? 'text-chat-muted')} />
+      <span className="flex-1 text-left truncate">{label}</span>
+      {hint && <span className="text-xs text-chat-muted">{hint}</span>}
+      <ChevronRight className="h-3.5 w-3.5 text-chat-muted/50 flex-shrink-0" />
+    </button>
+  )
+}
+
+function BotaoExpansivelPainel({
+  icon: Icon,
+  label,
+  aberto,
+  contagem,
+  onClick,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  label: string
+  aberto: boolean
+  contagem?: number
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full flex items-center gap-3 h-11 px-3 rounded-lg text-sm text-chat-text bg-chat-hover/30 hover:bg-chat-hover/60 border border-chat-border/50 transition-colors"
+    >
+      <Icon className="h-4 w-4 flex-shrink-0 text-chat-muted" />
+      <span className="flex-1 text-left truncate">{label}</span>
+      {typeof contagem === 'number' && contagem > 0 && (
+        <span className="text-xs text-chat-muted">{contagem}</span>
+      )}
+      <ChevronDown
+        className={cn('h-4 w-4 flex-shrink-0 text-chat-muted transition-transform', aberto && 'rotate-180')}
+      />
+    </button>
+  )
+}
+
+/**
+ * ITEM 5 — criar, editar e apagar etiquetas sem sair do painel de info.
+ *
+ * `GerenciarEtiquetasDialog` reusa as 4 funções de `services/labels.ts` (não
+ * reimplementa CRUD); a única peça nova é este formulário compacto.
+ *
+ * Diálogo dentro de Sheet: `GroupActionsDialog`, algumas linhas abaixo neste
+ * mesmo arquivo, já abre um <Dialog> Radix de dentro deste <Sheet> e está em
+ * produção — é o precedente que este componente segue, em vez de inventar uma
+ * segunda view dentro do próprio Sheet. Cada <Dialog>/<AlertDialog> do Radix
+ * é seu próprio Portal com overlay e foco independentes; a única regra herdada
+ * que importa aqui é a do vidro: NENHUM blur aninhado. O <Sheet> por trás já
+ * é a superfície de vidro (`superficie-vidro-chat`); este Dialog e o
+ * AlertDialog de confirmação ficam sólidos (`bg-chat-panel`), igual o
+ * `GroupActionsDialog` já faz — dois blurs empilhados ao mesmo tempo é
+ * exatamente o cenário que a regra proíbe.
+ */
+function GerenciarEtiquetasDialog({
+  open,
+  onOpenChange,
+  labels,
+  userId,
+  onChanged,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  labels: EtiquetaTipo[]
+  userId?: string
+  onChanged: () => void
+}) {
+  const { toast } = useToast()
+  const [novoNome, setNovoNome] = useState('')
+  const [novaCor, setNovaCor] = useState('#3b82f6')
+  const [criando, setCriando] = useState(false)
+  const [editandoId, setEditandoId] = useState<string | null>(null)
+  const [nomeEdicao, setNomeEdicao] = useState('')
+  const [corEdicao, setCorEdicao] = useState('#3b82f6')
+  const [salvandoEdicao, setSalvandoEdicao] = useState(false)
+  const [etiquetaParaExcluir, setEtiquetaParaExcluir] = useState<EtiquetaTipo | null>(null)
+  const [excluindo, setExcluindo] = useState(false)
+
+  const iniciarEdicao = (label: EtiquetaTipo) => {
+    setEditandoId(label.id)
+    setNomeEdicao(label.name)
+    setCorEdicao(label.color)
+  }
+
+  const handleCriar = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!novoNome.trim() || !userId) return
+    setCriando(true)
+    try {
+      await createLabel({ name: novoNome.trim(), color: novaCor, user_id: userId })
+      setNovoNome('')
+      setNovaCor('#3b82f6')
+      onChanged()
+      toast({ title: 'Etiqueta criada' })
+    } catch {
+      toast({ title: 'Erro ao criar etiqueta', variant: 'destructive' })
+    } finally {
+      setCriando(false)
+    }
+  }
+
+  const handleSalvarEdicao = async (id: string) => {
+    if (!nomeEdicao.trim()) return
+    setSalvandoEdicao(true)
+    try {
+      await updateLabel(id, { name: nomeEdicao.trim(), color: corEdicao })
+      setEditandoId(null)
+      onChanged()
+      toast({ title: 'Etiqueta atualizada' })
+    } catch {
+      toast({ title: 'Erro ao salvar etiqueta', variant: 'destructive' })
+    } finally {
+      setSalvandoEdicao(false)
+    }
+  }
+
+  const handleExcluir = async () => {
+    if (!etiquetaParaExcluir) return
+    setExcluindo(true)
+    try {
+      await deleteLabel(etiquetaParaExcluir.id)
+      setEtiquetaParaExcluir(null)
+      onChanged()
+      toast({ title: 'Etiqueta excluída' })
+    } catch {
+      toast({ title: 'Erro ao excluir etiqueta', variant: 'destructive' })
+    } finally {
+      setExcluindo(false)
+    }
+  }
+
+  return (
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="sm:max-w-[420px] bg-chat-panel border-chat-border text-chat-text">
+          <DialogHeader>
+            <DialogTitle className="text-chat-text">Gerenciar etiquetas</DialogTitle>
+          </DialogHeader>
+
+          <form onSubmit={handleCriar} className="flex items-end gap-2">
+            <div className="flex-1 space-y-1.5">
+              <Label className="text-xs text-chat-muted">Nova etiqueta</Label>
+              <Input
+                value={novoNome}
+                onChange={(e) => setNovoNome(e.target.value)}
+                placeholder="Ex: Pausa, Cobrança..."
+                className="h-9 bg-chat-hover border-chat-border text-chat-text"
+              />
+            </div>
+            <div className="relative h-9 w-9 shrink-0 rounded-md border border-chat-border overflow-hidden">
+              <input
+                type="color"
+                value={novaCor}
+                onChange={(e) => setNovaCor(e.target.value)}
+                className="absolute -top-2 -left-2 h-14 w-14 cursor-pointer"
+                title="Cor da etiqueta"
+              />
+            </div>
+            <Button
+              type="submit"
+              size="icon"
+              className="h-9 w-9 shrink-0"
+              disabled={criando || !novoNome.trim()}
+            >
+              {criando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            </Button>
+          </form>
+
+          <div className="max-h-64 overflow-y-auto custom-scrollbar -mx-1 px-1 space-y-1.5">
+            {labels.length === 0 ? (
+              <p className="text-xs text-chat-muted text-center py-4">Nenhuma etiqueta cadastrada.</p>
+            ) : (
+              labels.map((label) =>
+                editandoId === label.id ? (
+                  <div
+                    key={label.id}
+                    className="flex items-center gap-2 p-2 rounded-md bg-chat-hover border border-chat-border"
+                  >
+                    <div className="relative h-8 w-8 shrink-0 rounded-md border border-chat-border overflow-hidden">
+                      <input
+                        type="color"
+                        value={corEdicao}
+                        onChange={(e) => setCorEdicao(e.target.value)}
+                        className="absolute -top-2 -left-2 h-12 w-12 cursor-pointer"
+                      />
+                    </div>
+                    <Input
+                      value={nomeEdicao}
+                      onChange={(e) => setNomeEdicao(e.target.value)}
+                      className="h-8 flex-1 bg-chat-panel border-chat-border text-chat-text"
+                      autoFocus
+                    />
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 text-emerald-500 hover:text-emerald-400"
+                      disabled={salvandoEdicao || !nomeEdicao.trim()}
+                      onClick={() => handleSalvarEdicao(label.id)}
+                    >
+                      {salvandoEdicao ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Check className="h-4 w-4" />
+                      )}
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 text-chat-muted"
+                      onClick={() => setEditandoId(null)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div
+                    key={label.id}
+                    className="flex items-center gap-2 p-2 rounded-md bg-chat-hover/60 hover:bg-chat-hover border border-chat-border/70 group"
+                  >
+                    <div className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: label.color }} />
+                    <span className="flex-1 text-sm text-chat-text truncate">{label.name}</span>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 text-chat-muted opacity-0 group-hover:opacity-100 hover:text-chat-text transition-opacity"
+                      onClick={() => iniciarEdicao(label)}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 text-chat-muted opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity"
+                      onClick={() => setEtiquetaParaExcluir(label)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ),
+              )
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Excluir é destrutivo além deste contato: a etiqueta some de TODOS os
+          contatos que a usam, não só do que está com o painel aberto agora.
+          Confirmação explícita, mesmo padrão do "Sair do grupo" no
+          GroupActionsDialog logo abaixo. */}
+      <AlertDialog open={!!etiquetaParaExcluir} onOpenChange={(v) => !v && setEtiquetaParaExcluir(null)}>
+        <AlertDialogContent className="bg-chat-panel border-chat-border">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-chat-text">
+              Excluir "{etiquetaParaExcluir?.name}"?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-chat-muted">
+              Ela vai sair de todos os contatos que a usam hoje, não só desta conversa. Esta ação não
+              pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={excluindo}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault()
+                handleExcluir()
+              }}
+              disabled={excluindo}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {excluindo ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Excluir etiqueta'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  )
+}
+
 export function ChatWindow({ device, contact, conversation, assignment: assignmentProp, contacts, onBack, sheetOpen, onSheetOpenChange, onStartConversation, onOpenConversationByJid, onOptimisticSend, onOptimisticConfirm, onOptimisticFail, estadoConversa = 'pronto', onRetryMessages, conversas = [], onForwardMessage }: any) {
   const { user } = useAuth()
   const { toast } = useToast()
@@ -749,6 +1076,12 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const [labels, setLabels] = useState<any[]>([])
   const [contactTags, setContactTags] = useState<any[]>([])
   const [isLabelsOpen, setIsLabelsOpen] = useState(false)
+  // ITEM 5: sub-popup de CRUD de etiquetas, aberto de dentro do painel de
+  // info. Não é rascunho por conversa (etiquetas são globais), mas ainda
+  // assim entra no reset ao trocar de contato — mesmo motivo dos outros
+  // diálogos ali: o Sheet não desmonta, então um diálogo aberto "vaza" para
+  // a conversa seguinte se ninguém fechar.
+  const [isManageLabelsOpen, setIsManageLabelsOpen] = useState(false)
 
   const [isScheduleOpen, setIsScheduleOpen] = useState(false)
   const [scheduleDate, setScheduleDate] = useState('')
@@ -777,10 +1110,33 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const [recordingTime, setRecordingTime] = useState(0)
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
+  // ITEM 11: verdadeiro só enquanto a Groq responde a transcrição do áudio
+  // gravado. Alimenta o spinner do botão "enviar como texto" — sem isso,
+  // alguns segundos de espera pareceriam o botão travado.
+  const [isTranscribing, setIsTranscribing] = useState(false)
   const audioUrlRef = useRef<string | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  /**
+   * ITEM 13: carrega a intenção "meu clique foi para ENVIAR" através da
+   * fronteira assíncrona do MediaRecorder.
+   *
+   * O blob final só existe dentro do callback `onstop`, disparado pelo
+   * navegador depois que `.stop()` é chamado — não é síncrono. Uma ref (não
+   * state) porque o próprio `onstop` é quem lê e zera essa flag, e isso
+   * acontece fora do ciclo de render do React.
+   */
+  const enviarAoPararRef = useRef(false)
+  // Par da ref acima, para o caminho oposto: parar JOGANDO FORA o que gravou.
+  // Sem ela não existia cancelar durante a gravação — só dava para parar, e
+  // parar passou a enviar. Ver `cancelarGravacao`.
+  const descartarAoPararRef = useRef(false)
+  // ITEM 11: terceiro caminho — parar E TRANSCREVER, em vez de parar e
+  // enviar como áudio. Mesmo motivo de ser ref (não state) que as duas
+  // acima: só o `onstop` do MediaRecorder tem o blob final, e ele roda fora
+  // do ciclo do React.
+  const transcreverAoPararRef = useRef(false)
 
   const [isAiLoading, setIsAiLoading] = useState(false)
   const [aiModalOpen, setAiModalOpen] = useState(false)
@@ -901,6 +1257,21 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   // "Todos" fica à parte porque não vira número no texto, e sim a flag
   // `mentionsEveryOne` no envio.
   const [mencionarTodos, setMencionarTodos] = useState(false)
+  /**
+   * ITEM 7: toggle "enviar sem assinatura", ao lado da barra de enviar.
+   *
+   * Nasce DESLIGADO — o padrão de envio continua idêntico ao de hoje (assina
+   * sempre que houver assinatura salva). Ligar afeta só o próximo envio de
+   * texto desta conversa.
+   *
+   * Escopo por CONVERSA, não persistido: como o ChatWindow não desmonta ao
+   * trocar de contato (é renderizado sem `key` no ChatHub), esta flag é
+   * zerada à força no reset de conversa mais abaixo (mesmo bloco que fecha
+   * diálogos e limpa `mediaView`) — sem isso ela "vazaria" da conversa em
+   * que foi ligada para a próxima, e alguém mandaria sem assinatura sem ter
+   * pedido.
+   */
+  const [semAssinatura, setSemAssinatura] = useState(false)
 
   // Abre um item da galeria no visualizador que já existe. Vídeo e imagem são os
   // dois tipos que a aba Fotos produz.
@@ -1159,6 +1530,12 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       setAudioBlob(null)
       setAudioUrl(null)
     }
+    // ITEM 11: uma transcrição em voo pertence à conversa em que a gravação
+    // começou (ver a trava por `convKeyRef` em `transcreverEinserir`) — o
+    // spinner do botão, porém, é estado só de UI, não rascunho por conversa.
+    // Sem este reset ele poderia continuar girando na conversa nova depois
+    // de uma troca no meio da espera pela Groq.
+    setIsTranscribing(false)
 
     // Nada da conversa anterior pode ficar aberto sobre a nova. Os diálogos de
     // anotação, tarefa e apelido são os mais graves: eles gravam no banco usando
@@ -1171,10 +1548,16 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     setIsNicknameOpen(false)
     setIsScheduleOpen(false)
     setIsLabelsOpen(false)
+    setIsManageLabelsOpen(false)
     setTeamAssignOpen(false)
     setAiModalOpen(false)
     setIsPlusOpen(false)
     setIsEmojiOpen(false)
+    // ITEM 7: o toggle "sem assinatura" NÃO é rascunho — não faz parte de
+    // `ConversationDraft` e não é salvo/restaurado acima de propósito. Volta
+    // sempre ao padrão (assinado) ao entrar em qualquer conversa, a mesma
+    // decisão de escopo do comentário na declaração do estado.
+    setSemAssinatura(false)
 
     // Depois de restaurar, o compositor tem altura nova: reancorar no fundo.
     if (restaurado) {
@@ -1280,20 +1663,24 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     })
   }, [modoSelecao, limparSelecao])
 
+  // Compartilhado entre o mount, o realtime e o popup de gerenciar etiquetas
+  // (ITEM 5): depois de criar/editar/apagar ali, chama isto direto em vez de
+  // esperar o round-trip do realtime — a lista reflete na hora mesmo se o
+  // websocket atrasar.
+  const refreshLabels = useCallback(() => getLabels().then(setLabels).catch(() => {}), [])
+
   useEffect(() => {
     getTriggers()
       .then(setTriggers)
       .catch(() => {})
-    getLabels()
-      .then(setLabels)
-      .catch(() => {})
+    refreshLabels()
     // Fixo por sessão (não é por conversa): quem pode receber tarefa não muda
     // ao trocar de contato, então uma busca só no mount evita repetir a RPC a
     // cada abertura do modal.
     getTaskAssignees()
       .then(setTaskAssignees)
       .catch(() => {})
-  }, [])
+  }, [refreshLabels])
 
   useEffect(() => {
     return () => {
@@ -1322,9 +1709,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       .catch(() => {})
   })
   useRealtime('labels', () => {
-    getLabels()
-      .then(setLabels)
-      .catch(() => {})
+    refreshLabels()
   })
   useRealtime('contact_tags', () => {
     loadContactTags()
@@ -1750,9 +2135,12 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       const content = removerAssinaturaDuplicada(msgText.trim(), signature)
       // A mensagem otimista precisa nascer com EXATAMENTE o conteúdo que o
       // servidor grava: a RPC send_whatsapp_message prepende a assinatura como
-      // `assinatura + "\n\n" + texto` (devices.signature, senão profiles.signature).
-      // Replicar isso evita o balão sem assinatura que depois era substituído.
-      const displayContent = signature ? `${signature}\n\n${content}` : content
+      // `assinatura + "\n\n" + texto` (devices.signature, senão profiles.signature)
+      // — a MENOS que o toggle "sem assinatura" (item 7) esteja ligado para
+      // este envio, caso em que a RPC pula o prepend e o balão precisa
+      // nascer sem ele também. Replicar isso evita o balão que depois era
+      // substituído por um diferente.
+      const displayContent = signature && !semAssinatura ? `${signature}\n\n${content}` : content
       const replyId = replyingTo?.id
       const replySnapshot = replyingTo
         ? { content: replyingTo.content, sender_name: replyingTo.sender_name, id: replyingTo.id }
@@ -1791,6 +2179,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           reply_to_id: replyId,
           mentioned: mencionados,
           mentionEveryone: marcarTodos,
+          noSignature: semAssinatura,
         })
         onOptimisticConfirm?.(tempId, res?.message)
       } catch (err) {
@@ -1875,6 +2264,9 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           })
         }
       } else {
+        // Texto puro que caiu neste ramo (edição em curso, por exemplo) —
+        // mesmo campo `noSignature` do caminho otimista acima, para que o
+        // toggle valha qualquer que seja a rota de envio de texto.
         await sendMessage({
           content,
           device_id: device.id,
@@ -1884,6 +2276,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           reply_to_id: replyingTo?.id,
           mentioned: mencionados,
           mentionEveryone: marcarTodos,
+          noSignature: semAssinatura,
         })
       }
       limparCompositorAposEnvio(chaveEnvio, () => {
@@ -1917,12 +2310,42 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       }
 
       recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop())
+
+        // Cancelamento: a pessoa desistiu no meio. Sai ANTES de criar o blob
+        // e a object URL — assim não há preview para descartar depois nem URL
+        // vazando na memória.
+        if (descartarAoPararRef.current) {
+          descartarAoPararRef.current = false
+          chunksRef.current = []
+          setAudioBlob(null)
+          setAudioUrl(null)
+          setRecordingTime(0)
+          return
+        }
+
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
         setAudioBlob(blob)
         const url = URL.createObjectURL(blob)
         audioUrlRef.current = url
         setAudioUrl(url)
-        stream.getTracks().forEach((t) => t.stop())
+
+        // ITEM 13: se o clique que parou a gravação também pediu envio, o
+        // envio só pode partir DAQUI — é o único lugar em que o `blob` de
+        // verdade existe. Chamar a função de enviar logo depois de
+        // `stopRecording()` (fora deste callback) enviaria sempre vazio,
+        // porque o navegador ainda não tinha entregue os dados gravados.
+        if (enviarAoPararRef.current) {
+          enviarAoPararRef.current = false
+          void enviarAudioGravado(blob)
+        } else if (transcreverAoPararRef.current) {
+          // ITEM 11: mesmo caso do `if` acima — só aqui o blob de verdade
+          // existe. O áudio JÁ ficou no preview (setAudioBlob/setAudioUrl
+          // logo acima) antes de tentar transcrever: se a Groq falhar, o
+          // áudio gravado continua ali, pronto para enviar do jeito normal.
+          transcreverAoPararRef.current = false
+          void transcreverEinserir(blob)
+        }
       }
 
       recorder.start()
@@ -1958,9 +2381,28 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     }
   }
 
-  const stopRecording = () => {
+  /**
+   * ITEM 13: `enviarAoParar` é o que faz o botão principal da gravação
+   * parar E enviar num clique só, em vez de exigir "parar" e depois
+   * "enviar" separados (o hábito de quem usa WhatsApp é clicar de novo no
+   * mesmo botão para enviar — antes disso, o segundo clique caía no botão
+   * de GRAVAR de novo, e resetava o áudio que acabara de ser parado).
+   *
+   * Só marca a flag e chama `.stop()`; quem de fato envia é o `onstop` do
+   * MediaRecorder (acima, em `startRecording`), porque só ali o blob final
+   * existe.
+   */
+  const stopRecording = (enviarAoParar = false) => {
+    enviarAoPararRef.current = enviarAoParar
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop()
+    } else {
+      // Recorder não está gravando/pausado (encerrou sozinho antes, ou nunca
+      // chegou a iniciar) — não haverá `onstop` para consumir a flag. Se já
+      // existe um áudio pronto de uma parada anterior, ainda assim honra o
+      // pedido de envio; senão não há nada a fazer.
+      enviarAoPararRef.current = false
+      if (enviarAoParar && audioBlob) void enviarAudioGravado(audioBlob)
     }
     setIsRecording(false)
     setIsPaused(false)
@@ -1968,6 +2410,32 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       clearInterval(timerRef.current)
       timerRef.current = null
     }
+  }
+
+  /**
+   * Desistir da gravação em andamento, sem enviar e sem deixar preview.
+   *
+   * Existe porque o botão principal da gravação passou a ENVIAR (item 13):
+   * sem um cancelar explícito, quem começasse a gravar por engano não teria
+   * saída nenhuma — a lixeira do preview só aparece depois de parar, e parar
+   * virou sinônimo de mandar. É o mesmo par que o WhatsApp oferece enquanto
+   * se grava: descartar de um lado, enviar do outro.
+   */
+  const cancelarGravacao = () => {
+    descartarAoPararRef.current = true
+    enviarAoPararRef.current = false
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+    } else {
+      descartarAoPararRef.current = false
+    }
+    setIsRecording(false)
+    setIsPaused(false)
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+    discardAudio()
   }
 
   const discardAudio = () => {
@@ -1978,6 +2446,157 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     }
     setAudioUrl(null)
     setRecordingTime(0)
+  }
+
+  /**
+   * ITEM 11: para a gravação e manda transcrever, em vez de enviar como
+   * áudio. Espelha `stopRecording`/`cancelarGravacao` de propósito — mesmo
+   * padrão de flag + `.stop()`, só troca qual flag é lida no `onstop`. Uma
+   * alternativa EXPLÍCITA ao "Enviar áudio" do item 13, nunca um substituto:
+   * quem clica aqui está pedindo texto, não áudio.
+   */
+  const pararETranscrever = () => {
+    transcreverAoPararRef.current = true
+    enviarAoPararRef.current = false
+    descartarAoPararRef.current = false
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+    } else {
+      // Recorder já tinha parado sozinho antes (mesmo caso tratado em
+      // `stopRecording`): sem `onstop` pela frente, ainda assim honra o
+      // pedido se já existe um áudio pronto de uma parada anterior.
+      transcreverAoPararRef.current = false
+      if (audioBlob) void transcreverEinserir(audioBlob)
+    }
+    setIsRecording(false)
+    setIsPaused(false)
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+  }
+
+  /**
+   * ITEM 13: envia o áudio recém-gravado sem passar pelo `handleSend`
+   * genérico. Recebe o `blob` por parâmetro (não lê `audioBlob` do state)
+   * porque é chamada de dentro do `onstop` do MediaRecorder, no mesmo tick
+   * em que o blob acaba de ser criado — o `setAudioBlob` daquele callback
+   * ainda não foi processado pelo React nesse instante.
+   *
+   * Duplica o ramo de áudio de `handleSend` (upload -> sendMessage -> limpa
+   * o compositor) de propósito: `handleSend` depende do evento de submit do
+   * form e de checagens (edição, anexos) que não fazem sentido aqui, e essa
+   * função também precisa ser chamada fora de qualquer submit.
+   */
+  const enviarAudioGravado = async (blob: Blob) => {
+    if (!device || !user || !contact) return
+    const chaveEnvio = convKey
+    const content = msgText.trim() ? msgText.trim() : '[Áudio]'
+    setIsSending(true)
+    try {
+      const mediaUrl = await uploadAudio(blob, user.id)
+      await sendMessage({
+        content,
+        device_id: device.id,
+        sender_id: user.id,
+        is_read: true,
+        remote_sender: contact,
+        mediaUrl,
+        mediaType: 'audio',
+        reply_to_id: replyingTo?.id,
+      })
+      // Áudio não tem legenda no endpoint da Evolution: o texto digitado não
+      // viaja com ele, então não existe menção para levar — só limpar.
+      limparCompositorAposEnvio(chaveEnvio, () => {
+        discardAudio()
+        setMencaoAtiva(null)
+        setMencionarTodos(false)
+      })
+    } catch (err) {
+      // Não descarta o áudio no erro: a pessoa precisa poder tentar de novo
+      // (ou usar o botão de enviar manual, que ainda funciona) sem regravar.
+      console.error('[envio] áudio falhou', err)
+      toast({
+        title: traduzErro(err, 'Erro ao enviar áudio'),
+        variant: 'destructive',
+      })
+    } finally {
+      setIsSending(false)
+    }
+  }
+
+  /**
+   * ITEM 11: transcreve o áudio recém-gravado e devolve o texto ao
+   * compositor, para revisar antes de enviar — como se a pessoa tivesse
+   * digitado. Recebe o `blob` por parâmetro pelo mesmo motivo de
+   * `enviarAudioGravado`: só existe dentro do `onstop` do MediaRecorder.
+   *
+   * `chaveOrigem` trava o resultado na conversa em que a gravação começou.
+   * `ChatWindow` NÃO desmonta ao trocar de conversa (o mesmo componente seguе
+   * vivo para a conversa nova) — sem essa trava, uma transcrição que demorou
+   * a voltar cairia no campo de texto de QUALQUER conversa que estivesse
+   * aberta no momento em que a Groq respondesse, nunca a de origem.
+   */
+  const transcreverEinserir = async (blob: Blob) => {
+    const chaveOrigem = convKey
+    setIsTranscribing(true)
+    try {
+      const form = new FormData()
+      form.append('file', blob, 'audio.webm')
+
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || ''
+      const session = await supabase.auth.getSession()
+      const token = session.data.session?.access_token || ''
+
+      // Sem `Content-Type` manual: o navegador define `multipart/form-data`
+      // com o boundary certo sozinho a partir do `FormData` — declarar à mão
+      // aqui quebraria o parse do lado da edge function.
+      const res = await fetch(`${supabaseUrl}/functions/v1/audio-transcribe`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      })
+
+      if (!res.ok) {
+        const corpoErro = await res.text().catch(() => '')
+        console.error('[audio-transcribe] falhou', { status: res.status, body: corpoErro })
+        toast({
+          title: 'Não foi possível transcrever. O áudio continua pronto para enviar.',
+          variant: 'destructive',
+        })
+        return
+      }
+
+      const data = await res.json().catch(() => null)
+      const texto = typeof data?.text === 'string' ? data.text.trim() : ''
+      if (!texto) {
+        toast({
+          title: 'A transcrição voltou vazia. O áudio continua pronto para enviar.',
+          variant: 'destructive',
+        })
+        return
+      }
+
+      if (convKeyRef.current !== chaveOrigem) {
+        // A conversa já mudou. O áudio gravado segue preservado no rascunho
+        // da conversa de origem (mesmo mecanismo de sempre); só não dá para
+        // aplicar o texto aqui sem arriscar escrever na conversa errada.
+        toast({ title: 'Transcrição pronta, mas a conversa foi trocada. Volte a ela para revisar o texto.' })
+        return
+      }
+
+      inserirTextoNoCursor(texto)
+      discardAudio()
+      toast({ title: 'Transcrição pronta. Revise antes de enviar.' })
+    } catch (err) {
+      console.error('[audio-transcribe] erro', err)
+      toast({
+        title: 'Não foi possível transcrever agora. O áudio continua pronto para enviar.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsTranscribing(false)
+    }
   }
 
   const formatTime = (seconds: number) => {
@@ -2070,6 +2689,63 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   }
 
   /**
+   * ITEM 2: arrastar arquivo para a conversa aberta e anexar, como no
+   * WhatsApp Web.
+   *
+   * `dragCounterRef`, não state: `dragenter`/`dragleave` disparam para CADA
+   * elemento sobrevoado, inclusive filhos (balões de mensagem, cabeçalho,
+   * compositor). Sem contar quantos "enter" ainda não tiveram o "leave"
+   * correspondente, sair de um filho por cima de outro filho dispara um
+   * `dragleave` do pai antes do `dragenter` do próximo — e o realce pisca a
+   * cada balão sobrevoado. Só volta a `false` quando o contador some a
+   * zero, ou seja, quando o cursor sai de toda a área da conversa (ou o
+   * arquivo é solto).
+   */
+  const dragCounterRef = useRef(0)
+  const [isDraggingFile, setIsDraggingFile] = useState(false)
+
+  // `dataTransfer.types` inclui `'Files'` quando o que está sendo arrastado
+  // vem do sistema de arquivos. Arrastar um texto selecionado ou um link
+  // solto na página tem outros tipos (`text/plain`, `text/uri-list`) e NÃO
+  // deve acender o realce nem virar anexo — só arquivo.
+  const arrastandoArquivo = (e: React.DragEvent) =>
+    Array.from(e.dataTransfer.types || []).includes('Files')
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault()
+    if (!arrastandoArquivo(e)) return
+    dragCounterRef.current += 1
+    setIsDraggingFile(true)
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    // `preventDefault` aqui é o que PERMITE soltar. O comportamento padrão do
+    // navegador para um arquivo arrastado é abri-lo (e navegar para fora do
+    // app) — sem isto o `onDrop` nunca dispara e a pessoa perde a conversa.
+    e.preventDefault()
+    if (arrastandoArquivo(e)) e.dataTransfer.dropEffect = 'copy'
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    if (!arrastandoArquivo(e)) return
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1)
+    if (dragCounterRef.current === 0) setIsDraggingFile(false)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    dragCounterRef.current = 0
+    setIsDraggingFile(false)
+    // Só arquivos (`dataTransfer.files`) — nunca o texto/link solto, que fica
+    // em `dataTransfer.getData('text/...')` e nem é lido aqui.
+    const files = Array.from(e.dataTransfer.files || [])
+    // `addFiles` já valida quantidade (10) e tamanho (200MB) e empilha em
+    // `attachments` — o mesmo caminho do clipe. Não duplica a validação.
+    if (files.length > 0) addFiles(files)
+  }
+
+  /**
    * Escreve no campo de mensagem na posição do cursor, como o navegador faria
    * se a colagem não tivesse sido interceptada. Substitui o trecho selecionado,
    * se houver, e deixa o cursor no fim do que foi colado.
@@ -2145,14 +2821,46 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         }),
       })
 
-      if (!res.ok) throw new Error('AI assist failed')
+      if (!res.ok) {
+        // ITEM 14: antes disto o `catch` genérico mostrava sempre o mesmo
+        // toast, sem `console.error` e sem ler o corpo da resposta — e a
+        // edge function `ai-message-assist` tem 3 causas de falha bem
+        // diferentes (GROQ_KEY ausente, prompt de IA inválido/inativo, Groq
+        // fora do ar). Sem logar status + corpo aqui, não tinha como saber
+        // qual das três estava acontecendo; foi exatamente esse silêncio
+        // que impediu diagnosticar o bug relatado. Lê o corpo como texto
+        // (não sabemos se sempre vem JSON válido) só para registrar.
+        const corpoErro = await res.text().catch(() => '')
+        console.error('[ai-message-assist] falhou', { status: res.status, body: corpoErro })
+
+        let mensagem = 'Não foi possível melhorar o texto agora. Tente novamente.'
+        if (res.status === 500) {
+          // GROQ_KEY (ou credenciais do Supabase) ausente na edge function —
+          // não é algo que a pessoa usando o chat possa resolver sozinha.
+          mensagem = 'Assistente de IA não está configurado. Avise o time técnico.'
+        } else if (res.status === 400) {
+          // Ação sem prompt cadastrado/ativo em ai_assistant_prompts.
+          mensagem = 'Essa ação de IA não está disponível no momento.'
+        } else if (res.status === 502) {
+          // Falha ao buscar o prompt no Supabase OU falha da própria Groq
+          // (ex.: modelo descontinuado) — nos dois casos quem está fora do
+          // ar é o serviço, não o pedido da pessoa.
+          mensagem = 'O serviço de IA está indisponível agora. Tente novamente em instantes.'
+        }
+
+        toast({ title: mensagem, variant: 'destructive' })
+        return
+      }
       const aiResult = await res.json()
 
       setAiResult(aiResult.result)
       setAiModalOpen(true)
     } catch (err) {
+      // Chegou aqui sem resposta HTTP: falha de rede/conexão ou corpo que não
+      // é o JSON esperado. Também logado pelo mesmo motivo do bloco acima.
+      console.error('[ai-message-assist] erro de rede', err)
       toast({
-        title: 'NÃ£o foi possÃ­vel melhorar o texto agora. Tente novamente.',
+        title: 'Não foi possível falar com o assistente de IA. Verifique sua conexão.',
         variant: 'destructive',
       })
     } finally {
@@ -2326,7 +3034,10 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     // fossem pop-ups, e no Electron a janela de "salvar como" abriria por cima
     // da anterior.
     for (const midia of midiasDaSelecao) {
-      await downloadFile(midia.url, midia.name)
+      // A seleção carrega só `{ url, name }`, sem mime. O tipo é deduzido do
+      // próprio nome — que é exatamente onde ele está nos casos genéricos do
+      // webhook (`audio_message.ogg`), os únicos que precisam de nome novo.
+      await downloadFile(midia.url, nomeParaDownload(midia.name, tipoPeloNome(midia.name)))
     }
     limparSelecao()
   }, [midiasDaSelecao, toast, limparSelecao])
@@ -2494,7 +3205,26 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   }
 
   return (
-    <div className="flex flex-col h-full bg-transparent flex-1 relative min-w-0">
+    <div
+      className="flex flex-col h-full bg-transparent flex-1 relative min-w-0"
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {/* ITEM 2: realce de "solte aqui" enquanto se arrasta um arquivo sobre a
+          conversa. `pointer-events-none` para o overlay nunca ser o alvo dos
+          eventos de drag — sem isto, entrar nele contaria como sair da área
+          de baixo (e vice-versa) e o contador de dragenter/dragleave em
+          `dragCounterRef` erraria a conta. Fica por cima de tudo (`z-50`),
+          inclusive do cabeçalho e do compositor, porque soltar em qualquer
+          ponto da conversa aberta deve anexar. */}
+      {isDraggingFile && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-chat-conversation/90 backdrop-blur-sm border-4 border-dashed border-primary pointer-events-none">
+          <Paperclip className="h-10 w-10 text-primary" />
+          <p className="text-base font-semibold text-chat-text">Solte para anexar à conversa</p>
+        </div>
+      )}
       {/* No modo de seleção a barra de ações OCUPA O LUGAR do cabeçalho, como no
           WhatsApp. Empilhar as duas empurraria a conversa para baixo e a lista
           saltaria a cada entrada e saída do modo. */}
@@ -2695,11 +3425,21 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                 <MoreVertical className="h-5 w-5" />
               </Button>
             </SheetTrigger>
-            <SheetContent className="bg-chat-panel border-chat-border flex flex-col h-full p-0">
+            {/*
+              ITEM 6 — reforma de vidro do painel (na paleta chat-*, não na
+              --vidro-* do resto do app; ver o comentário de
+              `.superficie-vidro-chat` em main.css) + reagrupamento por
+              categoria. O painel antigo empilhava 9 blocos soltos, todos com
+              o MESMO botão `h-12 outline`, sem diferenciar navegação (sai
+              daqui), alternador (abre aqui dentro) e dado só-leitura. Agora:
+              `BotaoAcaoPainel` / `BotaoExpansivelPainel` / linhas soltas para
+              cada caso — ver os três componentes logo acima de `ChatWindow`.
+            */}
+            <SheetContent className="superficie-vidro-chat flex flex-col h-full p-0">
               <SheetHeader className="px-6 pt-6 pb-0 flex-shrink-0">
                 <SheetTitle className="text-chat-text">Info do {isGroupContact ? 'Grupo' : 'Contato'}</SheetTitle>
               </SheetHeader>
-              <div className="px-6 py-6 flex flex-col items-center border-b border-chat-border flex-shrink-0">
+              <div className="px-6 py-6 flex flex-col items-center border-b border-chat-border/60 flex-shrink-0">
                 <SmartAvatar
                   jid={contact}
                   name={displayName}
@@ -2738,129 +3478,61 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
               </div>
 
               <ScrollArea className="flex-1 min-h-0">
-                <div className="px-6 py-5 space-y-3">
+                <div className="px-6 py-5 space-y-6">
                   {/*
                     Buscar FECHA o painel antes de abrir a barra: a busca e os
                     destaques ficam na conversa, atrás deste painel. Sem fechar, o
                     clique pareceria não ter feito nada.
                   */}
-                  <Button
-                    className="w-full justify-start h-12 bg-chat-hover hover:bg-chat-hover border-chat-border text-chat-text transition-all"
-                    variant="outline"
-                    onClick={() => {
-                      onSheetOpenChange?.(false)
-                      openFind()
-                    }}
-                  >
-                    <Search className="h-4 w-4 mr-3 text-chat-muted" />
-                    Buscar na conversa
-                    <span className="ml-auto text-xs text-chat-muted">Ctrl+F</span>
-                  </Button>
+                  <SecaoInfoPainel titulo="Comunicação">
+                    <BotaoAcaoPainel
+                      icon={Search}
+                      label="Buscar na conversa"
+                      hint="Ctrl+F"
+                      onClick={() => {
+                        onSheetOpenChange?.(false)
+                        openFind()
+                      }}
+                    />
 
-                  <Button
-                    className="w-full justify-start h-12 bg-chat-hover hover:bg-chat-hover border-chat-border text-chat-text transition-all"
-                    variant="outline"
-                    onClick={() => setIsLabelsOpen((v) => !v)}
-                  >
-                    <Tags className="h-4 w-4 mr-3 text-chat-muted" />
-                    Etiquetas
-                    {etiquetasDoContato.length > 0 && (
-                      <span className="ml-2 text-xs text-chat-muted">
-                        {etiquetasDoContato.length}
-                      </span>
+                    {/* Galeria: mesma posição do WhatsApp — primeiro item dos
+                        dados do contato. Só monta quando aberta, para não
+                        disparar as três consultas toda vez que alguém abre o
+                        painel. */}
+                    <BotaoExpansivelPainel
+                      icon={ImageIcon}
+                      label="Mídia, links e docs"
+                      aberto={galeriaAberta}
+                      onClick={() => setGaleriaAberta((v) => !v)}
+                    />
+                    {galeriaAberta && device?.id && contact && (
+                      <ConversationGallery
+                        deviceId={device.id}
+                        remoteSender={contact}
+                        onAbrirMidia={abrirMidiaDaGaleria}
+                      />
                     )}
-                    <ChevronDown
-                      className={cn(
-                        'h-4 w-4 ml-auto text-chat-muted transition-transform',
-                        isLabelsOpen && 'rotate-180',
-                      )}
-                    />
-                  </Button>
-                  {isLabelsOpen && (
-                    <div className="rounded-md border border-chat-border bg-chat-hover/40 p-2">
-                      {labels.length === 0 ? (
-                        <div className="text-xs text-center text-chat-muted p-2">
-                          Nenhuma etiqueta ainda.
-                        </div>
-                      ) : (
-                        <div className="space-y-1">
-                          {labels.map((label: any) => {
-                            const isSelected = contactTags.some((t: any) => idDaEtiqueta(t) === label.id)
-                            return (
-                              <button
-                                key={label.id}
-                                onClick={() => handleToggleLabel(label.id)}
-                                className="w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded hover:bg-chat-hover transition-colors"
-                              >
-                                <div
-                                  className="w-3 h-3 rounded-full flex-shrink-0"
-                                  style={{ backgroundColor: label.color }}
-                                />
-                                <span className="flex-1 text-left truncate">{label.name}</span>
-                                {isSelected && <Check className="w-4 h-4 text-primary" />}
-                              </button>
-                            )
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )}
 
-                  {/* Galeria: mesma posição do WhatsApp — primeiro item dos dados
-                      do contato. Só monta quando aberta, para não disparar as
-                      três consultas toda vez que alguém abre o painel. */}
-                  <Button
-                    className="w-full justify-start h-12 bg-chat-hover hover:bg-chat-hover border-chat-border text-chat-text transition-all"
-                    variant="outline"
-                    onClick={() => setGaleriaAberta((v) => !v)}
-                  >
-                    <ImageIcon className="h-4 w-4 mr-3 text-chat-muted" />
-                    Mídia, links e docs
-                    <ChevronDown
-                      className={cn(
-                        'h-4 w-4 ml-auto text-chat-muted transition-transform',
-                        galeriaAberta && 'rotate-180',
-                      )}
-                    />
-                  </Button>
-                  {galeriaAberta && device?.id && contact && (
-                    <ConversationGallery
-                      deviceId={device.id}
-                      remoteSender={contact}
-                      onAbrirMidia={abrirMidiaDaGaleria}
-                    />
-                  )}
-
-                  {/* Compartilhar ESTE contato com outras conversas. Só aparece
-                      quando há telefone de verdade: grupo não é cartão de contato
-                      e chave @lid não é telefone. */}
-                  {podeCompartilhar({ remote_jid: contact } as any) && (
-                    <Button
-                      className="w-full justify-start h-12 bg-chat-hover hover:bg-chat-hover border-chat-border text-chat-text transition-all"
-                      variant="outline"
-                      onClick={() => setCompartilharEsteAberto(true)}
-                    >
-                      <Share2 className="h-4 w-4 mr-3 text-chat-muted" />
-                      Compartilhar contato
-                    </Button>
-                  )}
+                    {/* Compartilhar ESTE contato com outras conversas. Só
+                        aparece quando há telefone de verdade: grupo não é
+                        cartão de contato e chave @lid não é telefone. */}
+                    {podeCompartilhar({ remote_jid: contact } as any) && (
+                      <BotaoAcaoPainel
+                        icon={Share2}
+                        label="Compartilhar contato"
+                        onClick={() => setCompartilharEsteAberto(true)}
+                      />
+                    )}
+                  </SecaoInfoPainel>
 
                   {isGroupContact && device?.id && contact && (
-                    <>
-                      <Button
-                        className="w-full justify-start h-12 bg-chat-hover hover:bg-chat-hover border-chat-border text-chat-text transition-all"
-                        variant="outline"
+                    <SecaoInfoPainel titulo="Grupo">
+                      <BotaoExpansivelPainel
+                        icon={Users}
+                        label="Participantes"
+                        aberto={membrosAbertos}
                         onClick={() => setMembrosAbertos((v) => !v)}
-                      >
-                        <Users className="h-4 w-4 mr-3 text-chat-muted" />
-                        Participantes
-                        <ChevronDown
-                          className={cn(
-                            'h-4 w-4 ml-auto text-chat-muted transition-transform',
-                            membrosAbertos && 'rotate-180',
-                          )}
-                        />
-                      </Button>
+                      />
                       {membrosAbertos && (
                         <GroupMembersPanel
                           // Força remontagem ao trocar de grupo: o painel não
@@ -2888,14 +3560,11 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                         />
                       )}
 
-                      <Button
-                        className="w-full justify-start h-12 bg-chat-hover hover:bg-chat-hover border-chat-border text-chat-text transition-all"
-                        variant="outline"
+                      <BotaoAcaoPainel
+                        icon={Settings}
+                        label="Ações do grupo"
                         onClick={() => setIsGroupActionsOpen(true)}
-                      >
-                        <Settings className="h-4 w-4 mr-3 text-chat-muted" />
-                        Ações do grupo
-                      </Button>
+                      />
                       <GroupActionsDialog
                         // Mesma razão do `key` do painel de participantes: zera
                         // nome/descrição digitados e qualquer loading pendente
@@ -2920,107 +3589,156 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                           onSheetOpenChange?.(false)
                         }}
                       />
-                    </>
+                    </SecaoInfoPainel>
                   )}
-                  <Button
-                    className="w-full justify-start h-12 bg-chat-hover hover:bg-chat-hover border-chat-border text-chat-text transition-all"
-                    variant="outline"
-                    onClick={() => {
-                      // Só define um responsável padrão se o rascunho desta conversa
-                      // ainda não tinha um (evita sobrescrever uma escolha anterior).
-                      if (!taskAssignedTo && user) setTaskAssignedTo(user.id)
-                      setIsTaskModalOpen(true)
-                    }}
-                  >
-                    <ClipboardList className="mr-3 h-5 w-5 text-blue-400" /> Guardar tarefa
-                  </Button>
-                  <Button
-                    className="w-full justify-start h-12 bg-chat-hover hover:bg-chat-hover border-chat-border text-chat-text transition-all"
-                    variant="outline"
-                    onClick={() => {
-                      setNoteTitle(displayName)
-                      setNoteContent('')
-                      setNoteCategory('geral')
-                      setIsNoteOpen(true)
-                    }}
-                  >
-                    <ContactNoteIcon className="mr-3 h-5 w-5 text-purple-400" /> Adicionar Anotação
-                  </Button>
 
-                  {contactNotes.length > 0 && (
-                    <div className="pt-3 border-t border-chat-border">
-                      <h4 className="text-sm font-semibold text-chat-text mb-2 flex items-center justify-between">
-                        <span className="flex items-center gap-2">
-                          <ContactNoteIcon className="h-4 w-4 text-purple-400" />
-                          Anotações
-                          <span className="text-[11px] font-normal bg-purple-500/15 text-purple-400 px-1.5 py-0.5 rounded-full">
-                            {contactNotes.length}
-                          </span>
-                        </span>
-                        <a
-                          href="/notes"
-                          className="text-[11px] text-chat-muted hover:text-blue-400 flex items-center gap-0.5 transition-colors"
-                        >
-                          Ver todas <ChevronRight className="h-3 w-3" />
-                        </a>
-                      </h4>
-                      <div className="space-y-2">
-                        {contactNotes.map((note) => (
-                          <div
-                            key={note.id}
-                            className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-chat-hover border border-chat-border group transition-all duration-200"
-                          >
-                            <ContactNoteIcon className="h-4 w-4 text-purple-400 mt-0.5 flex-shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-1.5 mb-0.5">
-                                <span className="text-[11px] font-medium text-chat-text truncate">{note.title}</span>
-                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0 ${
-                                  note.category === 'financeiro' ? 'bg-emerald-500/15 text-emerald-400' :
-                                  note.category === 'rh' ? 'bg-blue-500/15 text-blue-400' :
-                                  note.category === 'administrativo' ? 'bg-amber-500/15 text-amber-400' :
-                                  'bg-chat-border text-chat-muted'
-                                }`}>
-                                  {note.category === 'financeiro' ? 'Fin.' :
-                                   note.category === 'rh' ? 'RH' :
-                                   note.category === 'administrativo' ? 'Adm.' : 'Geral'}
-                                </span>
-                              </div>
-                              <p className="text-[12px] text-chat-muted leading-relaxed">{note.content}</p>
-                              <p className="text-[10px] text-chat-muted/60 mt-1">
-                                {new Date(note.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })}
-                                {' '}
-                                {new Date(note.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteNote(note.id)}
-                              title="Marcar como concluída"
-                              className="opacity-0 group-hover:opacity-100 transition-all duration-150 text-chat-muted hover:text-emerald-400 flex-shrink-0 mt-0.5 hover:scale-110"
-                            >
-                              <CheckCircle2 className="h-4 w-4" />
-                            </button>
+                  <SecaoInfoPainel titulo="Organização">
+                    <BotaoExpansivelPainel
+                      icon={Tags}
+                      label="Etiquetas"
+                      aberto={isLabelsOpen}
+                      contagem={etiquetasDoContato.length}
+                      onClick={() => setIsLabelsOpen((v) => !v)}
+                    />
+                    {isLabelsOpen && (
+                      <div className="rounded-md border border-chat-border/60 bg-chat-hover/40 p-2 space-y-1">
+                        {labels.length === 0 ? (
+                          <div className="text-xs text-center text-chat-muted p-2">
+                            Nenhuma etiqueta ainda.
                           </div>
-                        ))}
+                        ) : (
+                          <div className="space-y-1">
+                            {labels.map((label: any) => {
+                              const isSelected = contactTags.some((t: any) => idDaEtiqueta(t) === label.id)
+                              return (
+                                <button
+                                  key={label.id}
+                                  onClick={() => handleToggleLabel(label.id)}
+                                  className="w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded hover:bg-chat-hover transition-colors"
+                                >
+                                  <div
+                                    className="w-3 h-3 rounded-full flex-shrink-0"
+                                    style={{ backgroundColor: label.color }}
+                                  />
+                                  <span className="flex-1 text-left truncate">{label.name}</span>
+                                  {isSelected && <Check className="w-4 h-4 text-primary" />}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        )}
+                        {/* ITEM 5: criar/editar/apagar sem sair do painel — o
+                            gatilho mora aqui dentro do próprio alternador de
+                            etiquetas, perto de onde elas são atribuídas. */}
+                        <button
+                          type="button"
+                          onClick={() => setIsManageLabelsOpen(true)}
+                          className="w-full flex items-center gap-1.5 px-2 py-1.5 text-xs text-chat-muted hover:text-chat-text border-t border-chat-border/60 mt-1 pt-2 transition-colors"
+                        >
+                          <Pencil className="h-3 w-3" />
+                          Gerenciar etiquetas
+                        </button>
                       </div>
-                    </div>
-                  )}
+                    )}
+
+                    <BotaoAcaoPainel
+                      icon={ClipboardList}
+                      label="Guardar tarefa"
+                      iconClassName="text-blue-400"
+                      onClick={() => {
+                        // Só define um responsável padrão se o rascunho desta
+                        // conversa ainda não tinha um (evita sobrescrever uma
+                        // escolha anterior).
+                        if (!taskAssignedTo && user) setTaskAssignedTo(user.id)
+                        setIsTaskModalOpen(true)
+                      }}
+                    />
+                    <BotaoAcaoPainel
+                      icon={ContactNoteIcon}
+                      label="Adicionar anotação"
+                      iconClassName="text-purple-400"
+                      onClick={() => {
+                        setNoteTitle(displayName)
+                        setNoteContent('')
+                        setNoteCategory('geral')
+                        setIsNoteOpen(true)
+                      }}
+                    />
+
+                    {contactNotes.length > 0 && (
+                      <div className="pt-1">
+                        <h5 className="text-xs font-medium text-chat-text/80 mb-2 flex items-center justify-between px-1">
+                          <span className="flex items-center gap-2">
+                            Anotações
+                            <span className="text-[11px] font-normal bg-purple-500/15 text-purple-400 px-1.5 py-0.5 rounded-full">
+                              {contactNotes.length}
+                            </span>
+                          </span>
+                          <a
+                            href="/notes"
+                            className="text-[11px] text-chat-muted hover:text-blue-400 flex items-center gap-0.5 transition-colors"
+                          >
+                            Ver todas <ChevronRight className="h-3 w-3" />
+                          </a>
+                        </h5>
+                        <div className="space-y-2">
+                          {contactNotes.map((note) => (
+                            <div
+                              key={note.id}
+                              className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-chat-hover/60 border border-chat-border/60 group transition-all duration-200"
+                            >
+                              <ContactNoteIcon className="h-4 w-4 text-purple-400 mt-0.5 flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5 mb-0.5">
+                                  <span className="text-[11px] font-medium text-chat-text truncate">{note.title}</span>
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0 ${
+                                    note.category === 'financeiro' ? 'bg-emerald-500/15 text-emerald-400' :
+                                    note.category === 'rh' ? 'bg-blue-500/15 text-blue-400' :
+                                    note.category === 'administrativo' ? 'bg-amber-500/15 text-amber-400' :
+                                    'bg-chat-border text-chat-muted'
+                                  }`}>
+                                    {note.category === 'financeiro' ? 'Fin.' :
+                                     note.category === 'rh' ? 'RH' :
+                                     note.category === 'administrativo' ? 'Adm.' : 'Geral'}
+                                  </span>
+                                </div>
+                                <p className="text-[12px] text-chat-muted leading-relaxed">{note.content}</p>
+                                <p className="text-[10px] text-chat-muted/60 mt-1">
+                                  {new Date(note.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+                                  {' '}
+                                  {new Date(note.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteNote(note.id)}
+                                title="Marcar como concluída"
+                                className="opacity-0 group-hover:opacity-100 transition-all duration-150 text-chat-muted hover:text-emerald-400 flex-shrink-0 mt-0.5 hover:scale-110"
+                              >
+                                <CheckCircle2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </SecaoInfoPainel>
 
                   {device && contact && (
-                    <div className="pt-4 border-t border-chat-border">
-                      <h4 className="text-sm font-semibold text-chat-text mb-3 flex items-center gap-2">
-                        <Info className="h-4 w-4 text-chat-muted" /> Dados da conversa
-                      </h4>
+                    <SecaoInfoPainel titulo="Dados e metadados">
+                      <div className="px-1 pb-1 flex items-center gap-1.5 text-xs font-medium text-chat-text/80">
+                        <Info className="h-3.5 w-3.5 text-chat-muted" /> Quem viu esta conversa
+                      </div>
                       {viewers.length === 0 ? (
-                        <p className="text-xs text-chat-muted">
+                        <p className="text-xs text-chat-muted px-1">
                           Nenhum usuário visualizou esta conversa ainda.
                         </p>
                       ) : (
-                        <div className="space-y-2">
+                        <div className="space-y-1">
                           {viewers.map((v) => (
                             <div
                               key={v.user_id}
-                              className="flex items-center justify-between px-3 py-2 rounded-md bg-chat-hover border border-chat-border"
+                              className="flex items-center justify-between px-3 py-2 rounded-md bg-chat-hover/60 border border-chat-border/60"
                             >
                               <span className="text-sm text-chat-text truncate">{v.user_name}</span>
                               <span className="text-[11px] text-chat-muted shrink-0 ml-2">
@@ -3038,25 +3756,25 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                         só neste painel. Cada linha some sozinha se o dado faltar.
                       */}
                       {assignment && (assignment.assigned_to_name || assignment.assigned_by_name || assignment.assigned_at) && (
-                        <div className="mt-4 pt-4 border-t border-chat-border">
-                          <h4 className="text-sm font-semibold text-chat-text mb-3 flex items-center gap-2">
-                            <UserCheck className="h-4 w-4 text-chat-muted" /> Atribuição
-                          </h4>
-                          <div className="space-y-2">
+                        <div className="pt-3">
+                          <div className="px-1 pb-1 flex items-center gap-1.5 text-xs font-medium text-chat-text/80">
+                            <UserCheck className="h-3.5 w-3.5 text-chat-muted" /> Atribuição
+                          </div>
+                          <div className="space-y-1">
                             {assignment.assigned_to_name && (
-                              <div className="flex items-center justify-between px-3 py-2 rounded-md bg-chat-hover border border-chat-border">
+                              <div className="flex items-center justify-between px-3 py-2 rounded-md bg-chat-hover/60 border border-chat-border/60">
                                 <span className="text-xs text-chat-muted">Atribuída a</span>
                                 <span className="text-sm text-chat-text truncate ml-2">{assignment.assigned_to_name}</span>
                               </div>
                             )}
                             {assignment.assigned_by_name && (
-                              <div className="flex items-center justify-between px-3 py-2 rounded-md bg-chat-hover border border-chat-border">
+                              <div className="flex items-center justify-between px-3 py-2 rounded-md bg-chat-hover/60 border border-chat-border/60">
                                 <span className="text-xs text-chat-muted">Atribuída por</span>
                                 <span className="text-sm text-chat-text truncate ml-2">{assignment.assigned_by_name}</span>
                               </div>
                             )}
                             {assignment.assigned_at && !isNaN(new Date(assignment.assigned_at).getTime()) && (
-                              <div className="flex items-center justify-between px-3 py-2 rounded-md bg-chat-hover border border-chat-border">
+                              <div className="flex items-center justify-between px-3 py-2 rounded-md bg-chat-hover/60 border border-chat-border/60">
                                 <span className="text-xs text-chat-muted">Quando</span>
                                 <span className="text-sm text-chat-text">{format(new Date(assignment.assigned_at), 'dd/MM HH:mm')}</span>
                               </div>
@@ -3064,11 +3782,19 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                           </div>
                         </div>
                       )}
-                    </div>
+                    </SecaoInfoPainel>
                   )}
                 </div>
               </ScrollArea>
             </SheetContent>
+
+            <GerenciarEtiquetasDialog
+              open={isManageLabelsOpen}
+              onOpenChange={setIsManageLabelsOpen}
+              labels={labels}
+              userId={user?.id}
+              onChanged={refreshLabels}
+            />
           </Sheet>
         </div>
       </div>
@@ -3357,7 +4083,14 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                             if (att.type === 'audio') {
                              return (
                                <div key={idx}>
-                                 <AudioMessage src={att.url} isMe={isMe} msgId={msg.id} />
+                                 <AudioMessage
+                                   src={att.url}
+                                   isMe={isMe}
+                                   msgId={msg.id}
+                                   transcription={msg.transcription}
+                                   transcriptionStatus={msg.transcription_status}
+                                   createdAt={msg.created_at}
+                                 />
                                </div>
                               )
                             }
@@ -3447,7 +4180,14 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                         if (isAudio) {
                           return (
                             <div key={idx}>
-                              <AudioMessage src={url} isMe={isMe} msgId={msg.id} />
+                              <AudioMessage
+                                src={url}
+                                isMe={isMe}
+                                msgId={msg.id}
+                                transcription={msg.transcription}
+                                transcriptionStatus={msg.transcription_status}
+                                createdAt={msg.created_at}
+                              />
                             </div>
                           )
                         }
@@ -3892,11 +4632,32 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
             <div className="flex items-center gap-1.5">
               <Info className="h-3 w-3 text-chat-muted/35" />
               <span>
-                Enviando como{' '}
-                <span className="font-semibold text-chat-text/70">
-                  {device?.signature || user?.signature}
-                </span>
+                {semAssinatura ? 'Enviando SEM assinatura' : 'Enviando como'}
+                {!semAssinatura && (
+                  <>
+                    {' '}
+                    <span className="font-semibold text-chat-text/70">
+                      {device?.signature || user?.signature}
+                    </span>
+                  </>
+                )}
               </span>
+              <div className="flex-1" />
+              {/* ITEM 7: toggle "sem assinatura" — nasce desligado (assina
+                  como sempre) e só vale para esta conversa; ver o reset em
+                  `setSemAssinatura(false)` na troca de conversa acima. */}
+              <Label
+                htmlFor="toggle-sem-assinatura"
+                className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-chat-muted/75"
+              >
+                Sem assinatura
+                <Switch
+                  id="toggle-sem-assinatura"
+                  checked={semAssinatura}
+                  onCheckedChange={setSemAssinatura}
+                  className="scale-75"
+                />
+              </Label>
             </div>
           </div>
         )}
@@ -4104,10 +4865,25 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                       {formatTime(recordingTime)}
                     </span>
                     <div className="flex-1" />
+                    {/* Descartar. Precisa existir DURANTE a gravação: como o
+                        botão principal agora envia, sem isto quem começasse a
+                        gravar por engano não teria saída — a lixeira do preview
+                        só aparece depois de parar, e parar passou a mandar. */}
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon"
+                      title="Descartar gravação"
+                      onClick={cancelarGravacao}
+                      className="h-8 w-8 text-chat-muted hover:text-red-400 hover:bg-red-500/10 rounded-full"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      title={isPaused ? 'Retomar gravação' : 'Pausar gravação'}
                       onClick={isPaused ? resumeRecording : pauseRecording}
                       className="h-8 w-8 text-chat-muted hover:text-chat-text hover:bg-chat-hover rounded-full"
                     >
@@ -4117,14 +4893,57 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                         <div className="w-3.5 h-3.5 rounded-sm bg-yellow-500" />
                       )}
                     </Button>
+                    {/* Só com a gravação pausada: parar SEM enviar, que é o
+                        que devolve o preview — e com ele ouvir antes de mandar
+                        e o agendamento de áudio. Sem esta porta, o item 13
+                        teria deixado os dois inalcançáveis. Fica escondido
+                        enquanto grava para não competir com o enviar, que é a
+                        ação principal. */}
+                    {isPaused && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        title="Parar e revisar antes de enviar"
+                        onClick={() => stopRecording(false)}
+                        className="h-8 w-8 text-chat-muted hover:text-chat-text hover:bg-chat-hover rounded-full"
+                      >
+                        <Square className="h-4 w-4" />
+                      </Button>
+                    )}
+                    {/* ITEM 11: alternativa EXPLÍCITA ao "Enviar áudio" logo
+                        abaixo — para, transcreve na Groq e devolve o texto
+                        para revisar no compositor, em vez de mandar o áudio.
+                        Nunca substitui o botão principal (item 13): os dois
+                        ficam lado a lado, e quem grava escolhe. */}
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon"
-                      onClick={stopRecording}
-                      className="h-8 w-8 text-red-400 hover:text-red-300 hover:bg-red-500/20 rounded-full"
+                      title="Parar e transcrever para texto"
+                      onClick={pararETranscrever}
+                      disabled={isTranscribing}
+                      className="h-8 w-8 text-chat-muted hover:text-chat-text hover:bg-chat-hover rounded-full disabled:opacity-50"
                     >
-                      <Square className="h-4 w-4" />
+                      {isTranscribing ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Captions className="h-4 w-4" />
+                      )}
+                    </Button>
+                    {/* ITEM 13: botão principal — para E envia num clique só.
+                        Ícone e título comunicam "enviar", porque é isso que
+                        ele faz agora. */}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      title="Enviar áudio"
+                      onClick={() => stopRecording(true)}
+                      disabled={isTranscribing}
+                      className="h-8 w-8 text-blue-400 hover:text-blue-300 hover:bg-blue-500/20 rounded-full disabled:opacity-50"
+                    >
+                      <Send className="h-4 w-4" />
                     </Button>
                   </div>
                 )}

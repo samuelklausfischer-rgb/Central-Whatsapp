@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Download, ZoomIn, ZoomOut, RotateCcw, Loader2 } from 'lucide-react'
 import * as XLSX from 'xlsx'
-import { downloadFile } from '@/lib/download'
+import { downloadFile, nomeParaDownload, type TipoArquivoDownload } from '@/lib/download'
 
 export type ViewerMedia = { url: string; type: 'image' | 'video' | 'pdf' | 'excel'; name?: string }
 
@@ -18,6 +18,13 @@ const MAX_SCALE = 5
 const STEP = 0.25
 
 const clamp = (v: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.round(v * 100) / 100))
+
+/** Mapeia o tipo do visualizador para a categoria usada no nome padrão de download. */
+function tipoParaDownload(tipo: ViewerMedia['type']): TipoArquivoDownload {
+  if (tipo === 'video') return 'video'
+  if (tipo === 'image') return 'imagem'
+  return 'documento'
+}
 
 /**
  * Visualizador in-app de imagem/vídeo (lightbox).
@@ -187,7 +194,7 @@ export function MediaViewer({ media, onClose }: { media: ViewerMedia | null; onC
         )}
         <button
           type="button"
-          onClick={() => downloadFile(media.url, media.name || 'arquivo')}
+          onClick={() => downloadFile(media.url, nomeParaDownload(media.name, tipoParaDownload(media.type)))}
           title="Baixar"
           className={toolBtn}
         >

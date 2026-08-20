@@ -3,18 +3,20 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/co
 import { Button } from '@/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Filter, X } from 'lucide-react'
+import type { Label as EtiquetaLabel } from '@/lib/supabase/types'
 
 interface ConversationFiltersProps {
   periodFilter: string
   statusFilter: string
   showUnresponded: boolean
   showArchived: boolean
-  showDeOutros: boolean
+  labels: EtiquetaLabel[]
+  labelFilter: string
   onPeriodFilterChange: (v: string) => void
   onStatusFilterChange: (v: string) => void
   onUnrespondedChange: (v: boolean) => void
   onArchivedChange: (v: boolean) => void
-  onDeOutrosChange: (v: boolean) => void
+  onLabelFilterChange: (v: string) => void
   onClearAll: () => void
   isMobile: boolean
   filterCount: number
@@ -25,12 +27,13 @@ export default function ConversationFilters({
   statusFilter,
   showUnresponded,
   showArchived,
-  showDeOutros,
+  labels,
+  labelFilter,
   onPeriodFilterChange,
   onStatusFilterChange,
   onUnrespondedChange,
   onArchivedChange,
-  onDeOutrosChange,
+  onLabelFilterChange,
   onClearAll,
   isMobile,
   filterCount,
@@ -55,6 +58,21 @@ export default function ConversationFilters({
           <ToggleGroupItem value="pinned" size="sm" variant="outline" className="text-xs h-7 px-2.5">Fixados</ToggleGroupItem>
         </ToggleGroup>
       </div>
+      <div>
+        <h4 className="text-sm font-medium mb-2.5">Etiqueta</h4>
+        <ToggleGroup type="single" value={labelFilter} onValueChange={(v) => v && onLabelFilterChange(v)} className="flex-wrap justify-start gap-1.5">
+          <ToggleGroupItem value="all" size="sm" variant="outline" className="text-xs h-7 px-2.5">Todas</ToggleGroupItem>
+          {labels.map((label) => (
+            <ToggleGroupItem key={label.id} value={label.id} size="sm" variant="outline" className="text-xs h-7 px-2.5 gap-1.5">
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: label.color }} />
+              {label.name}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+        {labels.length === 0 && (
+          <p className="text-xs text-muted-foreground">Nenhuma etiqueta cadastrada ainda.</p>
+        )}
+      </div>
       <div className="border-t border-border pt-4 space-y-2.5">
         <label className="flex items-center gap-2.5 text-sm cursor-pointer">
           <input
@@ -73,20 +91,6 @@ export default function ConversationFilters({
             className="rounded border-muted-foreground/30 accent-primary"
           />
           <span>Arquivadas</span>
-        </label>
-        {/*
-          Único filtro que REVELA em vez de restringir: conversa com dono fica
-          escondida por padrão. Fica marcado como desvio no contador de filtros
-          justamente por inverter o sentido dos outros.
-        */}
-        <label className="flex items-center gap-2.5 text-sm cursor-pointer">
-          <input
-            type="checkbox"
-            checked={showDeOutros}
-            onChange={(e) => onDeOutrosChange(e.target.checked)}
-            className="rounded border-muted-foreground/30 accent-primary"
-          />
-          <span>De outros atendentes</span>
         </label>
       </div>
       {filterCount > 0 && (

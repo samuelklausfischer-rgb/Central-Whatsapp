@@ -72,6 +72,13 @@ export interface Message {
    * booleano e não timestamp.
    */
   is_forwarded: boolean
+  /**
+   * ITEM 12: transcrição automática de áudio RECEBIDO (Groq). `status` NULL
+   * é o estado de toda mensagem que não é áudio recebido, e também de todo
+   * áudio anterior a este recurso — não retroage por decisão do usuário.
+   */
+  transcription: string | null
+  transcription_status: 'pending' | 'ready' | 'failed' | null
   created_at: string
   updated_at: string
 }

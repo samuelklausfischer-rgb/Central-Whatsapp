@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Download } from 'lucide-react'
-import { downloadFile } from '@/lib/download'
+import { downloadFile, nomeParaDownload } from '@/lib/download'
 import { getFileTypeMeta, isPdfFile, isExcelFile } from '@/lib/file-type'
 import { getPdfPreview } from '@/lib/pdf-thumbnail'
 import { getExcelPreview, type ExcelPreview } from '@/lib/excel-preview'
@@ -64,7 +64,7 @@ export function DocumentBubble({
   return (
     <button
       type="button"
-      onClick={() => (onOpenPreview ? onOpenPreview() : downloadFile(url, name))}
+      onClick={() => (onOpenPreview ? onOpenPreview() : downloadFile(url, nomeParaDownload(name, 'documento')))}
       className="block w-full max-w-[280px] overflow-hidden rounded-xl border border-black/10 bg-white text-left shadow-sm transition-opacity hover:opacity-90"
     >
       {isPdf && (
@@ -111,7 +111,7 @@ export function DocumentBubble({
           className="h-4 w-4 flex-shrink-0 text-gray-400"
           onClick={(e) => {
             e.stopPropagation()
-            downloadFile(url, name)
+            downloadFile(url, nomeParaDownload(name, 'documento'))
           }}
         />
       </div>

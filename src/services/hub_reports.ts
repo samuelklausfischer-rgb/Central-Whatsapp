@@ -76,3 +76,67 @@ export const enviarHubReport = async ({
 
   if (!res.ok) throw new Error(`Falha ao enviar o report (erro ${res.status}).`)
 }
+
+export type HubReportStatus =
+  | 'novo'
+  | 'em_analise'
+  | 'em_andamento'
+  | 'resolvido'
+  | 'melhoramento'
+  | 'nao_aplicado'
+  | 'arquivado'
+
+export interface HubReportChecklistItem {
+  id: string
+  texto: string
+  status: 'pendente' | 'fazendo' | 'feito'
+  prazo: string | null
+}
+
+export interface HubMeuReport {
+  id: string
+  tipo: HubReportTipo
+  titulo: string
+  descricao: string
+  status: HubReportStatus
+  criado_em: string
+  prazo: string | null
+  checklist: HubReportChecklistItem[]
+}
+
+export interface ListarMeusHubReportsInput {
+  userId?: string | null
+  userEmail?: string | null
+}
+
+/**
+ * "Meus reportes" — lê pela RPC `hub_meus_reports` (SECURITY DEFINER), a
+ * única porta de leitura que existe pra `anon` em `hub_reports`. Não há
+ * policy de SELECT nessa tabela de propósito (exporia reports de todo mundo);
+ * a função filtra por autor por dentro, usando os mesmos `user_id`/`user_email`
+ * que `ReportarProblemaDialog.tsx` já grava em `metadata` no envio. Mesmo
+ * fetch cru + anon key do restante deste arquivo — ver comentário no topo.
+ *
+ * Enquanto a migration `20260820130000_hub_meus_reports.sql` não for aplicada
+ * em produção, a RPC não existe e este fetch volta 404 — tratado como erro
+ * normal pela tela (ver ReportarProblemaDialog), não como bug.
+ */
+export const listarMeusHubReports = async ({
+  userId,
+  userEmail,
+}: ListarMeusHubReportsInput): Promise<HubMeuReport[]> => {
+  if (!userId && !userEmail) return []
+
+  const res = await fetch(`${HUB_SUPABASE_URL}/rest/v1/rpc/hub_meus_reports`, {
+    method: 'POST',
+    headers: hubHeaders,
+    body: JSON.stringify({ p_user_id: userId ?? null, p_user_email: userEmail ?? null }),
+  })
+
+  if (!res.ok) {
+    throw new Error(`Não foi possível carregar seus reportes agora (erro ${res.status}). Tente de novo em instantes.`)
+  }
+
+  const data = await res.json()
+  return Array.isArray(data) ? (data as HubMeuReport[]) : []
+}

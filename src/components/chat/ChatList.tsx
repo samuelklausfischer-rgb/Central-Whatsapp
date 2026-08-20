@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useDeferredValue, useSyncExternalStore, memo } from 'react'
+import { useState, useEffect, useMemo, useCallback, useDeferredValue, useSyncExternalStore, memo } from 'react'
 import {
   conversationDraftKey,
   getDraft,
@@ -13,13 +13,12 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { SmartAvatar } from '@/components/chat/SmartAvatar'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { format, startOfDay, differenceInCalendarDays } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { Check, CheckCheck, Smartphone, Search, X, MessageCircle, Pin, RefreshCw, UserCheck, UsersRound, BellOff } from 'lucide-react'
+import { Check, CheckCheck, Smartphone, Search, X, MessageCircle, Pin, RefreshCw, UserCheck, UsersRound, BellOff, Eye, EyeOff } from 'lucide-react'
 import {
   AlertDialog,
   AlertDialogContent,
@@ -43,10 +42,20 @@ import {
   ContextMenuContent,
 } from '@/components/ui/context-menu'
 import { useAuth } from '@/hooks/use-auth'
+import { useRealtime } from '@/hooks/use-realtime'
+import { getContactTags } from '@/services/contact_tags'
+import { getLabels } from '@/services/labels'
 import type { ConversationUserState } from '@/services/conversation_states'
-import type { ConversationAssignment } from '@/lib/supabase/types'
+import type { ConversationAssignment, Label } from '@/lib/supabase/types'
 import { chaveDaConversa } from '@/stores/conversationMessages'
 import { buildContactIndex, findContactByIdentifier, resolveContactDisplayName } from '@/lib/contacts/normalize'
+
+/** Etiqueta já resolvida (nome + cor), pronta para desenhar na linha da lista. */
+interface EtiquetaResumo {
+  id: string
+  name: string
+  color: string
+}
 
 export interface ChatListProps {
   devices: any[]
@@ -150,6 +159,7 @@ const ChatRow = memo(function ChatRow({
   currentUserId,
   hasDraft,
   draftPreview,
+  tags,
 }: {
   conv: any
   contact: any
@@ -167,6 +177,7 @@ const ChatRow = memo(function ChatRow({
   currentUserId?: string
   hasDraft?: boolean
   draftPreview?: string
+  tags?: EtiquetaResumo[]
 }) {
   const name = resolveContactDisplayName(conv.remote_sender, contactIndex, {
     sender_name: conv.sender_name
@@ -250,6 +261,31 @@ const ChatRow = memo(function ChatRow({
           <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 dark:bg-amber-950 dark:text-amber-400 self-start mt-0.5">
             Aguardando
           </span>
+        )}
+        {tags && tags.length > 0 && (
+          // Linha estreita, tag pode ter nome longo: só as 2 primeiras entram por
+          // extenso, o resto vira "+N" — a lista inteira de nomes fica no title
+          // (hover), então nada se perde, só fica um clique/hover mais longe.
+          <div className="flex items-center gap-1 mt-0.5 overflow-hidden">
+            {tags.slice(0, 2).map((tag) => (
+              <span
+                key={tag.id}
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-chat-hover border border-chat-border text-[10px] font-medium text-chat-muted shrink-0 max-w-[92px]"
+                title={tag.name}
+              >
+                <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
+                <span className="truncate">{tag.name}</span>
+              </span>
+            ))}
+            {tags.length > 2 && (
+              <span
+                className="text-[10px] font-medium text-chat-muted/70 shrink-0"
+                title={tags.slice(2).map((t) => t.name).join(', ')}
+              >
+                +{tags.length - 2}
+              </span>
+            )}
+          </div>
         )}
         <div className="flex items-center gap-1 mt-0.5">
           {/* Com rascunho, o check de entrega da última mensagem enviada dá lugar
@@ -442,18 +478,76 @@ export function ChatList({
   const [escopoLista, setEscopoLista] = useState<'geral' | 'minhas'>('geral')
 
   /**
-   * Conversa que já tem dono sai da lista por padrão: quem olha a Geral está
-   * atrás do que ainda não tem responsável, e o que já foi pego só atrapalha.
+   * Esconder atribuídas: controle FORA do popover (fica ao lado do botão
+   * Filtros), padrão LIGADO. Diferente do antigo `mostrarDeOutros` — que só
+   * escondia conversa de OUTRO atendente e ficava dentro do popover —, este
+   * esconde qualquer conversa que já tem responsável, inclusive a minha.
+   * Decisão: um controle só, não dois sobrepostos com semânticas parecidas.
    *
-   * Ao contrário dos outros filtros, este REVELA em vez de restringir — e é por
-   * isso que conta no `activeFilterCount` quando LIGADO: aqui o desvio do padrão
-   * é mostrar, não esconder.
+   * Deliberadamente FORA do `activeFilterCount`/"Remover" pelo mesmo motivo de
+   * `escopoLista` acima: o controle já fica sempre visível ao lado de Filtros,
+   * então marcar seu estado de novo no contador de filtros escondidos seria
+   * redundante — o contador existe para avisar do que está escondido DENTRO
+   * do popover, não do que já está à mostra na tela.
    *
    * A busca ignora esse ocultamento (ver `filteredConversations`). Sem isso,
-   * procurar por alguém que está com um colega não traria nada e o contato
-   * pareceria ter sumido do sistema — que é justamente o que não pode acontecer.
+   * procurar por alguém que está com um colega (ou comigo) não traria nada e o
+   * contato pareceria ter sumido do sistema — que é justamente o que não pode
+   * acontecer.
    */
-  const [mostrarDeOutros, setMostrarDeOutros] = useState(false)
+  const [esconderAtribuidas, setEsconderAtribuidas] = useState(true)
+
+  // Etiquetas do aparelho selecionado. Buscadas em bloco (uma consulta por
+  // troca de aparelho, não por conversa) e reindexadas no cliente por
+  // `remote_sender` em `tagsByContact` — mesmo padrão de `assignments`, que já
+  // chega pronto como Map indexado por conversa.
+  const [labels, setLabels] = useState<Label[]>([])
+  const [contactTags, setContactTags] = useState<any[]>([])
+
+  useEffect(() => {
+    getLabels().then(setLabels).catch(() => {})
+  }, [])
+
+  const loadContactTags = useCallback(() => {
+    if (!selectedDeviceId) {
+      setContactTags([])
+      return
+    }
+    getContactTags(selectedDeviceId).then(setContactTags).catch(() => {})
+  }, [selectedDeviceId])
+
+  useEffect(() => {
+    loadContactTags()
+  }, [loadContactTags])
+
+  // Realtime sem filtro por aparelho: o payload cru do Postgres não traz
+  // nome/cor da etiqueta (só o uuid), então não dá pra reconciliar em memória
+  // mesmo filtrando por device_id — todo evento apenas dispara um reload
+  // completo, que já busca o join pronto (`label_id(*)`). Mesmo padrão que o
+  // ChatWindow já usa para a mesma tabela.
+  useRealtime('contact_tags', () => {
+    loadContactTags()
+  })
+  useRealtime('labels', () => {
+    getLabels().then(setLabels).catch(() => {})
+  })
+
+  const tagsByContact = useMemo(() => {
+    const map = new Map<string, EtiquetaResumo[]>()
+    contactTags.forEach((tag: any) => {
+      // O select em `getContactTags` traz `label_id` já expandido pelo join
+      // (`*, label_id(*)`), então aqui ele chega como objeto — nunca como o
+      // uuid cru, porque todo evento de realtime só dispara um reload completo.
+      const label = tag?.label_id
+      if (!label || typeof label !== 'object') return
+      const lista = map.get(tag.remote_sender) ?? []
+      lista.push({ id: label.id, name: label.name, color: label.color })
+      map.set(tag.remote_sender, lista)
+    })
+    return map
+  }, [contactTags])
+
+  const [labelFilter, setLabelFilter] = useState<string>('all')
 
   // Conjunto de conversas com rascunho. A store só troca a referência do snapshot
   // quando o CONJUNTO muda — digitar dentro de uma conversa que já tem rascunho
@@ -466,16 +560,16 @@ export function ChatList({
     if (activeStatusFilter !== 'all') count++
     if (showUnrespondedOnly) count++
     if (showArchived) count++
-    if (mostrarDeOutros) count++
+    if (labelFilter !== 'all') count++
     if (searchQuery.trim()) count++
     return count
-  }, [activePeriodFilter, activeStatusFilter, showUnrespondedOnly, showArchived, mostrarDeOutros, searchQuery])
+  }, [activePeriodFilter, activeStatusFilter, showUnrespondedOnly, showArchived, labelFilter, searchQuery])
 
   const handleClearAllFilters = useCallback(() => {
     setActivePeriodFilter('all')
     setActiveStatusFilter('all')
     setShowUnrespondedOnly(false)
-    setMostrarDeOutros(false)
+    setLabelFilter('all')
     if (showArchived) onToggleArchived()
     setSearchQuery('')
   }, [showArchived, onToggleArchived])
@@ -539,18 +633,32 @@ export function ChatList({
     [assignments, currentUserId, selectedDeviceId],
   )
 
+  /**
+   * "Atribuída" para fins do toggle "esconder atribuídas" = minha OU de outro.
+   * É a união das duas checagens acima, não uma terceira regra nova — reusa
+   * `ehMinha`/`ehDeOutro` de propósito para não duplicar a definição de dono.
+   */
+  const ehAtribuida = useCallback(
+    (remoteSender: string) => ehMinha(remoteSender) || ehDeOutro(remoteSender),
+    [ehMinha, ehDeOutro],
+  )
+
   const filteredConversations = useMemo(() => {
     let filtered = conversations
     if (escopoLista === 'minhas') {
       filtered = filtered.filter((conv) => ehMinha(conv.remote_sender))
     }
-    // Esconder o que já tem dono, EXCETO enquanto a pessoa está buscando: quem
-    // digita um nome quer aquele contato, não a fila. Achar "nenhum resultado"
-    // para alguém que existe é pior do que mostrar uma conversa a mais.
+    // Esconder o que já tem dono (meu ou de outro), EXCETO enquanto a pessoa
+    // está buscando: quem digita um nome quer aquele contato, não a fila.
+    // Achar "nenhum resultado" para alguém que existe é pior do que mostrar
+    // uma conversa a mais.
     //
     // Fora da Geral não se aplica: "Minhas" por definição só traz o que é meu.
-    if (escopoLista === 'geral' && !mostrarDeOutros && !deferredSearch.trim()) {
-      filtered = filtered.filter((conv) => !ehDeOutro(conv.remote_sender))
+    if (escopoLista === 'geral' && esconderAtribuidas && !deferredSearch.trim()) {
+      filtered = filtered.filter((conv) => !ehAtribuida(conv.remote_sender))
+    }
+    if (labelFilter !== 'all') {
+      filtered = filtered.filter((conv) => tagsByContact.get(conv.remote_sender)?.some((t) => t.id === labelFilter))
     }
     if (activePeriodFilter !== 'all') {
       filtered = filtered.filter((conv) => matchesPeriod(conv.lastMessage?.created_at, activePeriodFilter))
@@ -580,7 +688,7 @@ export function ChatList({
       })
     }
     return filtered
-  }, [deferredSearch, showUnrespondedOnly, showArchived, conversations, contactIndex, statesByKey, selectedDeviceId, activePeriodFilter, activeStatusFilter, escopoLista, ehMinha, mostrarDeOutros, ehDeOutro])
+  }, [deferredSearch, showUnrespondedOnly, showArchived, conversations, contactIndex, statesByKey, selectedDeviceId, activePeriodFilter, activeStatusFilter, escopoLista, ehMinha, esconderAtribuidas, ehAtribuida, labelFilter, tagsByContact])
 
   const isSearching = deferredSearch !== searchQuery
 
@@ -633,12 +741,18 @@ export function ChatList({
             {devices.map((device) => (
               <SelectItem key={device.id} value={device.id} className="py-3">
                 <div className="flex items-center gap-3">
-                  <Avatar className="h-8 w-8 bg-chat-panel">
-                    <AvatarImage src={device.avatar_url} />
-                    <AvatarFallback>
-                      <Smartphone className="h-4 w-4 text-chat-muted" />
-                    </AvatarFallback>
-                  </Avatar>
+                  {/*
+                    Foto real do WhatsApp do aparelho, com o globo do PRN como
+                    fallback (nunca iniciais — "Financeiro PRN" viraria "FI",
+                    que não identifica nada). Mesmo componente/shape usado no
+                    dashboard (Index.tsx), já resolve resync de avatar expirado.
+                  */}
+                  <SmartAvatar
+                    isInstance
+                    deviceRecord={device}
+                    name={device.name}
+                    className="h-8 w-8 bg-chat-panel"
+                  />
                   <div className="flex flex-col text-left">
                     <span className="text-sm font-medium leading-none text-chat-text">
                       {device.name}
@@ -711,16 +825,45 @@ export function ChatList({
             statusFilter={activeStatusFilter}
             showUnresponded={showUnrespondedOnly}
             showArchived={showArchived}
-            showDeOutros={mostrarDeOutros}
+            labels={labels}
+            labelFilter={labelFilter}
             onPeriodFilterChange={setActivePeriodFilter}
             onStatusFilterChange={setActiveStatusFilter}
             onUnrespondedChange={setShowUnrespondedOnly}
             onArchivedChange={(v) => { if (v !== showArchived) onToggleArchived() }}
-            onDeOutrosChange={setMostrarDeOutros}
+            onLabelFilterChange={setLabelFilter}
             onClearAll={handleClearAllFilters}
             isMobile={isMobile}
             filterCount={activeFilterCount}
           />
+          {/*
+            Fora do popover de propósito — ver comentário de `esconderAtribuidas`
+            acima. Desabilitado em "Minhas" porque lá toda conversa já é minha
+            por definição: escondê-las esvaziaria a aba sem explicar por quê.
+          */}
+          <button
+            onClick={() => setEsconderAtribuidas((v) => !v)}
+            disabled={escopoLista !== 'geral'}
+            aria-pressed={esconderAtribuidas}
+            title={
+              escopoLista !== 'geral'
+                ? 'Só vale na aba Geral — em Minhas todas já são suas'
+                : esconderAtribuidas
+                  ? 'Escondendo conversas já atribuídas. Toque para mostrar essas também.'
+                  : 'Mostrando conversas atribuídas também. Toque para esconder de novo.'
+            }
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all border',
+              escopoLista !== 'geral'
+                ? 'text-chat-muted/40 border-transparent cursor-not-allowed'
+                : esconderAtribuidas
+                  ? 'text-chat-text border-chat-border bg-chat-hover'
+                  : 'text-chat-muted border-chat-border hover:bg-chat-hover hover:text-chat-text',
+            )}
+          >
+            {esconderAtribuidas ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            Atribuídas
+          </button>
           <button
             onClick={handleClearAllFilters}
             disabled={activeFilterCount === 0}
@@ -749,8 +892,11 @@ export function ChatList({
             {showArchived && (
               <FilterChip label="Arquivadas" onRemove={() => onToggleArchived()} />
             )}
-            {mostrarDeOutros && (
-              <FilterChip label="De outros atendentes" onRemove={() => setMostrarDeOutros(false)} />
+            {labelFilter !== 'all' && (
+              <FilterChip
+                label={`Etiqueta: ${labels.find((l) => l.id === labelFilter)?.name ?? '—'}`}
+                onRemove={() => setLabelFilter('all')}
+              />
             )}
             {searchQuery.trim() && (
               <FilterChip label={`Busca: "${searchQuery}"`} onRemove={() => setSearchQuery('')} />
@@ -789,6 +935,7 @@ export function ChatList({
                 currentUserId={currentUserId}
                 hasDraft={hasDraft}
                 draftPreview={hasDraft ? getDraft(draftKey)?.text ?? '' : undefined}
+                tags={tagsByContact.get(conv.remote_sender)}
               />
             )
           })}

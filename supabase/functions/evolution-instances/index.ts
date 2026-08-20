@@ -15,6 +15,22 @@ const serviceHeaders = {
   apikey: SUPABASE_SERVICE_KEY,
 }
 
+/**
+ * Eventos que TODA instância precisa assinar na Evolution.
+ *
+ * Esta lista tem que andar junto com `WEBHOOK_EVENTS` de `sync-instances`.
+ * Elas viviam separadas e divergiram: `sync-instances` passou a assinar
+ * `CONNECTION_UPDATE` e estas duas aqui continuaram só com as de mensagem —
+ * então instância criada pela tela, ou webhook reconfigurado por este arquivo,
+ * nunca reportava conexão, e `devices.status` voltava a ficar preso em
+ * `'connecting'`. Era o bug do dashboard ("3 de 5 conectados") renascendo a
+ * cada aparelho novo.
+ *
+ * `MESSAGES_UPSERT`/`MESSAGES_UPDATE` são a ingestão de mensagem, ou seja, a
+ * função principal do app: nunca remover.
+ */
+const WEBHOOK_EVENTS = ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'CONNECTION_UPDATE']
+
 type JsonRecord = Record<string, unknown>
 
 function json(data: Record<string, unknown>, status = 200) {
@@ -511,6 +527,13 @@ async function listInstancesAction() {
   }
 
   const validInstances: JsonRecord[] = []
+  // Reconciliação de `devices.status`: depender só do webhook `connection.update`
+  // (ver `evolution-webhook/index.ts`) é frágil — se ele cair, ou se a instância
+  // reconectar com o webhook fora do ar, a coluna volta a mentir. Esta ação já
+  // consulta a Evolution AO VIVO e já calcula `normalizedStatus` só para a
+  // resposta; persistir o mesmo valor aqui resolve a reconciliação de graça,
+  // toda vez que alguém abre a tela de Conexão WhatsApp — sem cron novo.
+  const statusParaGravar: { id: string; status: string }[] = []
 
   for (const raw of rawList as JsonRecord[]) {
     const inst = (raw as JsonRecord).instance as JsonRecord || raw
@@ -532,6 +555,15 @@ async function listInstancesAction() {
 
     const device = devicesByKey.get(instanceName) || null
 
+    // Só grava quando: (a) o aparelho existe e não foi excluído — um eco tardio
+    // não pode reviver uma instância apagada no app; (b) o status mudou de
+    // verdade — evita um PATCH a cada abertura de tela para os 5 aparelhos que
+    // já estão certos; (c) `normalizedStatus` não é 'unknown' — um estado que a
+    // Evolution não deu para classificar não pode sobrescrever um status bom.
+    if (device && !device.deleted_at && normalizedStatus !== 'unknown' && device.status !== normalizedStatus) {
+      statusParaGravar.push({ id: String(device.id), status: normalizedStatus })
+    }
+
     validInstances.push({
       instanceName,
       status: rawStatus,
@@ -542,6 +574,24 @@ async function listInstancesAction() {
       device,
       alreadyImported: Boolean(device),
     })
+  }
+
+  // Fogo-e-esquece: a reconciliação é um bônus desta leitura, não o motivo dela.
+  // Se um PATCH falhar, a resposta ao front (que já foi montada com o valor
+  // fresco de `normalizedStatus`) não pode ficar refém disso — a próxima
+  // chamada de `list` tenta de novo.
+  if (statusParaGravar.length > 0) {
+    await Promise.all(
+      statusParaGravar.map(({ id, status }) =>
+        fetch(`${SUPABASE_URL}/rest/v1/devices?id=eq.${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          headers: { ...serviceHeaders, Prefer: 'return=minimal' },
+          body: JSON.stringify({ status }),
+        }).catch((err) => {
+          console.warn(JSON.stringify({ scope: 'reconciliacao_status', deviceId: id, status, erro: String(err) }))
+        }),
+      ),
+    )
   }
 
   return json({ instances: validInstances })
@@ -608,7 +658,7 @@ async function createInstanceAction(body: JsonRecord) {
       url: webhookUrl,
       byEvents: true,
       base64: false,
-      events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE'],
+      events: WEBHOOK_EVENTS,
     },
   })
 
@@ -738,7 +788,7 @@ async function configureWebhookAction(body: JsonRecord) {
       url: webhookUrl,
       byEvents: true,
       base64: false,
-      events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE'],
+      events: WEBHOOK_EVENTS,
     },
   })
 

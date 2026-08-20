@@ -66,6 +66,11 @@
     --chat-conversation-pattern-opacity: 0.038;
     --chat-conversation-pattern-size: 360px auto;
 
+    /* ── Variante de vidro do tema chat-* (painel de info do contato) ── */
+    --chat-vidro-opacidade: 0.82;
+    --chat-vidro-borda-opacidade: 0.6;
+    --chat-vidro-luz-opacidade: 0.35;
+
     /* ── Fundo PRN e superfícies de vidro ── */
     --bg-campo-de: 214 100% 97%;
     --bg-campo-para: 210 60% 98%;
@@ -140,6 +145,10 @@
     --chat-bubble-shadow: 0 1px 0.5px rgb(0 0 0 / 0.35);
     --chat-pattern: radial-gradient(ellipse at 50% -10%, rgba(59, 130, 246, 0.045) 0%, transparent 65%);
     --chat-conversation-pattern-opacity: 0.035;
+
+    --chat-vidro-opacidade: 0.68;
+    --chat-vidro-borda-opacidade: 0.14;
+    --chat-vidro-luz-opacidade: 0.12;
 
     --bg-campo-de: 222 47% 7%;
     --bg-campo-para: 215 40% 10%;
@@ -224,6 +233,40 @@
     top: 0;
     height: 1px;
     background: linear-gradient(90deg, transparent, hsl(0 0% 100% / var(--vidro-luz-opacidade)), transparent);
+    pointer-events: none;
+    border-radius: inherit;
+  }
+
+  /**
+   * Mesma receita de `.superficie-vidro`, logo acima, mas apoiada nos tokens
+   * `--chat-*` em vez de `--vidro-*`/`--background`. A tela de Conversas usa
+   * paleta própria (imita o WhatsApp) e ficou de fora da reforma de vidro do
+   * resto do app de propósito — usar `--vidro-*` aqui (calibrado para
+   * `--background`) criaria uma ilha visual dentro do chat. Esta variante é
+   * o que dá a linguagem de vidro ao painel de info sem sair da paleta dele.
+   *
+   * Regras herdadas de `.superficie-vidro`: blur de 12px, nunca mais, e só
+   * nesta superfície EXTERNA — nenhum elemento dentro do painel (linhas,
+   * cartões, o Dialog de gerenciar etiquetas) pode ter seu próprio
+   * `backdrop-filter`. Blur aninhado é o que trava a rolagem no Electron.
+   */
+  .superficie-vidro-chat {
+    position: relative;
+    background-color: hsl(var(--chat-panel) / var(--chat-vidro-opacidade));
+    -webkit-backdrop-filter: blur(12px) saturate(150%);
+    backdrop-filter: blur(12px) saturate(150%);
+    border: 1px solid hsl(var(--chat-border) / var(--chat-vidro-borda-opacidade));
+    box-shadow: var(--chat-shadow), inset 0 0 0 1px hsl(0 0% 100% / 0.05);
+  }
+
+  /* Mesma linha de luz do topo que `.superficie-vidro::before` usa. */
+  .superficie-vidro-chat::before {
+    content: '';
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, hsl(0 0% 100% / var(--chat-vidro-luz-opacidade)), transparent);
     pointer-events: none;
     border-radius: inherit;
   }

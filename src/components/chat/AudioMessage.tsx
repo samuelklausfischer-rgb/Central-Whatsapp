@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Play, Pause, Download } from 'lucide-react'
+import { Play, Pause, Download, Captions } from 'lucide-react'
 
 interface AudioMessageProps {
   src: string
@@ -8,6 +8,76 @@ interface AudioMessageProps {
   showDownload?: boolean
   compact?: boolean
   downloadName?: string
+  /**
+   * ITEM 12: transcrição automática do áudio RECEBIDO. Os três só existem
+   * juntos nos balões de conversa — o preview de composição (áudio ainda não
+   * enviado) nunca passa essas props, e o componente já lida bem com elas
+   * ausentes (não renderiza nada extra).
+   */
+  transcription?: string | null
+  transcriptionStatus?: 'pending' | 'ready' | 'failed' | null
+  createdAt?: string
+}
+
+// Tempo máximo que um "transcrevendo..." fica visível sem virar `ready`/
+// `failed`. Existe para nunca virar um carregando eterno: se por qualquer
+// motivo a edge function nunca respondeu (deploy pendente, fila travada), o
+// indicador some sozinho em vez de mentir para sempre que "já já sai".
+const TRANSCRICAO_TRAVADA_MS = 3 * 60 * 1000
+
+// Ponto de corte para "ver mais": abaixo disso o texto cabe folgado num
+// balão de áudio sem precisar de recolher/expandir.
+const TRANSCRICAO_TRUNCA_EM = 180
+
+function TranscriptionBlock({
+  transcription,
+  transcriptionStatus,
+  createdAt,
+}: {
+  transcription?: string | null
+  transcriptionStatus?: 'pending' | 'ready' | 'failed' | null
+  createdAt?: string
+}) {
+  const [expanded, setExpanded] = useState(false)
+
+  if (transcriptionStatus === 'ready' && transcription) {
+    const longo = transcription.length > TRANSCRICAO_TRUNCA_EM
+    const textoExibido = longo && !expanded ? `${transcription.slice(0, TRANSCRICAO_TRUNCA_EM).trimEnd()}…` : transcription
+    return (
+      <div className="mt-1.5 pt-1.5 border-t border-chat-text/10 flex items-start gap-1.5">
+        <Captions className="h-3.5 w-3.5 mt-0.5 flex-shrink-0 text-chat-muted/60" />
+        <div className="min-w-0 flex-1 text-[12.5px] leading-snug text-chat-muted/85 whitespace-pre-wrap break-words">
+          {textoExibido}
+          {longo && (
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="ml-1 font-medium text-blue-500 hover:text-blue-400 whitespace-nowrap"
+            >
+              {expanded ? 'ver menos' : 'ver mais'}
+            </button>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  if (transcriptionStatus === 'pending') {
+    // Passou do teto de espera: melhor sumir do que prometer para sempre um
+    // resultado que pode nunca chegar (ver `TRANSCRICAO_TRAVADA_MS`).
+    const travada = createdAt ? Date.now() - new Date(createdAt).getTime() > TRANSCRICAO_TRAVADA_MS : false
+    if (travada) return null
+    return (
+      <div className="mt-1.5 pt-1.5 border-t border-chat-text/10 flex items-center gap-1.5 text-[12px] text-chat-muted/60 italic">
+        <Captions className="h-3.5 w-3.5 flex-shrink-0 animate-pulse" />
+        Transcrevendo áudio…
+      </div>
+    )
+  }
+
+  // 'failed' ou status desconhecido: nada de balão vazio, nada de "não deu"
+  // permanente no meio da conversa — o áudio continua tocável normalmente.
+  return null
 }
 
 let currentPlayingAudio: { pause: () => void; msgId?: string } | null = null
@@ -27,6 +97,9 @@ export function AudioMessage({
   showDownload = true,
   compact = false,
   downloadName = 'audio-message.webm',
+  transcription,
+  transcriptionStatus,
+  createdAt,
 }: AudioMessageProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -216,6 +289,11 @@ export function AudioMessage({
       <div className="mt-1 flex items-center justify-between text-[11px] tabular-nums text-chat-muted/70">
         <span>{formatTime(currentTime)} / {formatTime(duration)}</span>
       </div>
+      <TranscriptionBlock
+        transcription={transcription}
+        transcriptionStatus={transcriptionStatus}
+        createdAt={createdAt}
+      />
     </div>
   )
 }

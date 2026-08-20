@@ -1,6 +1,96 @@
 import { isNativeAndroid } from '@/lib/app-info'
 
 /**
+ * Categorias usadas só para escolher o nome padrão quando não há nome real
+ * (ver `nomeParaDownload` abaixo). Não precisa bater com `ViewerMedia['type']`.
+ */
+export type TipoArquivoDownload = 'audio' | 'video' | 'imagem' | 'documento'
+
+const NOME_PADRAO_POR_TIPO: Record<TipoArquivoDownload, string> = {
+  audio: 'audio-whatsapp',
+  video: 'video-whatsapp',
+  imagem: 'imagem-whatsapp',
+  documento: 'documento-whatsapp',
+}
+
+/**
+ * O webhook (`supabase/functions/evolution-webhook` e `evolution-history-import`,
+ * função `ensureExtension`) já grava um nome genérico quando o WhatsApp não manda
+ * `fileName` — `audio_message.ogg`, `video_message.mp4` etc. Isso é comum: áudio e
+ * vídeo do WhatsApp quase nunca trazem nome real, então NA PRÁTICA todo áudio já
+ * chega ao front com esse mesmo nome. Sem tratar isso aqui, um baixado por cima do
+ * outro (mesmo nome = mesmo arquivo no Electron, que agora salva sem perguntar).
+ */
+const NOME_GENERICO_WEBHOOK = /^(image|video|audio|document|sticker)_message\.[a-z0-9]+$/i
+
+/** Carimbo de data/hora do clique (local), só dígitos — nunca colide entre dois downloads no mesmo segundo é impossível, mas ajuda a diferenciar de olho os arquivos salvos. */
+function carimboDataHora(data = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${data.getFullYear()}${p(data.getMonth() + 1)}${p(data.getDate())}-${p(data.getHours())}${p(data.getMinutes())}${p(data.getSeconds())}`
+}
+
+/** Windows rejeita esses caracteres em nome de arquivo (o Android já sanitiza os dele em `sanitizarNome`, mais abaixo). */
+function sanitizarNomeArquivo(nome: string): string {
+  return nome.replace(/[\\/:*?"<>|]/g, '_').trim()
+}
+
+function extensaoDe(nome: string): string {
+  const m = /\.([a-z0-9]{1,8})$/i.exec(nome)
+  return m ? m[1] : ''
+}
+
+/** Extensões que denunciam o tipo quando o nome genérico não diz (raro, mas acontece em reenvio). */
+const EXT_POR_TIPO: Record<string, TipoArquivoDownload> = {
+  ogg: 'audio', opus: 'audio', mp3: 'audio', m4a: 'audio', wav: 'audio', aac: 'audio',
+  mp4: 'video', mov: 'video', avi: 'video', mkv: 'video', webm: 'video', '3gp': 'video',
+  jpg: 'imagem', jpeg: 'imagem', png: 'imagem', gif: 'imagem', webp: 'imagem', bmp: 'imagem',
+}
+
+/**
+ * Descobre a categoria a partir do próprio nome do arquivo.
+ *
+ * Existe porque nem todo ponto de download conhece o tipo da mídia: a lista de
+ * seleção do `ChatWindow` carrega só `{ url, name }`. Mas justamente no caso em
+ * que o nome padrão é necessário — o genérico do webhook — **o tipo está escrito
+ * no nome** (`audio_message.ogg`, `video_message.mp4`…), então dá para deduzir
+ * sem arrastar o mime por toda a cadeia. A extensão é a segunda tentativa, e
+ * `documento` é o padrão seguro (nome genérico de documento não engana ninguém).
+ */
+export function tipoPeloNome(nome: string | null | undefined): TipoArquivoDownload {
+  const bruto = (nome || '').trim().toLowerCase()
+
+  const generico = /^(image|video|audio|document|sticker)_message\./.exec(bruto)
+  if (generico) {
+    const prefixo = generico[1]
+    if (prefixo === 'audio') return 'audio'
+    if (prefixo === 'video') return 'video'
+    if (prefixo === 'image' || prefixo === 'sticker') return 'imagem'
+    return 'documento'
+  }
+
+  return EXT_POR_TIPO[extensaoDe(bruto).toLowerCase()] ?? 'documento'
+}
+
+/**
+ * Nome final para salvar um download.
+ *
+ * Preserva um nome real quando existir (não estraga nome bom). Quando não —
+ * vazio, o fallback `'arquivo'` do MediaViewer, ou o genérico `*_message.*` que
+ * o webhook grava por falta de nome real — usa nome padrão por tipo + carimbo
+ * de data/hora do clique, para nunca sobrescrever um download anterior.
+ */
+export function nomeParaDownload(nomeOriginal: string | null | undefined, tipo: TipoArquivoDownload): string {
+  const bruto = (nomeOriginal || '').trim()
+  const generico = !bruto || bruto.toLowerCase() === 'arquivo' || NOME_GENERICO_WEBHOOK.test(bruto)
+
+  if (!generico) return sanitizarNomeArquivo(bruto)
+
+  const ext = extensaoDe(bruto)
+  const base = `${NOME_PADRAO_POR_TIPO[tipo]}-${carimboDataHora()}`
+  return sanitizarNomeArquivo(ext ? `${base}.${ext}` : base)
+}
+
+/**
  * Baixa um arquivo (mídia/documento) forçando download local.
  * Faz fetch + blob para baixar de fato; se falhar (CORS/offline), abre em nova aba.
  *

@@ -111,6 +111,14 @@ export const sendMessage = async (data: {
    * da 2.4.0-rc2, e por busca no repositório inteiro.
    */
   forwarded?: boolean
+  /**
+   * ITEM 7: pula a assinatura salva (device.signature/profiles.signature)
+   * para ESTE envio, sem marcar a mensagem como encaminhada — ao contrário
+   * de `forwarded`, que faz as duas coisas. Vem do toggle "sem assinatura"
+   * do compositor; default `false` preserva o comportamento de hoje
+   * (assina sempre que houver assinatura salva).
+   */
+  noSignature?: boolean
 }) => {
   const session = await supabase.auth.getSession()
   if (!session.data.session) throw new Error('Not authenticated')
@@ -119,7 +127,22 @@ export const sendMessage = async (data: {
     throw new Error('remote_sender is required')
   }
 
-  const { data: result, error } = await supabase.rpc('send_whatsapp_message', {
+  /**
+   * `p_sem_assinatura` só entra no payload quando é TRUE — de propósito.
+   *
+   * O parâmetro nasceu numa migration que pode ainda não ter sido aplicada no
+   * banco quando este código subir. O PostgREST resolve a função pela lista de
+   * argumentos: mandar um parâmetro que a função ainda não tem faz a chamada
+   * falhar por assinatura desconhecida — e aqui isso não seria "o toggle não
+   * funciona", seria **todo envio de mensagem quebrado**, que é a função
+   * principal do app.
+   *
+   * Omitindo quando é `false` (o padrão, e a esmagadora maioria das chamadas),
+   * as duas pontas ficam independentes: o app funciona igual a hoje mesmo sem a
+   * migration, e o toggle passa a ter efeito assim que ela for aplicada. Sem
+   * ordem obrigatória de deploy.
+   */
+  const argumentos: Record<string, unknown> = {
     p_device_id: data.device_id,
     p_remote_sender: data.remote_sender,
     p_content: data.content,
@@ -131,7 +154,10 @@ export const sendMessage = async (data: {
     p_mentioned: data.mentioned && data.mentioned.length > 0 ? data.mentioned : null,
     p_mention_everyone: data.mentionEveryone ?? false,
     p_forwarded: data.forwarded ?? false,
-  })
+  }
+  if (data.noSignature) argumentos.p_sem_assinatura = true
+
+  const { data: result, error } = await supabase.rpc('send_whatsapp_message', argumentos)
 
   if (error) throw new Error(error.message)
 

@@ -913,6 +913,134 @@ async function fetchMediaAttachment(
   }
 }
 
+// Vocabulário de status persistido em `devices.status`. Espelha EXATAMENTE o
+// `normalizedStatus` calculado em `evolution-instances/index.ts` (ação `list`,
+// ~l.524-531) — usar valores diferentes aqui criaria um TERCEIRO dialeto de
+// status, e `Index.tsx:511` só reconhece `'open'`/`'connected'` como conectado
+// (o `list` já usa `'connected'`, não `'open'`, então é esse o vocabulário que
+// vence). Estado não mapeado devolve `null` de propósito: melhor não escrever
+// nada do que sobrescrever um status confiável com um estado desconhecido.
+function statusDeConexaoNormalizado(estadoBruto: string): 'connected' | 'disconnected' | 'connecting' | null {
+  const estado = (estadoBruto || '').toLowerCase()
+  if (['open', 'connected', 'online', 'connection'].includes(estado)) return 'connected'
+  if (['close', 'closed', 'disconnected', 'offline'].includes(estado)) return 'disconnected'
+  if (estado === 'connecting') return 'connecting'
+  return null
+}
+
+/**
+ * `connection.update`: o evento que faltava assinar (ver `WEBHOOK_EVENTS` em
+ * `sync-instances/index.ts`) para `devices.status` parar de ficar preso em
+ * `'connecting'` para sempre depois que o QR é lido. Até esta função existir,
+ * a coluna só era escrita em 4 pontos de `evolution-instances/index.ts`
+ * (create/connect -> 'connecting', disconnect -> 'disconnected', delete ->
+ * 'deleted') e nenhum deles rodava depois de uma conexão bem-sucedida — só a
+ * tela de Conexão WhatsApp (`InstancesSettings.tsx`) sabia a verdade, porque
+ * consultava a Evolution ao vivo e nunca persistia.
+ *
+ * NUNCA LANÇA: é o mesmo webhook único de ingestão da empresa (ver comentário
+ * grande no `Deno.serve` no fim do arquivo) — um erro aqui não pode virar 500
+ * nem impedir a resposta 200, sob pena de a Evolution reentregar o payload.
+ */
+async function tratarConnectionUpdate(body: Record<string, any>): Promise<Response> {
+  try {
+    const dados = (body.data && typeof body.data === 'object') ? body.data as Record<string, any> : {}
+    const estadoBruto = String(dados.state ?? dados.connection ?? dados.status ?? '')
+    const status = statusDeConexaoNormalizado(estadoBruto)
+
+    if (!status) {
+      console.log(
+        JSON.stringify({ scope: 'connection_update', acao: 'ignorado', instance: body.instance, estadoBruto, build: BUILD_MARKER }),
+      )
+      return new Response(
+        JSON.stringify({ status: 'ignored', reason: 'unmapped connection state', build: BUILD_MARKER }),
+        { status: 200 },
+      )
+    }
+
+    // `deleted_at=is.null`: instância removida no app não deve reviver por um
+    // eco de conexão tardio da Evolution (ex.: delete ainda não propagado lá).
+    const resp = await fetch(
+      `${SUPABASE_URL}/rest/v1/devices?instance_key=eq.${encodeURIComponent(body.instance)}&deleted_at=is.null`,
+      { method: 'PATCH', headers: sbHeaders(), body: JSON.stringify({ status }) },
+    )
+
+    if (!resp.ok) {
+      const erro = await resp.text().catch(() => '')
+      console.warn(
+        JSON.stringify({
+          scope: 'connection_update',
+          acao: 'patch_falhou',
+          instance: body.instance,
+          httpStatus: resp.status,
+          erro: erro.slice(0, 300),
+          build: BUILD_MARKER,
+        }),
+      )
+    } else {
+      console.log(
+        JSON.stringify({ scope: 'connection_update', acao: 'atualizado', instance: body.instance, status, build: BUILD_MARKER }),
+      )
+    }
+
+    return new Response(
+      JSON.stringify({ status: 'success', action: 'connection_update', deviceStatus: status, build: BUILD_MARKER }),
+      { status: 200 },
+    )
+  } catch (err) {
+    console.warn(
+      JSON.stringify({ scope: 'connection_update', acao: 'excecao', erro: String(err), build: BUILD_MARKER }),
+    )
+    return new Response(
+      JSON.stringify({ status: 'error', reason: 'connection_update_exception', build: BUILD_MARKER }),
+      { status: 200 },
+    )
+  }
+}
+
+/**
+ * ITEM 12: dispara a transcrição automática do áudio RECEBIDO na edge
+ * function `audio-transcribe`, SEM NUNCA aguardar aqui.
+ *
+ * Este é o ÚNICO webhook de ingestão de mensagens da empresa (ver o
+ * comentário grande em `Deno.serve`, no fim do arquivo). A Groq é um
+ * serviço de terceiro: pode demorar segundos, pode estar fora do ar, pode
+ * devolver erro — e nada disso pode atrasar nem derrubar o salvamento da
+ * PRÓXIMA mensagem que chegar, de qualquer aparelho da frota. Por isso:
+ *
+ *   1. NUNCA se dá `await` na chamada — a função que chama esta aqui
+ *      continua e devolve a resposta do webhook imediatamente.
+ *   2. `EdgeRuntime.waitUntil`, quando existe no runtime, segura a promise
+ *      viva depois que a resposta já saiu — sem ele, o isolate pode ser
+ *      pausado assim que a resposta é entregue e a chamada para
+ *      `audio-transcribe` nem chegaria a completar. Onde não existe (runtime
+ *      mais antigo), ainda assim só um `.catch()`: jamais uma exceção não
+ *      tratada, jamais um retorno que alguém espere.
+ *   3. Qualquer falha da Groq fica isolada DENTRO de `audio-transcribe`, que
+ *      marca `transcription_status = 'failed'` na própria linha — a
+ *      mensagem e o áudio já salvos não são tocados.
+ */
+function dispararTranscricao(messageId: string, audioUrl: string): void {
+  const chamada = fetch(`${SUPABASE_URL}/functions/v1/audio-transcribe`, {
+    method: 'POST',
+    headers: sbHeaders(),
+    body: JSON.stringify({ message_id: messageId, audio_url: audioUrl }),
+  })
+    .then((resp) => {
+      if (!resp.ok) {
+        mediaWarn('transcricao_http_falhou', { messageId, status: resp.status })
+      }
+    })
+    .catch((err) => {
+      mediaWarn('transcricao_fetch_falhou', { messageId, error: String(err) })
+    })
+
+  const runtime = (globalThis as Record<string, any>).EdgeRuntime
+  if (runtime?.waitUntil) {
+    runtime.waitUntil(chamada)
+  }
+}
+
 async function tratarWebhook(req: Request): Promise<Response> {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'method not allowed' }), { status: 405 })
@@ -929,6 +1057,15 @@ async function tratarWebhook(req: Request): Promise<Response> {
   // A Evolution v2 emite "apagar para todos" como messages.delete — evento
   // próprio, com payload plano. Sem este ramo o revoke não chega nunca.
   const isDelete = event === 'messages.delete' || event === 'MESSAGES_DELETE'
+  // Mesmo padrão dos três acima: minúsculo-com-ponto no CORPO do webhook,
+  // maiúsculo-com-underscore na CONFIGURAÇÃO (`WEBHOOK_EVENTS`, em
+  // `sync-instances/index.ts`). Tratado ANTES do guard de evento não tratado
+  // logo abaixo, e retorna cedo: não tem nada em comum com o fluxo de mensagem.
+  const isConnectionUpdate = event === 'connection.update' || event === 'CONNECTION_UPDATE'
+
+  if (isConnectionUpdate) {
+    return await tratarConnectionUpdate(body)
+  }
 
   if (!isUpsert && !isUpdate && !isDelete) {
     return new Response(
@@ -1288,9 +1425,16 @@ async function tratarWebhook(req: Request): Promise<Response> {
 
   const citacao = await resolverCitacao(messageData.contextInfo, device.id, headers)
 
+  // ITEM 12: só ÁUDIO RECEBIDO (nunca enviado, nunca outro tipo de mídia)
+  // entra na transcrição automática. `Prefer: return=representation` só é
+  // trocado NESTE caso, para vir o `id` da linha na própria resposta do
+  // insert — evita uma segunda consulta só para descobrir o id antes de
+  // disparar a transcrição.
+  const precisaTranscricao = mediaInfo?.type === 'audio' && !isFromMe && Boolean(mediaAttachment)
+
   const insertResp = await fetch(`${SUPABASE_URL}/rest/v1/messages`, {
     method: 'POST',
-    headers: { ...headers, Prefer: 'return=minimal' },
+    headers: { ...headers, Prefer: precisaTranscricao ? 'return=representation' : 'return=minimal' },
     body: JSON.stringify({
       content,
       device_id: device.id,
@@ -1305,8 +1449,20 @@ async function tratarWebhook(req: Request): Promise<Response> {
       ...(isForwarded ? { is_forwarded: true } : {}),
       ...(citacao.reply_to_id ? { reply_to_id: citacao.reply_to_id } : {}),
       ...(citacao.reply_to_snapshot ? { reply_to_snapshot: citacao.reply_to_snapshot } : {}),
+      // Grava o estado "pendente" JÁ no insert (sem round-trip extra): é o
+      // que deixa a UI mostrar "transcrevendo..." assim que a mensagem
+      // aparece, em vez de nascer sem nenhuma pista de que uma transcrição
+      // está a caminho.
+      ...(precisaTranscricao ? { transcription_status: 'pending' } : {}),
     }),
   })
+
+  // O corpo da resposta só pode ser lido UMA VEZ (`Response.text/json`). O log
+  // de erro abaixo e o disparo da transcrição logo depois precisam dos dois
+  // do mesmo corpo, por isso a leitura é feita aqui uma única vez e
+  // reaproveitada nos dois lugares.
+  const insertRespBody =
+    !insertResp.ok || precisaTranscricao ? await insertResp.text().catch(() => '') : ''
 
   if (mediaInfo) {
     mediaLog('message_insert_result', {
@@ -1315,12 +1471,31 @@ async function tratarWebhook(req: Request): Promise<Response> {
       attachmentInserted: Boolean(attachments),
     })
     if (!insertResp.ok) {
-      const insertError = await insertResp.text().catch(() => '')
       mediaWarn('message_insert_failed', {
         messageId: externalId,
         status: insertResp.status,
-        errorText: insertError.slice(0, 700),
+        errorText: insertRespBody.slice(0, 700),
       })
+    }
+  }
+
+  // ITEM 12: dispara a transcrição SEM NUNCA bloquear a resposta deste
+  // webhook. Ver o comentário grande em `dispararTranscricao`, acima — este é
+  // o único ponto de ingestão de mensagens da empresa, e a Groq pode demorar
+  // ou estar fora do ar sem que isso afete a entrega de nenhuma mensagem.
+  if (precisaTranscricao && insertResp.ok) {
+    try {
+      const inserted = JSON.parse(insertRespBody || '[]')
+      const novaMsg = Array.isArray(inserted) ? inserted[0] : inserted
+      if (novaMsg?.id && mediaAttachment?.url) {
+        dispararTranscricao(novaMsg.id, mediaAttachment.url)
+      } else {
+        mediaWarn('transcricao_sem_id', { messageId: externalId })
+      }
+    } catch (err) {
+      // Nunca pode derrubar a ingestão: a mensagem já foi salva com sucesso
+      // acima, só a transcrição automática que não vai sair deste áudio.
+      mediaWarn('transcricao_dispatch_falhou', { messageId: externalId, error: String(err) })
     }
   }
 

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain } = require('electron')
+const { app, BrowserWindow, shell, ipcMain, session } = require('electron')
 const { autoUpdater } = require('electron-updater')
 const log = require('electron-log')
 const path = require('path')
@@ -190,7 +190,48 @@ ipcMain.handle('gerar-pdf-proposta', async (_evento, html) => {
   }
 })
 
+// ── Downloads: salvar direto em Downloads, sem diálogo ─────────────────────────
+
+/**
+ * Sem isso, o Electron abre o diálogo nativo "Salvar como" para todo download
+ * disparado por `<a download>` (é o `downloadFile` de `src/lib/download.ts`) —
+ * era essa a queixa: "o app pergunta onde quero salvar". Interceptando
+ * `will-download` e chamando `item.setSavePath()` ANTES do download começar, o
+ * Electron pula o diálogo e grava direto.
+ *
+ * A pasta vem de `app.getPath('downloads')`, não de `%USERPROFILE%\Downloads`
+ * montado na mão: é a API própria do Electron para isso, e ela acerta mesmo
+ * quando o usuário moveu a pasta de padrão do Windows para outro lugar.
+ */
+function caminhoSemColisao(pasta, nomeArquivo) {
+  const ext = path.extname(nomeArquivo)
+  const base = path.basename(nomeArquivo, ext)
+  let candidato = path.join(pasta, nomeArquivo)
+  let contador = 1
+  // O `nomeParaDownload` do renderer já carimba data/hora nos nomes genéricos
+  // (áudio/vídeo sem nome real), então colisão real é rara — mas
+  // `setSavePath` sobrescreve sem avisar se o arquivo já existir, e dois
+  // documentos com o mesmo nome original ainda podem colidir. Esta é a
+  // última rede: soma " (1)", " (2)"... até achar um nome livre.
+  while (fs.existsSync(candidato)) {
+    candidato = path.join(pasta, `${base} (${contador})${ext}`)
+    contador += 1
+  }
+  return candidato
+}
+
+function setupDownloads() {
+  session.defaultSession.on('will-download', (_evento, item) => {
+    const pastaDownloads = app.getPath('downloads')
+    const destino = caminhoSemColisao(pastaDownloads, item.getFilename())
+    item.setSavePath(destino)
+  })
+}
+
 // ── Ciclo de vida do app ──────────────────────────────────────────────────────
 
-app.whenReady().then(createWindow)
+app.whenReady().then(() => {
+  createWindow()
+  setupDownloads()
+})
 app.on('window-all-closed', () => app.quit())

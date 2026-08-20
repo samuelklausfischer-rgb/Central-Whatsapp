@@ -3,7 +3,14 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || ''
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
 const DEFAULT_WEBHOOK_URL = `${SUPABASE_URL}/functions/v1/evolution-webhook`
-const WEBHOOK_EVENTS = ['MESSAGES_UPSERT', 'MESSAGES_UPDATE']
+// `CONNECTION_UPDATE` foi acrescentado para consertar `devices.status` na ORIGEM:
+// antes desta linha, a coluna só era escrita em 4 pontos de
+// `evolution-instances/index.ts` (create/connect -> 'connecting', disconnect ->
+// 'disconnected', delete -> 'deleted') e NUNCA saía de 'connecting' depois que o
+// QR era lido, porque nenhum evento assinado aqui cobria mudança de conexão — só
+// mensagem. `MESSAGES_UPSERT`/`MESSAGES_UPDATE` são preservados: são a função
+// principal do app (recebimento de mensagem) e não podem ser perdidos.
+const WEBHOOK_EVENTS = ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'CONNECTION_UPDATE']
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
