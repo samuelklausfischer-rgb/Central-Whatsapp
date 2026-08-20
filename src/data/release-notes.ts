@@ -7,6 +7,27 @@ export interface ReleaseNote {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.214',
+    date: '2026-08-20 15:50',
+    title: 'A fila de melhorias que vocês pediram',
+    details: [
+      '🎙️ Gravar áudio ficou como no WhatsApp: ao começar a gravar, o botão do microfone dá lugar ao de enviar, no mesmo canto. Antes ele continuava ali e, quem clicava esperando enviar, apagava a gravação sem querer. Agora também dá para descartar no meio, ou parar para ouvir antes de mandar',
+      '📝 A IA de organizar texto voltou a funcionar. O serviço que usávamos foi desativado pelo fornecedor e por isso ela vinha dando erro — trocamos pelo substituto oficial, que é mais rápido',
+      '🔊 Áudio recebido agora ganha transcrição automática, logo abaixo do player, como no WhatsApp. Vale para os áudios novos',
+      '🗣️ E, ao gravar, dá para transcrever antes de enviar: o texto cai no campo da mensagem, você lê, corrige o que quiser e manda como texto',
+      '💬 O painel de informações do contato foi reorganizado por assunto e voltou a abrir — na versão anterior ele ficava só uma tela escura, sem conteúdo',
+      '🏷️ Etiquetas: agora dá para criar, renomear, mudar a cor e excluir ali mesmo no contato, sem ir em Configurações. E elas aparecem na lista de conversas, com cor e nome, além de virarem filtro',
+      '📱 As instâncias mostram a própria foto do WhatsApp na lista, no lugar do ícone genérico de telefone',
+      '🔀 Novo botão ao lado de Filtros para esconder as conversas já atribuídas, deixando à vista só o que ninguém pegou',
+      '📎 Dá para arrastar um arquivo direto para cima da conversa e anexar, sem passar pelo clipe',
+      '✍️ Toggle para mandar uma mensagem sem assinatura, ao lado de "Enviando como". Vale só para aquela conversa e volta ao normal na seguinte',
+      '💾 No app do computador, baixar arquivo não pergunta mais onde salvar: vai direto para a pasta Downloads. E áudios e vídeos sem nome recebem nome com data e hora, então um não sobrescreve o outro',
+      '📋 O botão de reportar problema ganhou a aba "Meus reportes": você acompanha o status, o prazo e o checklist do que enviou',
+      '🐛 Corrigido em Anotações: quando a internet caía, a tela dizia "Nenhuma anotação" — o contrário da verdade',
+      '🐛 Corrigido: excluir, editar e cancelar só apareciam ao passar o mouse e ficavam invisíveis no celular',
+    ],
+  },
+  {
     version: '0.0.213',
     date: '2026-08-18 17:05',
     title: 'A cara nova chega para todo mundo',
