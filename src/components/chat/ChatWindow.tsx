@@ -4931,20 +4931,16 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                         <Captions className="h-4 w-4" />
                       )}
                     </Button>
-                    {/* ITEM 13: botão principal — para E envia num clique só.
-                        Ícone e título comunicam "enviar", porque é isso que
-                        ele faz agora. */}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      title="Enviar áudio"
-                      onClick={() => stopRecording(true)}
-                      disabled={isTranscribing}
-                      className="h-8 w-8 text-blue-400 hover:text-blue-300 hover:bg-blue-500/20 rounded-full disabled:opacity-50"
-                    >
-                      <Send className="h-4 w-4" />
-                    </Button>
+                    {/*
+                      O "enviar" NÃO fica aqui.
+                      Ele mora no botão redondo grande à direita do compositor,
+                      que durante a gravação toma o lugar do microfone. Ter um
+                      segundo enviar aqui dentro deixava dois botões da mesma
+                      ação na mesma tela, competindo — e o de fora é o que a
+                      pessoa já procura, porque é onde o microfone estava.
+                      Esta barrinha cuida do resto: descartar, pausar, revisar
+                      e transcrever.
+                    */}
                   </div>
                 )}
               </div>
@@ -5277,7 +5273,34 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                 </DialogFooter>
               </DialogContent>
             </Dialog>
-            {audioUrl || msgText.trim() || attachments.length > 0 ? (
+            {/*
+              Três estados para o MESMO lugar, e a ordem importa.
+
+              `isRecording` vem PRIMEIRO. Enquanto gravava, esta condição só
+              olhava texto/anexo/`audioUrl` — todos vazios naquele momento — e
+              caía no microfone: o botão de INICIAR gravação continuava ali,
+              durante a gravação. Quem tem o hábito do WhatsApp clicava nele
+              esperando enviar e chamava `startRecording` de novo, que zera o
+              blob e o cronômetro. Era o reset que o usuário relatou, e ele
+              sobrevivia fora da barrinha de gravação, que já tinha sido
+              corrigida antes.
+
+              Agora, gravando, este botão é o de ENVIAR o áudio, no mesmo lugar
+              e em destaque. A barrinha acima cuida de descartar, pausar e
+              revisar — e não repete um segundo "enviar" na mesma tela.
+            */}
+            {isRecording ? (
+              <Button
+                type="button"
+                size="icon"
+                title="Enviar áudio"
+                onClick={() => stopRecording(true)}
+                disabled={isSending}
+                className="rounded-full flex-shrink-0 h-11 w-11 bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/30 hover:shadow-blue-600/50 transition-all duration-300 hover:scale-105 active:scale-95 animate-pulse-ring disabled:opacity-50 disabled:shadow-none disabled:hover:scale-100"
+              >
+                <Send className="h-5 w-5 ml-0.5" />
+              </Button>
+            ) : audioUrl || msgText.trim() || attachments.length > 0 ? (
               <Button
                 type="submit"
                 size="icon"
@@ -5294,6 +5317,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
               <Button
                 type="button"
                 size="icon"
+                title="Gravar áudio"
                 onClick={startRecording}
                 disabled={isSending}
                 className="rounded-full flex-shrink-0 h-11 w-11 bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/30 hover:shadow-blue-600/50 transition-all duration-300 hover:scale-105 active:scale-95 disabled:opacity-50 disabled:shadow-none disabled:hover:scale-100"
