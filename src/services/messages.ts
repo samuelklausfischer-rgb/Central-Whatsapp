@@ -157,7 +157,34 @@ export const sendMessage = async (data: {
   }
   if (data.noSignature) argumentos.p_sem_assinatura = true
 
-  const { data: result, error } = await supabase.rpc('send_whatsapp_message', argumentos)
+  let { data: result, error } = await supabase.rpc('send_whatsapp_message', argumentos)
+
+  /**
+   * Rede de segurança: banco sem o parâmetro que este cliente conhece.
+   *
+   * Já aconteceu. O toggle "sem assinatura" foi publicado antes da migration
+   * ser aplicada, e como o PostgREST resolve a função pela LISTA DE ARGUMENTOS,
+   * mandar um parâmetro que o banco ainda não tem devolve `PGRST202` — e a
+   * mensagem simplesmente não saía.
+   *
+   * Num app de atendimento, "não enviou nada" é pior que "enviou assinado": a
+   * pessoa perde o que digitou e costuma nem entender o porquê. Então aqui a
+   * falha degrada — reenvia sem o parâmetro e devolve um aviso para a interface
+   * contar o que houve, em vez de sumir com a mensagem.
+   *
+   * Só entra neste caminho quem pediu `noSignature`; envio normal nunca passa
+   * por aqui.
+   */
+  let assinaturaNaoSuprimida = false
+  if (error && data.noSignature && error.code === 'PGRST202') {
+    console.warn(
+      '[envio] banco não conhece `p_sem_assinatura` — reenviando com assinatura.',
+      error.message,
+    )
+    delete argumentos.p_sem_assinatura
+    ;({ data: result, error } = await supabase.rpc('send_whatsapp_message', argumentos))
+    assinaturaNaoSuprimida = !error
+  }
 
   if (error) throw new Error(error.message)
 
@@ -171,6 +198,13 @@ export const sendMessage = async (data: {
     const corpo = typeof parsed.body === 'string' ? parsed.body : parsed.body ? JSON.stringify(parsed.body) : ''
     const causa = corpo ? `: ${corpo.slice(0, 300)}` : ''
     throw new Error(parsed.error + detail + causa)
+  }
+
+  // Sinaliza o caso da rede de segurança acima: a mensagem SAIU, mas assinada,
+  // porque o banco não suportava suprimir. Quem chama decide como contar isso —
+  // o importante é não deixar a pessoa achar que saiu sem assinatura.
+  if (assinaturaNaoSuprimida && parsed && typeof parsed === 'object') {
+    return { ...parsed, assinaturaNaoSuprimida: true }
   }
 
   return parsed

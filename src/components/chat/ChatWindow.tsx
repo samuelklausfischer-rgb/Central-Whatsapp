@@ -2267,7 +2267,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         // Texto puro que caiu neste ramo (edição em curso, por exemplo) —
         // mesmo campo `noSignature` do caminho otimista acima, para que o
         // toggle valha qualquer que seja a rota de envio de texto.
-        await sendMessage({
+        const envio = await sendMessage({
           content,
           device_id: device.id,
           sender_id: user.id,
@@ -2278,6 +2278,18 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           mentionEveryone: marcarTodos,
           noSignature: semAssinatura,
         })
+
+        // A mensagem SAIU, mas com assinatura: o banco não suportava suprimir e
+        // `sendMessage` reenviou sem o pedido, em vez de deixar a mensagem se
+        // perder. Avisar é obrigatório — quem desligou a assinatura de propósito
+        // precisa saber que ela foi junto assim mesmo.
+        if (envio?.assinaturaNaoSuprimida) {
+          toast({
+            title: 'Mensagem enviada, mas com assinatura',
+            description:
+              'A opção de enviar sem assinatura ainda não está disponível neste servidor. Avise o time técnico.',
+          })
+        }
       }
       limparCompositorAposEnvio(chaveEnvio, () => {
         setMsgText('')
