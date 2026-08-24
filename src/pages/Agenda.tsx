@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAuth } from '@/hooks/use-auth'
@@ -34,6 +35,15 @@ import {
   type ModoDaAgenda,
 } from '@/services/agenda'
 import type { AgendaEscopo, AgendaGroup, AgendaImportancia } from '@/lib/supabase/types'
+import {
+  conectar as conectarOutlook,
+  desconectar as desconectarOutlook,
+  getEventosDoOutlook,
+  getStatus as getStatusDoOutlook,
+  criarNoOutlook,
+  type EventoDoOutlook,
+  type StatusDaConexao,
+} from '@/services/agenda_microsoft'
 
 /**
  * ITEM 1: a Agenda.
@@ -73,6 +83,66 @@ function paraCampoLocal(d: Date): string {
   return format(d, "yyyy-MM-dd'T'HH:mm")
 }
 
+/**
+ * Um compromisso na tela pode vir de dois lugares: do nosso banco ou do Outlook
+ * da pessoa. Esta é a forma comum, para a grade e a lista do dia não precisarem
+ * saber a diferença — só o rótulo de origem muda.
+ */
+interface ItemDaAgenda {
+  id: string
+  titulo: string
+  descricao: string | null
+  starts_at: string
+  ends_at: string
+  dia_inteiro: boolean
+  importancia: AgendaImportancia
+  link: string | null
+  email: string | null
+  origem: 'interna' | 'outlook'
+  escopo: AgendaEscopo | null
+  setor: string | null
+  /** Só compromisso NOSSO pode ser excluído daqui; o do Outlook é leitura. */
+  podeExcluir: boolean
+}
+
+function daNossaAgenda(ev: EventoComPessoas, meuId: string | undefined): ItemDaAgenda {
+  return {
+    id: ev.id,
+    titulo: ev.titulo,
+    descricao: ev.descricao,
+    starts_at: ev.starts_at,
+    ends_at: ev.ends_at,
+    dia_inteiro: ev.dia_inteiro,
+    importancia: ev.importancia,
+    link: ev.link,
+    email: ev.email,
+    origem: 'interna',
+    escopo: ev.escopo,
+    setor: ev.setor,
+    podeExcluir: ev.created_by === meuId,
+  }
+}
+
+function doOutlook(ev: EventoDoOutlook): ItemDaAgenda {
+  return {
+    id: `outlook:${ev.id}`,
+    titulo: ev.titulo,
+    descricao: ev.descricao,
+    starts_at: ev.starts_at,
+    ends_at: ev.ends_at,
+    dia_inteiro: ev.dia_inteiro,
+    // O Outlook não tem "importância" no mesmo sentido; entra como normal para
+    // não inventar urgência que a pessoa não marcou.
+    importancia: 'normal',
+    link: ev.link,
+    email: null,
+    origem: 'outlook',
+    escopo: null,
+    setor: null,
+    podeExcluir: false,
+  }
+}
+
 interface Rascunho {
   titulo: string
   descricao: string
@@ -84,6 +154,8 @@ interface Rascunho {
   email: string
   escopo: AgendaEscopo
   groupId: string
+  /** Salvar no Outlook em vez de na nossa agenda. Só para escopo pessoal. */
+  noOutlook: boolean
 }
 
 function rascunhoVazio(dia: Date): Rascunho {
@@ -103,6 +175,7 @@ function rascunhoVazio(dia: Date): Rascunho {
     email: '',
     escopo: 'usuario',
     groupId: '',
+    noOutlook: false,
   }
 }
 
@@ -114,9 +187,15 @@ export default function Agenda() {
   const [diaSelecionado, setDiaSelecionado] = useState(() => startOfDay(new Date()))
   const [modo, setModo] = useState<ModoDaAgenda>('tudo')
   const [eventos, setEventos] = useState<EventoComPessoas[]>([])
+  const [doOutlookNoPeriodo, setDoOutlookNoPeriodo] = useState<EventoDoOutlook[]>([])
+  const [conexao, setConexao] = useState<StatusDaConexao>({ configurado: false, conectado: false })
   const [grupos, setGrupos] = useState<AgendaGroup[]>([])
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
+  /** Falha do Outlook é avisada à parte: a agenda daqui continua servindo. */
+  const [erroOutlook, setErroOutlook] = useState<string | null>(null)
+  /** Sobe depois de criar no Outlook, para a consulta ao vivo refazer. */
+  const [recarregaOutlook, setRecarregaOutlook] = useState(0)
 
   const [dialogoAberto, setDialogoAberto] = useState(false)
   const [rascunho, setRascunho] = useState<Rascunho>(() => rascunhoVazio(new Date()))
@@ -156,17 +235,76 @@ export default function Agenda() {
       .catch(() => setGrupos([]))
   }, [])
 
-  /** Eventos por dia, para a grade não varrer a lista inteira 42 vezes. */
+  useEffect(() => {
+    getStatusDoOutlook().then(setConexao)
+  }, [])
+
+  /**
+   * Compromissos do Outlook do período visível.
+   *
+   * Consulta AO VIVO, sem copiar para o nosso banco — é o que evita compromisso
+   * duplicado e compromisso fantasma, e é o que faz repetição funcionar sem
+   * implementarmos recorrência (a Microsoft já devolve as ocorrências
+   * expandidas).
+   *
+   * Só nos modos que incluem a agenda pessoal: em "Setor" e "Grupos" o Outlook
+   * de alguém não tem o que fazer ali.
+   */
+  useEffect(() => {
+    if (!conexao.conectado || (modo !== 'meus' && modo !== 'tudo')) {
+      setDoOutlookNoPeriodo([])
+      setErroOutlook(null)
+      return
+    }
+    let vivo = true
+    getEventosDoOutlook(gradeInicio.toISOString(), gradeFim.toISOString())
+      .then((lista) => {
+        if (!vivo) return
+        setDoOutlookNoPeriodo(lista)
+        setErroOutlook(null)
+      })
+      .catch((e) => {
+        if (!vivo) return
+        setDoOutlookNoPeriodo([])
+        setErroOutlook(e instanceof Error ? e.message : 'Não foi possível ler o Outlook')
+        // Conexão revogada ou expirada: o servidor apaga a linha e responde 409,
+        // então a tela volta a oferecer "Conectar" em vez de insistir no erro.
+        if (e instanceof Error && /não conectado|expirou/i.test(e.message)) {
+          setConexao((c) => ({ ...c, conectado: false }))
+        }
+      })
+    return () => {
+      vivo = false
+    }
+  }, [conexao.conectado, modo, gradeInicio, gradeFim, recarregaOutlook])
+
+  /**
+   * Tudo o que aparece na tela, das duas origens, na forma comum — e por dia,
+   * para a grade não varrer a lista inteira 42 vezes.
+   *
+   * Ordenado por horário DENTRO do dia: sem isso os compromissos do Outlook
+   * cairiam todos depois dos nossos, e a lista do dia deixaria de ser uma linha
+   * do tempo.
+   */
   const porDia = useMemo(() => {
-    const mapa = new Map<string, EventoComPessoas[]>()
-    for (const ev of eventos) {
-      const chave = format(new Date(ev.starts_at), 'yyyy-MM-dd')
+    const todos: ItemDaAgenda[] = [
+      ...eventos.map((ev) => daNossaAgenda(ev, user?.id)),
+      ...doOutlookNoPeriodo.map(doOutlook),
+    ]
+    const mapa = new Map<string, ItemDaAgenda[]>()
+    for (const ev of todos) {
+      const quando = new Date(ev.starts_at)
+      if (Number.isNaN(quando.getTime())) continue
+      const chave = format(quando, 'yyyy-MM-dd')
       const atual = mapa.get(chave) || []
       atual.push(ev)
       mapa.set(chave, atual)
     }
+    for (const lista of mapa.values()) {
+      lista.sort((a, b) => a.starts_at.localeCompare(b.starts_at))
+    }
     return mapa
-  }, [eventos])
+  }, [eventos, doOutlookNoPeriodo, user?.id])
 
   const doDiaSelecionado = porDia.get(format(diaSelecionado, 'yyyy-MM-dd')) || []
 
@@ -207,6 +345,25 @@ export default function Agenda() {
 
     setSalvando(true)
     try {
+      /*
+        Salvar no Outlook NÃO grava também no nosso banco. O compromisso volta
+        pela consulta ao vivo — gravar dos dois lados criaria exatamente o
+        compromisso duplicado que a consulta ao vivo existe para evitar.
+      */
+      if (rascunho.escopo === 'usuario' && rascunho.noOutlook) {
+        await criarNoOutlook({
+          titulo: rascunho.titulo.trim(),
+          descricao: rascunho.descricao.trim() || null,
+          inicio: rascunho.inicio,
+          fim: rascunho.fim,
+          dia_inteiro: rascunho.diaInteiro,
+        })
+        setDialogoAberto(false)
+        toast({ title: 'Compromisso criado no Outlook' })
+        setRecarregaOutlook((n) => n + 1)
+        return
+      }
+
       await criarEvento({
         titulo: rascunho.titulo.trim(),
         descricao: rascunho.descricao.trim() || null,
@@ -247,6 +404,52 @@ export default function Agenda() {
       })
     }
   }
+
+  const ligarOutlook = async () => {
+    try {
+      await conectarOutlook()
+      toast({
+        title: 'Abrimos a autorização da Microsoft',
+        description: 'Ao terminar, volte para esta aba e a conexão já estará feita.',
+      })
+    } catch (e) {
+      toast({
+        title: e instanceof Error ? e.message : 'Não foi possível iniciar a conexão',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const desligarOutlook = async () => {
+    try {
+      await desconectarOutlook()
+      setConexao((c) => ({ ...c, conectado: false, conta_email: null }))
+      setDoOutlookNoPeriodo([])
+      toast({ title: 'Outlook desconectado' })
+    } catch (e) {
+      toast({
+        title: e instanceof Error ? e.message : 'Não foi possível desconectar',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  /**
+   * A conexão termina numa ABA à parte (o retorno cai na função do servidor,
+   * não no app). Ao voltar o foco para cá, reconsultamos — assim a tela se
+   * atualiza sozinha, sem a pessoa precisar recarregar nada.
+   */
+  useEffect(() => {
+    const aoVoltar = () => {
+      if (document.visibilityState === 'visible') getStatusDoOutlook().then(setConexao)
+    }
+    window.addEventListener('focus', aoVoltar)
+    document.addEventListener('visibilitychange', aoVoltar)
+    return () => {
+      window.removeEventListener('focus', aoVoltar)
+      document.removeEventListener('visibilitychange', aoVoltar)
+    }
+  }, [])
 
   return (
     <div className="flex h-full flex-col">
@@ -289,6 +492,41 @@ export default function Agenda() {
           </Button>
         </div>
       </div>
+
+      {/*
+        Só aparece quando o servidor já tem as chaves do aplicativo. Sem elas,
+        oferecer "Conectar" seria prometer um botão que daria erro.
+      */}
+      {conexao.configurado && (
+        <div className="mx-6 mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-border/60 bg-accent/30 px-4 py-2.5">
+          <CalendarDays className="h-4 w-4 shrink-0 text-sky-400" aria-hidden="true" />
+          {conexao.conectado ? (
+            <>
+              <span className="min-w-0 flex-1 break-words text-sm text-muted-foreground">
+                Outlook conectado{conexao.conta_email ? ` como ${conexao.conta_email}` : ''}
+              </span>
+              <Button variant="ghost" size="sm" onClick={desligarOutlook}>
+                Desconectar
+              </Button>
+            </>
+          ) : (
+            <>
+              <span className="min-w-0 flex-1 break-words text-sm text-muted-foreground">
+                Conecte seu Outlook para ver aqui os compromissos que já estão lá.
+              </span>
+              <Button size="sm" onClick={ligarOutlook}>
+                Conectar Outlook
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+
+      {erroOutlook && (
+        <p className="mx-6 mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300">
+          {erroOutlook} — os compromissos criados aqui continuam aparecendo normalmente.
+        </p>
+      )}
 
       {erro && (
         <p className="mx-6 mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
@@ -364,10 +602,20 @@ export default function Agenda() {
             doDiaSelecionado.map((ev) => (
               <div key={ev.id} className="rounded-lg border border-border/60 bg-accent/30 p-3">
                 <div className="flex items-start justify-between gap-2">
-                  <p className="text-sm font-medium">{ev.titulo}</p>
-                  <span className={cn('rounded border px-1.5 text-[10px]', CORES_IMPORTANCIA[ev.importancia])}>
-                    {ev.importancia}
-                  </span>
+                  <p className="min-w-0 flex-1 break-words text-sm font-medium">{ev.titulo}</p>
+                  {/* Origem antes de importância: saber DE ONDE vem é o que
+                      responde "por que isso está aqui se eu não marquei". */}
+                  {ev.origem === 'outlook' ? (
+                    <span className="shrink-0 rounded border border-sky-500/30 bg-sky-500/10 px-1.5 text-[10px] text-sky-300">
+                      Outlook
+                    </span>
+                  ) : (
+                    <span
+                      className={cn('shrink-0 rounded border px-1.5 text-[10px]', CORES_IMPORTANCIA[ev.importancia])}
+                    >
+                      {ev.importancia}
+                    </span>
+                  )}
                 </div>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   {ev.dia_inteiro
@@ -387,7 +635,8 @@ export default function Agenda() {
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
                     >
-                      <Link2 className="h-3 w-3" /> Abrir link
+                      <Link2 className="h-3 w-3" />
+                      {ev.origem === 'outlook' ? 'Abrir no Outlook' : 'Abrir link'}
                     </a>
                   )}
                   {ev.email && (
@@ -398,7 +647,10 @@ export default function Agenda() {
                       <Mail className="h-3 w-3" /> {ev.email}
                     </a>
                   )}
-                  {ev.created_by === user?.id && (
+                  {/* Compromisso do Outlook é somente leitura aqui: apagar e
+                      editar continuam sendo lá, para não existirem dois donos
+                      do mesmo item. */}
+                  {ev.podeExcluir && (
                     <button
                       type="button"
                       onClick={() => remover(ev.id)}
@@ -498,6 +750,27 @@ export default function Agenda() {
                 </Select>
               </div>
             </div>
+
+            {/*
+              Só na agenda pessoal: "setor" e "grupo" são conceitos nossos, que
+              não existem no Outlook de ninguém.
+            */}
+            {rascunho.escopo === 'usuario' && conexao.conectado && (
+              <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border/60 bg-accent/30 p-3">
+                <Checkbox
+                  checked={rascunho.noOutlook}
+                  onCheckedChange={(v) => setRascunho((r) => ({ ...r, noOutlook: v === true }))}
+                  className="mt-0.5"
+                />
+                <span className="min-w-0 text-sm">
+                  Salvar no Outlook
+                  <span className="block text-xs text-muted-foreground">
+                    Vai para a sua agenda da Microsoft e aparece também no celular. Depois, editar
+                    e excluir se faz por lá.
+                  </span>
+                </span>
+              </label>
+            )}
 
             {rascunho.escopo === 'grupo' && (
               <div className="grid gap-1.5">
