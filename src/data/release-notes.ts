@@ -3,6 +3,33 @@ export interface ReleaseNote {
   date: string
   title: string
   details: string[]
+  /**
+   * ITEM 4: um exemplo curto de COMO usar o que chegou nesta versão. Opcional
+   * de propósito — as versões antigas não têm, e reescrever o histórico só para
+   * preencher um campo não ajudaria ninguém. Vale para as próximas.
+   */
+  usabilidade?: string
+}
+
+export type CategoriaNota = 'novidade' | 'correcao'
+
+/**
+ * ITEM 4: separa o que é função nova do que é bug corrigido.
+ *
+ * Lê a convenção que os dados JÁ seguem — correção abre com 🐛, e o texto
+ * costuma começar com "Corrigido". O diálogo por sua vez já fatiava a string
+ * em `slice(0, 2)` para o ícone e `slice(2)` para o texto, então esta função só
+ * formaliza o mesmo corte.
+ *
+ * Feito assim, e não com um campo novo por item, porque a alternativa era
+ * reescrever mais de 600 linhas de histórico para ganhar uma informação que já
+ * está escrita ali — com risco de errar na transcrição e sem ninguém revisando.
+ */
+export function classificarNota(detalhe: string): CategoriaNota {
+  const icone = detalhe.slice(0, 2)
+  const texto = detalhe.slice(2).trim()
+  if (icone === '🐛') return 'correcao'
+  return /^corrigid/i.test(texto) ? 'correcao' : 'novidade'
 }
 
 export const releaseNotes: ReleaseNote[] = [

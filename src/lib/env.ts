@@ -4,6 +4,7 @@ type AppRuntimeConfig = {
   VITE_RELATORIOS_APP_URL?: string
   VITE_LICITACAO_APP_URL?: string
   VITE_LICITACAO_SUPABASE_URL?: string
+  VITE_PRN_HUB_APP_URL?: string
 }
 
 /**
@@ -60,4 +61,12 @@ export const appEnv = {
     runtimeConfig?.VITE_LICITACAO_SUPABASE_URL ||
     import.meta.env.VITE_LICITACAO_SUPABASE_URL ||
     LICITACAO_SUPABASE_URL_PADRAO,
+  // ITEM 2: PRN-hub. Sem padrão no código porque a URL de publicação ainda não
+  // foi informada — e chutar um domínio seria pior que a tela de "não
+  // configurado", que ao menos diz o que falta. Assim que a URL existir, ela
+  // deve virar uma constante aqui em cima como as outras duas, pela lição da
+  // v0.0.207 registrada no comentário acima: só em `.env.local` ela falta no
+  // build e a ferramenta vai quebrada para a frota, em silêncio.
+  VITE_PRN_HUB_APP_URL:
+    runtimeConfig?.VITE_PRN_HUB_APP_URL || import.meta.env.VITE_PRN_HUB_APP_URL || '',
 }

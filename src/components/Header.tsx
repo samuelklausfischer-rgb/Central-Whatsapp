@@ -26,6 +26,7 @@ import { useAuth } from '@/hooks/use-auth'
 import { useToolAccess } from '@/hooks/use-tool-access'
 import { useInstalarPwa } from '@/hooks/use-instalar-pwa'
 import { DESTINOS_PRINCIPAIS, gruposDeFerramentas, itensDeConta, ehAcao } from '@/lib/navegacao'
+import { iniciarTour } from '@/components/TourDoApp'
 import { cn } from '@/lib/utils'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { ReleaseNotesDialog } from '@/components/ReleaseNotesDialog'
@@ -61,6 +62,7 @@ function FerramentasMenu() {
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
+          data-tour="ferramentas"
           className="group gap-1.5 rounded-full h-9 px-4 border border-border text-muted-foreground transition-all duration-200 hover:text-foreground hover:bg-accent data-[state=open]:bg-accent data-[state=open]:text-foreground"
         >
           <LayoutGrid className="h-4 w-4" />
@@ -144,6 +146,10 @@ export function Header() {
               <Link
                 key={item.url}
                 to={item.url}
+                // ITEM 5: âncora do tour. A MobileTabBar usa o mesmo atributo
+                // com o mesmo valor, então o tour acha o destino em qualquer
+                // uma das duas cascas sem saber qual está montada.
+                data-tour={item.url}
                 className={`flex items-center gap-2 px-3 py-2 rounded-full text-sm font-medium transition-all duration-200 ${isActive ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent'}`}
               >
                 <item.icon className="h-4 w-4" />
@@ -257,6 +263,7 @@ export function Header() {
             <DropdownMenuTrigger asChild>
               <Button
                 variant="ghost"
+                data-tour="conta"
                 className="rounded-full h-10 pl-2 pr-4 gap-2 hover:bg-accent border border-border transition-all duration-200"
               >
                 <Avatar className="h-7 w-7 border-2 border-border">
@@ -297,9 +304,12 @@ export function Header() {
                     // `preventDefault` segura o foco: sem ele o menu devolve o foco
                     // ao avatar no mesmo instante em que o diálogo tenta pegá-lo, e
                     // o diálogo abre sem foco.
+                    // Despacha pela AÇÃO, e não assumindo que toda ação é
+                    // notificações — desde o ITEM 5 existe mais de uma.
                     onSelect={(e) => {
                       e.preventDefault()
-                      setNotifOpen(true)
+                      if (item.action === 'tour') iniciarTour()
+                      else setNotifOpen(true)
                     }}
                     className="focus:bg-accent focus:text-accent-foreground cursor-pointer"
                   >

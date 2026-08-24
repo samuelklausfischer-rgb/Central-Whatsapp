@@ -6,6 +6,7 @@ import {
   StickyNote,
   Zap,
   CalendarClock,
+  CalendarDays,
   Bell,
   BarChart3,
   Percent,
@@ -13,6 +14,8 @@ import {
   FileText,
   FileSignature,
   Gavel,
+  ClipboardList,
+  Compass,
   PenLine,
   ShieldAlert,
   Settings,
@@ -44,7 +47,7 @@ export interface AcaoNav {
   title: string
   description: string
   icon: React.ElementType
-  action: 'notifications'
+  action: 'notifications' | 'tour'
 }
 
 export type ItemDeFerramenta = DestinoNav | AcaoNav
@@ -62,6 +65,12 @@ export const DESTINOS_PRINCIPAIS: DestinoNav[] = [
   { title: 'Painel', description: 'Visão geral', icon: LayoutDashboard, url: '/dashboard' },
   { title: 'Conversas', description: 'WhatsApp', icon: MessageSquare, url: '/chat' },
   { title: 'Email', description: 'Caixa de entrada', icon: Mail, url: '/email' },
+  /*
+    ITEM 1: "deve ser um botão ao lado de emails e ferramentas" — é literalmente
+    aqui. Vira a quarta aba do rodapé no celular; conferir o aperto na tela
+    estreita antes de acrescentar uma quinta.
+  */
+  { title: 'Agenda', description: 'Compromissos', icon: CalendarDays, url: '/agenda' },
 ]
 
 /**
@@ -131,6 +140,17 @@ const LICITACOES: DestinoNav = {
  * pessoa a pessoa (`public.tool_access`), como Licitações — o critério do grupo
  * é o gate, não onde o código mora.
  */
+/**
+ * ITEM 2: o PRN-hub, onde nasce esta fila de melhorias. Liberado pessoa a pessoa
+ * por `public.tool_access`, como Licitações — hoje só para quem cuida da fila.
+ */
+const PRN_HUB: DestinoNav = {
+  title: 'PRN Hub',
+  description: 'Fila de melhorias',
+  icon: ClipboardList,
+  url: '/ferramentas/prn-hub',
+}
+
 const PROPOSTA_COMERCIAL: DestinoNav = {
   title: 'Proposta Comercial',
   description: 'PDF de 13 slides',
@@ -150,6 +170,7 @@ export interface AcessoFerramentasExternas {
   relatorios: boolean
   licitacoes: boolean
   propostaComercial: boolean
+  prnHub: boolean
 }
 
 export interface GrupoDeFerramentas {
@@ -181,6 +202,7 @@ export function gruposDeFerramentas(
     ...(externas?.propostaComercial ? [PROPOSTA_COMERCIAL] : []),
     ...(externas?.relatorios ? [RELATORIOS] : []),
     ...(externas?.licitacoes ? [LICITACOES] : []),
+    ...(externas?.prnHub ? [PRN_HUB] : []),
     ...(user?.is_super_admin ? [RELATORIO_APP] : []),
   ]
 
@@ -212,6 +234,12 @@ export function itensDeConta(user: UsuarioDeNav | null | undefined): ItemDeFerra
         ]
       : []),
     { title: 'Notificações', description: 'Som e alertas', icon: Bell, action: 'notifications' },
+    /*
+      ITEM 5: rever a apresentação do app. Fica aqui, junto de Notificações e
+      Configurações, porque foi exatamente onde você pediu — e porque é o lugar
+      de onde ninguém abre por engano no meio do atendimento.
+    */
+    { title: 'Tour do app', description: 'Rever a apresentação', icon: Compass, action: 'tour' },
     {
       title: 'Configurações',
       description: 'Preferências do app',

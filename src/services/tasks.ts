@@ -94,17 +94,40 @@ export async function createTask(input: CreateTaskInput): Promise<Task> {
   return data as Task
 }
 
-export async function updateTaskStatus(id: string, status: Task['status']): Promise<void> {
-  const { error } = await supabase.from('tasks').update({ status }).eq('id', id)
+/**
+ * ITEM 9: a situação anda junto do motivo.
+ *
+ * `status_reason` é sempre escrito, inclusive como `null`: arrastar de
+ * "aguardando" para "concluída" precisa APAGAR o motivo antigo, senão a tarefa
+ * termina carregando um "aguardando assinatura" que não vale mais — e quem
+ * confere lê uma justificativa vencida como se fosse atual.
+ */
+export async function updateTaskStatus(
+  id: string,
+  status: Task['status'],
+  motivo: string | null = null,
+): Promise<void> {
+  const { error } = await supabase
+    .from('tasks')
+    .update({ status, status_reason: motivo })
+    .eq('id', id)
   if (error) {
     console.error('Error updating task status:', error)
     throw error
   }
 }
 
+/** ITEM 9: situações que pedem explicação. As outras dispensam. */
+export const SITUACOES_COM_MOTIVO: Task['status'][] = ['waiting', 'in_review']
+
 export async function updateTask(
   id: string,
-  patch: Partial<Pick<Task, 'title' | 'description' | 'status' | 'assigned_to' | 'due_date' | 'contact_id'>>,
+  patch: Partial<
+    Pick<
+      Task,
+      'title' | 'description' | 'status' | 'status_reason' | 'assigned_to' | 'due_date' | 'contact_id'
+    >
+  >,
 ): Promise<void> {
   const { error } = await supabase.from('tasks').update(patch).eq('id', id)
   if (error) {

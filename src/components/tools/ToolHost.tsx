@@ -17,6 +17,7 @@ const Relatorios = lazy(() => import('@/pages/tools/Relatorios'))
 const Licitacoes = lazy(() => import('@/pages/tools/Licitacoes'))
 const Assinaturas = lazy(() => import('@/pages/tools/Assinaturas'))
 const PropostaComercial = lazy(() => import('@/pages/tools/PropostaComercial'))
+const PrnHub = lazy(() => import('@/pages/tools/PrnHub'))
 
 interface FerramentaHospedavel {
   titulo: string
@@ -40,6 +41,9 @@ export const FERRAMENTAS_HOSPEDADAS: Record<string, FerramentaHospedavel> = {
   'relatorio-app': { titulo: 'Relatório App', url: '/ferramentas/relatorio-app', Componente: RelatorioApp },
   relatorios: { titulo: 'Relatórios', url: '/ferramentas/relatorios', Componente: Relatorios, telaCheia: true },
   licitacoes: { titulo: 'Licitações', url: '/ferramentas/licitacoes', Componente: Licitacoes, telaCheia: true },
+  // ITEM 2. `telaCheia` como as outras embutidas por iframe: o app filho cuida
+  // da própria altura, e o respiro do painel daria barra de rolagem dupla.
+  'prn-hub': { titulo: 'PRN Hub', url: '/ferramentas/prn-hub', Componente: PrnHub, telaCheia: true },
   assinaturas: { titulo: 'Assinaturas', url: '/ferramentas/assinaturas', Componente: Assinaturas },
   'proposta-comercial': {
     titulo: 'Proposta Comercial',

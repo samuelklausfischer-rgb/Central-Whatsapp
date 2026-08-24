@@ -34,11 +34,29 @@ import {
   getTasks,
   createTask,
   updateTaskStatus,
+  updateTask,
   deleteTask,
   getTaskAssignees,
+  SITUACOES_COM_MOTIVO,
   type TaskWithRelations,
   type TaskAssignee,
 } from '@/services/tasks'
+import {
+  getColunas,
+  salvarColunas,
+  restaurarColunasPadrao,
+  getChecklist,
+  adicionarItem,
+  marcarItem,
+  removerItem,
+  COLUNAS_PADRAO,
+  CLASSES_DE_COR,
+  CORES_DISPONIVEIS,
+  type ColunaDoQuadro,
+} from '@/services/task_board'
+import type { TaskChecklistItem } from '@/lib/supabase/types'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Eye, EyeOff, ArrowUp, ArrowDown, RotateCcw, Settings2 } from 'lucide-react'
 
 type TabKey = 'minhas' | 'direcionadas' | 'todas'
 
@@ -75,6 +93,21 @@ export default function CRM() {
 
   const [assignees, setAssignees] = useState<TaskAssignee[]>([])
   const [loadingAssignees, setLoadingAssignees] = useState(true)
+
+  // ITEM 11: quadro pessoal. Nasce no padrão para a tela nunca ficar sem
+  // colunas enquanto a preferência não chega do banco.
+  const [colunas, setColunas] = useState<ColunaDoQuadro[]>(COLUNAS_PADRAO)
+  const [painelColunasAberto, setPainelColunasAberto] = useState(false)
+
+  // ITEM 11: tarefa aberta no detalhe, com checklist.
+  const [tarefaAberta, setTarefaAberta] = useState<TaskWithRelations | null>(null)
+  const [checklist, setChecklist] = useState<TaskChecklistItem[]>([])
+  const [novoItem, setNovoItem] = useState('')
+
+  // ITEM 9: quando a nova situação pede justificativa, ela é perguntada ANTES
+  // de gravar — senão a tarefa fica "aguardando" sem ninguém saber o quê.
+  const [pedindoMotivo, setPedindoMotivo] = useState<{ taskId: string; status: Task['status'] } | null>(null)
+  const [motivo, setMotivo] = useState('')
 
   const [isNewTaskOpen, setIsNewTaskOpen] = useState(false)
   const [newTitle, setNewTitle] = useState('')
@@ -124,8 +157,21 @@ export default function CRM() {
     if (user) {
       fetchTasks()
       fetchAssignees()
+      getColunas(user.id).then(setColunas)
     }
   }, [user])
+
+  // Checklist carrega ao abrir a tarefa, e não junto da lista: seriam N idas ao
+  // banco para desenhar um quadro onde nenhum checklist aparece.
+  useEffect(() => {
+    if (!tarefaAberta) {
+      setChecklist([])
+      return
+    }
+    getChecklist(tarefaAberta.id)
+      .then(setChecklist)
+      .catch(() => setChecklist([]))
+  }, [tarefaAberta])
 
   useRealtime('tasks', () => {
     fetchTasks()
@@ -174,13 +220,30 @@ export default function CRM() {
     }
   }
 
-  const handleUpdateStatus = async (taskId: string, newStatus: Task['status']) => {
+  const handleUpdateStatus = async (
+    taskId: string,
+    newStatus: Task['status'],
+    novoMotivo: string | null = null,
+  ) => {
     try {
-      await updateTaskStatus(taskId, newStatus)
+      await updateTaskStatus(taskId, newStatus, novoMotivo)
     } catch (err) {
       toast({ title: 'Erro ao mover tarefa', variant: 'destructive' })
       fetchTasks()
     }
+  }
+
+  /** ITEM 9: confirma o motivo e só então move a tarefa. */
+  const confirmarMotivo = async () => {
+    if (!pedindoMotivo) return
+    const { taskId, status } = pedindoMotivo
+    const texto = motivo.trim()
+    setPedindoMotivo(null)
+    setMotivo('')
+    setTasks((prev) =>
+      prev.map((t) => (t.id === taskId ? { ...t, status, status_reason: texto || null } : t)),
+    )
+    await handleUpdateStatus(taskId, status, texto || null)
   }
 
   const handleDragStart = (e: React.DragEvent, taskId: string) => {
@@ -202,29 +265,43 @@ export default function CRM() {
     if (!taskId) return
 
     const task = tasks.find((t) => t.id === taskId)
-    if (task && task.status !== status) {
-      setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status } : t)))
-      handleUpdateStatus(taskId, status)
+    if (!task || task.status === status) return
+
+    // ITEM 9: "aguardando" e "em validação" existem para EXPLICAR a parada.
+    // Move só depois de saber o motivo — caso contrário quem confere abre e não
+    // encontra nada, que é exatamente a queixa original.
+    if (SITUACOES_COM_MOTIVO.includes(status)) {
+      setMotivo(task.status_reason || '')
+      setPedindoMotivo({ taskId, status })
+      return
     }
+
+    // Saindo para uma situação que não pede motivo, o antigo é apagado junto
+    // (o serviço grava `status_reason: null`).
+    setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status, status_reason: null } : t)))
+    handleUpdateStatus(taskId, status)
   }
 
-  const columns = [
-    {
-      id: 'pending',
-      title: 'Pendente',
-      color: 'bg-yellow-500/10 border-yellow-500/20 text-yellow-500',
-    },
-    {
-      id: 'in_progress',
-      title: 'Em Andamento',
-      color: 'bg-blue-500/10 border-blue-500/20 text-blue-500',
-    },
-    {
-      id: 'completed',
-      title: 'Concluído',
-      color: 'bg-green-500/10 border-green-500/20 text-green-500',
-    },
-  ] as const
+  /*
+    ITEM 11: as colunas deixam de ser uma constante e passam a vir da
+    personalização DESTA pessoa. A forma ({id, title, color}) é a mesma de
+    antes de propósito — assim o laço de renderização e o arrastar-e-soltar,
+    que estão presos a esses nomes, seguem intactos.
+
+    Só as visíveis entram. Esconder uma coluna não some com as tarefas dela: o
+    filtro é de exibição, e a situação continua valendo para todo mundo.
+  */
+  const columns = useMemo(
+    () =>
+      colunas
+        .filter((c) => c.visivel)
+        .map((c) => ({
+          id: c.status,
+          title: c.titulo,
+          color: CLASSES_DE_COR[c.cor] || CLASSES_DE_COR.slate,
+        })),
+    [colunas],
+  )
 
   // "Direcionadas por mim" só faz sentido para quem já direcionou (na prática,
   // admin — a policy só deixa outro dono em assigned_to se quem grava é admin).
@@ -254,10 +331,17 @@ export default function CRM() {
             Arraste e solte as tarefas para alterar o status.
           </p>
         </div>
-        <Button onClick={openNewTaskDialog} className="gap-1.5">
-          <Plus className="h-4 w-4" />
-          Nova tarefa
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* ITEM 11: personalizar o quadro. Só muda o SEU — ver o aviso dentro. */}
+          <Button variant="outline" onClick={() => setPainelColunasAberto(true)} className="gap-1.5">
+            <Settings2 className="h-4 w-4" />
+            Colunas
+          </Button>
+          <Button onClick={openNewTaskDialog} className="gap-1.5">
+            <Plus className="h-4 w-4" />
+            Nova tarefa
+          </Button>
+        </div>
       </div>
 
       <div className="px-6">
@@ -333,9 +417,25 @@ export default function CRM() {
                     >
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2">
-                          <p className="text-xs font-medium text-foreground line-clamp-2">
-                            {task.title}
-                          </p>
+                          {/*
+                            ITEM 11: abrir a tarefa. É um botão, e não um clique
+                            no cartão inteiro, porque o cartão é a alça do
+                            arrastar — clique na área toda dispararia a abertura
+                            em toda tentativa de mover.
+                          */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setTarefaAberta(task)
+                            }}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            className="min-w-0 flex-1 text-left"
+                          >
+                            <p className="text-xs font-medium text-foreground line-clamp-2 hover:underline">
+                              {task.title}
+                            </p>
+                          </button>
                           {/* No APK Android não existe hover: sem `useIsMobile()` esse
                               botão ficaria invisível e inalcançável no toque. */}
                           <div className={classesAcoesTarefa}>
@@ -357,6 +457,16 @@ export default function CRM() {
                         {task.description && (
                           <p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5 break-words">
                             {task.description}
+                          </p>
+                        )}
+                        {/*
+                          ITEM 9: o motivo aparece NO CARTÃO, e não só ao abrir.
+                          O pedido era justamente que quem confere não precisasse
+                          entrar em cada tarefa para descobrir o que está travando.
+                        */}
+                        {task.status_reason && (
+                          <p className="mt-1 rounded border border-purple-500/25 bg-purple-500/10 px-1.5 py-0.5 text-[11px] leading-snug text-purple-300 break-words">
+                            {task.status_reason}
                           </p>
                         )}
                         {contactName && (
@@ -494,6 +604,294 @@ export default function CRM() {
             <Button onClick={handleCreateTask} disabled={isSavingNewTask || !newTitle.trim()}>
               {isSavingNewTask ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Criar tarefa
+            </Button>
+          </DialogFooter>
+        </GlassDialogContent>
+      </Dialog>
+
+      {/* ITEM 9: o motivo da parada, perguntado antes de mover. */}
+      <Dialog open={!!pedindoMotivo} onOpenChange={(v) => !v && setPedindoMotivo(null)}>
+        <GlassDialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {pedindoMotivo?.status === 'waiting' ? 'O que está aguardando?' : 'O que falta validar?'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-2 py-2">
+            <Label htmlFor="motivo-tarefa">Motivo</Label>
+            <Textarea
+              id="motivo-tarefa"
+              value={motivo}
+              onChange={(e) => setMotivo(e.target.value)}
+              placeholder="Ex.: aguardando a assinatura do documento pela diretoria"
+              autoFocus
+            />
+            <p className="text-xs text-muted-foreground">
+              Isto fica visível para todo mundo que enxerga a tarefa — é o que a pessoa que confere vai ler.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPedindoMotivo(null)}>
+              Cancelar
+            </Button>
+            <Button onClick={confirmarMotivo}>Mover tarefa</Button>
+          </DialogFooter>
+        </GlassDialogContent>
+      </Dialog>
+
+      {/* ITEM 11: detalhe da tarefa, com checklist. */}
+      <Dialog open={!!tarefaAberta} onOpenChange={(v) => !v && setTarefaAberta(null)}>
+        <GlassDialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="pr-6">{tarefaAberta?.title}</DialogTitle>
+          </DialogHeader>
+
+          {tarefaAberta && (
+            <div className="grid gap-4 py-2">
+              {tarefaAberta.description && (
+                <p className="text-sm leading-relaxed text-muted-foreground">{tarefaAberta.description}</p>
+              )}
+
+              <div className="grid gap-1.5">
+                <Label>Situação</Label>
+                <Select
+                  value={tarefaAberta.status}
+                  onValueChange={(v) => {
+                    const novo = v as Task['status']
+                    if (SITUACOES_COM_MOTIVO.includes(novo)) {
+                      setMotivo(tarefaAberta.status_reason || '')
+                      setPedindoMotivo({ taskId: tarefaAberta.id, status: novo })
+                      setTarefaAberta(null)
+                      return
+                    }
+                    setTasks((prev) =>
+                      prev.map((t) =>
+                        t.id === tarefaAberta.id ? { ...t, status: novo, status_reason: null } : t,
+                      ),
+                    )
+                    setTarefaAberta({ ...tarefaAberta, status: novo, status_reason: null })
+                    void handleUpdateStatus(tarefaAberta.id, novo)
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {COLUNAS_PADRAO.map((c) => (
+                      <SelectItem key={c.status} value={c.status}>
+                        {c.titulo}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {tarefaAberta.status_reason && (
+                <p className="rounded-lg border border-purple-500/25 bg-purple-500/10 p-2 text-sm text-purple-300">
+                  {tarefaAberta.status_reason}
+                </p>
+              )}
+
+              <div className="grid gap-2">
+                <Label>Checklist</Label>
+                {checklist.length === 0 && (
+                  <p className="text-xs text-muted-foreground">Nenhum item ainda.</p>
+                )}
+                {checklist.map((item) => (
+                  <div key={item.id} className="flex items-center gap-2">
+                    <Checkbox
+                      checked={item.feito}
+                      onCheckedChange={(v) => {
+                        const feito = v === true
+                        setChecklist((prev) =>
+                          prev.map((i) => (i.id === item.id ? { ...i, feito } : i)),
+                        )
+                        marcarItem(item.id, feito).catch(() => {
+                          setChecklist((prev) =>
+                            prev.map((i) => (i.id === item.id ? { ...i, feito: !feito } : i)),
+                          )
+                          toast({ title: 'Não foi possível marcar o item', variant: 'destructive' })
+                        })
+                      }}
+                    />
+                    <span
+                      className={
+                        item.feito
+                          ? 'flex-1 text-sm text-muted-foreground line-through'
+                          : 'flex-1 text-sm'
+                      }
+                    >
+                      {item.texto}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setChecklist((prev) => prev.filter((i) => i.id !== item.id))
+                        removerItem(item.id).catch(() => {
+                          toast({ title: 'Não foi possível remover', variant: 'destructive' })
+                          void getChecklist(tarefaAberta.id).then(setChecklist)
+                        })
+                      }}
+                      className="rounded p-1 text-muted-foreground transition-colors hover:text-rose-500"
+                      title="Remover item"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={novoItem}
+                    onChange={(e) => setNovoItem(e.target.value)}
+                    placeholder="Novo item do checklist"
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter') return
+                      e.preventDefault()
+                      const texto = novoItem.trim()
+                      if (!texto) return
+                      setNovoItem('')
+                      adicionarItem(tarefaAberta.id, texto, checklist.length)
+                        .then((criado) => setChecklist((prev) => [...prev, criado]))
+                        .catch(() =>
+                          toast({ title: 'Não foi possível adicionar', variant: 'destructive' }),
+                        )
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTarefaAberta(null)}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </GlassDialogContent>
+      </Dialog>
+
+      {/* ITEM 11: personalização do quadro. */}
+      <Dialog open={painelColunasAberto} onOpenChange={setPainelColunasAberto}>
+        <GlassDialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Suas colunas</DialogTitle>
+          </DialogHeader>
+
+          <p className="text-xs text-muted-foreground">
+            Vale só para o seu quadro. A situação de cada tarefa continua a mesma para toda a equipe —
+            é o que permite outra pessoa conferir o que você marcou.
+          </p>
+
+          <div className="grid gap-2 py-2">
+            {colunas.map((c, i) => (
+              <div key={c.status} className="flex items-center gap-2 rounded-lg border border-border/60 p-2">
+                <button
+                  type="button"
+                  title={c.visivel ? 'Esconder do meu quadro' : 'Mostrar no meu quadro'}
+                  onClick={() =>
+                    setColunas((prev) =>
+                      prev.map((x) => (x.status === c.status ? { ...x, visivel: !x.visivel } : x)),
+                    )
+                  }
+                  className="rounded p-1 text-muted-foreground hover:text-foreground"
+                >
+                  {c.visivel ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                </button>
+
+                <Input
+                  value={c.titulo}
+                  onChange={(e) =>
+                    setColunas((prev) =>
+                      prev.map((x) => (x.status === c.status ? { ...x, titulo: e.target.value } : x)),
+                    )
+                  }
+                  className="h-8 flex-1"
+                />
+
+                <Select
+                  value={c.cor}
+                  onValueChange={(v) =>
+                    setColunas((prev) => prev.map((x) => (x.status === c.status ? { ...x, cor: v } : x)))
+                  }
+                >
+                  <SelectTrigger className="h-8 w-28">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CORES_DISPONIVEIS.map((cor) => (
+                      <SelectItem key={cor} value={cor}>
+                        {cor}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <button
+                  type="button"
+                  disabled={i === 0}
+                  title="Subir"
+                  onClick={() =>
+                    setColunas((prev) => {
+                      const copia = [...prev]
+                      ;[copia[i - 1], copia[i]] = [copia[i], copia[i - 1]]
+                      return copia
+                    })
+                  }
+                  className="rounded p-1 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                >
+                  <ArrowUp className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  disabled={i === colunas.length - 1}
+                  title="Descer"
+                  onClick={() =>
+                    setColunas((prev) => {
+                      const copia = [...prev]
+                      ;[copia[i], copia[i + 1]] = [copia[i + 1], copia[i]]
+                      return copia
+                    })
+                  }
+                  className="rounded p-1 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                >
+                  <ArrowDown className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="ghost"
+              className="gap-1.5"
+              onClick={async () => {
+                if (!user) return
+                try {
+                  await restaurarColunasPadrao(user.id)
+                  setColunas(COLUNAS_PADRAO)
+                  toast({ title: 'Quadro de volta ao padrão' })
+                } catch {
+                  toast({ title: 'Não foi possível restaurar', variant: 'destructive' })
+                }
+              }}
+            >
+              <RotateCcw className="h-4 w-4" />
+              Padrão
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!user) return
+                try {
+                  await salvarColunas(user.id, colunas)
+                  setPainelColunasAberto(false)
+                  toast({ title: 'Colunas salvas' })
+                } catch {
+                  toast({ title: 'Não foi possível salvar as colunas', variant: 'destructive' })
+                }
+              }}
+            >
+              Salvar
             </Button>
           </DialogFooter>
         </GlassDialogContent>
