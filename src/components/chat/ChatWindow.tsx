@@ -1036,6 +1036,18 @@ function GerenciarEtiquetasDialog({
   )
 }
 
+/**
+ * Até onde a barra de texto cresce sozinha antes de passar a rolar. Uma linha é
+ * o piso natural do `rows={1}`, então o crescimento só começa da segunda.
+ */
+const LINHAS_MAXIMAS_DO_COMPOSITOR = 5
+
+/**
+ * ITENS 8 e 14: o WhatsApp só aplica edição até 15 minutos depois do envio.
+ * Passado isso ele descarta em silêncio — e a Evolution ainda responde sucesso.
+ */
+const JANELA_DE_EDICAO_MS = 15 * 60 * 1000
+
 export function ChatWindow({ device, contact, conversation, assignment: assignmentProp, contacts, onBack, sheetOpen, onSheetOpenChange, onStartConversation, onOpenConversationByJid, onOptimisticSend, onOptimisticConfirm, onOptimisticFail, estadoConversa = 'pronto', onRetryMessages, conversas = [], onForwardMessage }: any) {
   const { user } = useAuth()
   const { toast } = useToast()
@@ -1293,6 +1305,13 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const findInputRef = useRef<HTMLInputElement>(null)
   const messageRefs = useRef(new Map<string, HTMLDivElement>())
   const lastScrolledMatchKeyRef = useRef<string | null>(null)
+
+  /**
+   * ITEM 12: mensagem que acabou de receber o pulo a partir de uma citação.
+   * Serve só para o realce momentâneo — sem ele a tela rola até a original e o
+   * olho não tem como saber qual das bolhas era o destino.
+   */
+  const [mensagemDestacada, setMensagemDestacada] = useState<string | null>(null)
 
   const messages = conversation?.messages || []
 
@@ -1830,6 +1849,92 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     }
   }, [device?.id, contact])
 
+  /**
+   * ITEM 13: a barra de texto cresce junto com o conteúdo — da segunda até a
+   * quinta linha — e só então passa a rolar.
+   *
+   * Mora num efeito sobre `msgText`, e NÃO no `onChange` do textarea, porque
+   * digitar é só UM dos caminhos que escrevem no compositor: rascunho
+   * restaurado ao trocar de conversa, "Editar" numa mensagem existente, emoji,
+   * transcrição do áudio gravado, resultado da IA de texto e colagem também
+   * mudam o valor. Preso ao `onChange`, o campo nasceria com uma linha em todos
+   * esses casos, com o texto escondido atrás da rolagem.
+   *
+   * O teto sai do `lineHeight` calculado, e não de um número fixo: a classe usa
+   * `leading-relaxed` sobre `text-[15px]` e o padding vertical é assimétrico
+   * (`pt-3` no topo sobrepõe o `py-2.5` de baixo). Lendo do estilo, mexer no
+   * tamanho da fonte ou no respiro continua dando cinco linhas em vez de
+   * envelhecer escondido.
+   */
+  useEffect(() => {
+    const el = msgTextareaRef.current
+    if (!el) return
+
+    const estilo = window.getComputedStyle(el)
+    const doEstilo = Number.parseFloat(estilo.lineHeight)
+    const tamanhoDaFonte = Number.parseFloat(estilo.fontSize)
+    // `line-height: normal` não vira px em todo motor, e aí o `parseFloat` dá
+    // NaN. Cair para 1,5x a fonte mantém um teto plausível; deixar o teto virar
+    // infinito faria a barra crescer sem parar e comer a conversa inteira.
+    const alturaDaLinha = Number.isFinite(doEstilo)
+      ? doEstilo
+      : (Number.isFinite(tamanhoDaFonte) ? tamanhoDaFonte : 15) * 1.5
+    const respiro =
+      (Number.parseFloat(estilo.paddingTop) || 0) + (Number.parseFloat(estilo.paddingBottom) || 0)
+
+    // `auto` ANTES de medir: `scrollHeight` nunca encolhe sozinho, então sem
+    // zerar a altura o campo só cresceria — apagar o texto deixaria a barra
+    // alta para sempre.
+    el.style.height = 'auto'
+    const alturaDoConteudo = el.scrollHeight
+
+    const teto = alturaDaLinha * LINHAS_MAXIMAS_DO_COMPOSITOR + respiro
+
+    el.style.height = `${Math.min(alturaDoConteudo, teto)}px`
+    // Rolagem só quando há o que rolar: com `overflow-y: auto` sempre ligado, o
+    // Chromium reserva a canaleta da barra e o texto dança um pixel para o lado
+    // ao cruzar cada linha.
+    el.style.overflowY = alturaDoConteudo > teto ? 'auto' : 'hidden'
+  }, [msgText])
+
+  /**
+   * ITEM 12: pula da citação para a mensagem original, como no WhatsApp.
+   *
+   * O alvo é `reply_to_id` — o id da NOSSA tabela — e nunca
+   * `reply_to_snapshot.id`. Quando a original não está no nosso banco, o
+   * webhook guarda ali o `stanzaId` da Evolution (`evolution-webhook`, na
+   * montagem do snapshot sem original) e deixa `reply_to_id` nulo; procurar
+   * esse id no mapa, que só tem ids do Postgres, nunca acharia nada.
+   *
+   * Reusa o mesmo par que a busca (Ctrl+F) já usa logo abaixo: desligar
+   * `isNearBottomRef` ANTES de rolar, senão uma mensagem nova chegando no meio
+   * do caminho puxa a tela de volta pro fim da conversa.
+   */
+  const pularParaMensagemOriginal = useCallback(
+    (idOriginal: string | null | undefined) => {
+      if (!idOriginal) return
+      const el = messageRefs.current.get(idOriginal)
+      if (!el) {
+        // A original existe no banco, mas está fora das últimas carregadas
+        // (`getConversationMessages` traz um teto de mensagens). Avisar é melhor
+        // que um clique que não faz nada.
+        toast({ title: 'A mensagem original não está carregada nesta conversa' })
+        return
+      }
+      isNearBottomRef.current = false
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      setMensagemDestacada(idOriginal)
+    },
+    [toast],
+  )
+
+  // O realce é momentâneo: apaga sozinho depois que o olho pegou a bolha.
+  useEffect(() => {
+    if (!mensagemDestacada) return
+    const t = setTimeout(() => setMensagemDestacada(null), 1500)
+    return () => clearTimeout(t)
+  }, [mensagemDestacada])
+
   // Busca (Ctrl+F): rola até a mensagem da ocorrência atual. Roda só quando a
   // ocorrência realmente muda (não a cada refresh de `messages`), e desliga
   // isNearBottomRef antes de rolar pra o auto-scroll-pro-fundo não "puxar" a
@@ -2202,7 +2307,22 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     setIsSending(true)
     try {
       if (editingMessageId) {
-        await editMessage(editingMessageId, device.id, content)
+        // Erro próprio: a edição agora falha por motivos legítimos — passou dos
+        // 15 minutos do WhatsApp, a mensagem não tem id do lado de lá, a
+        // Evolution recusou. Caindo no `catch` geral lá embaixo, a pessoa lia
+        // "Erro ao enviar mensagem" ao tentar EDITAR. O texto continua no
+        // compositor para poder copiar ou tentar de novo, e nada é gravado:
+        // quando não dá para editar no WhatsApp, os dois lados seguem iguais.
+        try {
+          await editMessage(editingMessageId, device.id, content)
+        } catch (err) {
+          console.error('[edicao] falhou', err)
+          toast({
+            title: traduzErro(err, 'Não foi possível editar a mensagem'),
+            variant: 'destructive',
+          })
+          return
+        }
         limparCompositorAposEnvio(chaveEnvio, () => {
           setEditingMessageId(null)
           setMsgText('')
@@ -2996,6 +3116,66 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       })
     },
     [user?.id, isGroupContact, contactIndex],
+  )
+
+  /**
+   * ITENS 8 e 14: relógio grosso para a janela de edição.
+   *
+   * UM tique para a conversa inteira, e não um timer por mensagem — numa
+   * conversa de 500 balões isso viraria 500 timers. Meio minuto de precisão
+   * basta para um limite de 15: errar por segundos só faz o item sumir um pouco
+   * antes ou depois, e nos dois casos a função do banco ainda recusa.
+   */
+  const [agora, setAgora] = useState(() => Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setAgora(Date.now()), 30_000)
+    return () => clearInterval(t)
+  }, [])
+
+  /**
+   * Se a edição desta mensagem tem como CHEGAR ao WhatsApp.
+   *
+   * Sem `external_id` nunca existiu mensagem do lado de lá para editar (é o caso
+   * das importadas do histórico). Passados 15 minutos o WhatsApp ignora a
+   * edição, e a Evolution ainda assim responde 2xx — foi exatamente por isso que
+   * a edição parecia funcionar aqui e não acontecia no celular do cliente.
+   * Oferecer o botão nesses casos é prometer o que não dá para cumprir.
+   */
+  const podeEditarNoWhatsapp = useCallback(
+    (msg: any) => {
+      if (!msg?.external_id || msg.deleted_at) return false
+      const enviadaEm = new Date(msg.created_at).getTime()
+      if (!Number.isFinite(enviadaEm)) return false
+      return agora - enviadaEm < JANELA_DE_EDICAO_MS
+    },
+    [agora],
+  )
+
+  /** Mensagens por id. Um `find` por bolha citada seria varredura por render. */
+  const mensagensPorId = useMemo(() => {
+    const indice = new Map<string, any>()
+    for (const m of messages) indice.set(m.id, m)
+    return indice
+  }, [messages])
+
+  /**
+   * ITEM 10: nome de quem escreveu a mensagem CITADA.
+   *
+   * O `sender_name` do snapshot vem vazio de propósito quando a original não
+   * estava no nosso banco na hora que a citação chegou — o webhook só teria o
+   * JID do participante, e um JID não é nome. Quando a original está aqui,
+   * porém, dá para resolver o nome de verdade em vez de exibir o rótulo
+   * genérico "Mensagem original", que era o que a bolha fazia em toda resposta
+   * vinda do celular.
+   */
+  const nomeDaCitacao = useCallback(
+    (msg: any) => {
+      const doSnapshot = msg.reply_to_snapshot?.sender_name
+      if (doSnapshot) return doSnapshot
+      const original = msg.reply_to_id ? mensagensPorId.get(msg.reply_to_id) : null
+      return original ? resolverAutorDaMensagem(original) : 'Mensagem original'
+    },
+    [mensagensPorId, resolverAutorDaMensagem],
   )
 
   // ——— Ações em lote da barra de seleção ———
@@ -3990,6 +4170,10 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                 isMe ? 'items-end' : 'items-start',
                 modoSelecao && 'cursor-pointer select-none rounded-lg -mx-1 px-1 py-0.5 transition-colors',
                 estaMarcada && 'bg-chat-text/[0.07]',
+                // ITEM 12: realce de quem acabou de receber o pulo de uma
+                // citação. Some sozinho (ver o efeito de `mensagemDestacada`).
+                mensagemDestacada === msg.id &&
+                  'rounded-lg -mx-1 px-1 py-0.5 bg-blue-400/15 transition-colors duration-500',
               )}
             >
               {shouldShowSenderLabel && (
@@ -4038,10 +4222,37 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                   }`}
                 >
                   {!msg.deleted_at && msg.reply_to_snapshot && (
-                    <div className="flex items-start gap-2 mb-2 pl-2 border-l-2 border-chat-text/20">
+                    // ITEM 12: só vira botão quando há para onde pular. Sem
+                    // `reply_to_id` a original não está no nosso banco (só o
+                    // stanzaId da Evolution, no snapshot), então o bloco segue
+                    // sendo texto: um cursor de mão que não leva a lugar nenhum
+                    // é pior que nenhum.
+                    <div
+                      role={msg.reply_to_id ? 'button' : undefined}
+                      tabIndex={msg.reply_to_id ? 0 : undefined}
+                      onClick={
+                        msg.reply_to_id
+                          ? () => pularParaMensagemOriginal(msg.reply_to_id)
+                          : undefined
+                      }
+                      onKeyDown={
+                        msg.reply_to_id
+                          ? (e) => {
+                              if (e.key !== 'Enter' && e.key !== ' ') return
+                              e.preventDefault()
+                              pularParaMensagemOriginal(msg.reply_to_id)
+                            }
+                          : undefined
+                      }
+                      className={cn(
+                        'flex items-start gap-2 mb-2 pl-2 border-l-2 border-chat-text/20 rounded-r',
+                        msg.reply_to_id &&
+                          'cursor-pointer transition-colors hover:bg-chat-text/[0.06] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-400/50',
+                      )}
+                    >
                       <div className="flex-1 min-w-0">
                         <div className="text-[11px] font-semibold text-chat-muted/90">
-                          {msg.reply_to_snapshot.sender_name || 'Mensagem original'}
+                          {nomeDaCitacao(msg)}
                         </div>
                           <div className="text-[12px] truncate text-chat-muted/70">
                             {isTechnicalPlaceholder(msg.reply_to_snapshot.content) ? 'Voz' : msg.reply_to_snapshot.content || ''}
@@ -4138,12 +4349,27 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                                 key={idx}
                                 type="button"
                                 onClick={() => setMediaView({ url: att.url, type: 'image', name: att.name })}
-                                className="block max-w-[240px] overflow-hidden rounded-xl border border-chat-border hover:opacity-90 hover:scale-[1.02] transition-all duration-300 shadow-sm cursor-zoom-in"
+                                /*
+                                  ITEM 6: mais perto do WhatsApp. Saíram a borda,
+                                  a sombra e o `hover:scale` — o WhatsApp não tem
+                                  nenhum dos três, e o crescimento no hover fazia
+                                  a foto pular por cima do balão vizinho. O teto
+                                  subiu de 240px para 320px, que é a ordem de
+                                  grandeza do WhatsApp no computador.
+
+                                  A largura continua natural (sem `w-full`) de
+                                  propósito: esticar foto pequena — QR code de
+                                  boleto, etiqueta de exame, print — já foi um bug
+                                  corrigido, e o comentário do ChatImage explica
+                                  por quê. `object-contain` no lugar de
+                                  `object-cover` para nunca cortar a imagem.
+                                */
+                                className="block max-w-[320px] overflow-hidden rounded-xl cursor-zoom-in transition-opacity duration-200 hover:opacity-95"
                               >
                                 <ChatImage
                                   src={att.url}
                                   alt={att.name || 'Imagem'}
-                                  className="w-full h-auto object-cover pointer-events-none"
+                                  className="w-full h-auto object-contain pointer-events-none"
                                 />
                               </button>
                              )
@@ -4332,6 +4558,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                            <MessageActionsMenu
                              msg={msg}
                              isMe={isMe}
+                             podeEditar={isMe && podeEditarNoWhatsapp(msg)}
                              onReply={setReplyingTo}
                              onCopy={handleCopyMessage}
                              onEdit={handleEditMessage}
@@ -4406,6 +4633,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                             <MessageActionsMenu
                               msg={msg}
                               isMe={isMe}
+                              podeEditar={isMe && podeEditarNoWhatsapp(msg)}
                               onReply={setReplyingTo}
                               onCopy={handleCopyMessage}
                               onEdit={handleEditMessage}
@@ -4714,11 +4942,27 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
               <div className="flex-1 min-w-0">
                 {replyingTo && (
                   <>
+                    {/*
+                      ITEM 10: quem é respondido sai de `resolverAutorDaMensagem`,
+                      a MESMA resolução da bolha. Aqui havia
+                      `replyingTo.sender_name || user?.name`, e mensagem recebida
+                      vem com `sender_name` vazio de propósito (o webhook não
+                      inventa nome a partir de um JID) — o fallback então exibia o
+                      nome do PRÓPRIO atendente, e a prévia dizia que você estava
+                      respondendo a si mesmo.
+                    */}
                     <div className="text-[11px] font-semibold text-blue-400 mb-0.5">
-                      Respondendo a {replyingTo.sender_name || user?.name || 'contato'}
+                      Respondendo a {resolverAutorDaMensagem(replyingTo)}
                     </div>
+                    {/*
+                      O texto é o da mensagem respondida, e nada mais. Antes o
+                      `reply_to_snapshot` vinha na frente do `content`: ao
+                      responder uma mensagem que JÁ ERA uma resposta, a prévia
+                      mostrava o texto da citação interna dela em vez do texto
+                      dela mesma.
+                    */}
                     <div className="text-[12px] text-chat-muted truncate">
-                      {(replyingTo.reply_to_snapshot?.content || replyingTo.content) && isTechnicalPlaceholder(replyingTo.reply_to_snapshot?.content || replyingTo.content) ? 'Voz' : replyingTo.reply_to_snapshot?.content || replyingTo.content || ''}
+                      {isTechnicalPlaceholder(replyingTo.content) ? 'Voz' : replyingTo.content || ''}
                     </div>
                   </>
                 )}
@@ -5015,7 +5259,12 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                 )}
                 <textarea
                   ref={msgTextareaRef}
-                  className="flex-1 bg-transparent border-none min-h-[44px] max-h-[120px] px-4 py-2.5 text-[15px] text-chat-text placeholder:text-chat-muted focus-visible:outline-none resize-none leading-relaxed custom-scrollbar pt-3"
+                  // Sem `max-h-*` aqui de propósito: o teto das cinco linhas é
+                  // aplicado em px pelo efeito de auto-crescimento, e um
+                  // `max-height` do CSS por cima dele cortaria a altura medida
+                  // sem que o `overflow-y` acompanhasse. `transition-[height]`
+                  // só anima porque aquele efeito escreve uma altura explícita.
+                  className="flex-1 bg-transparent border-none min-h-[44px] px-4 py-2.5 text-[15px] text-chat-text placeholder:text-chat-muted focus-visible:outline-none resize-none leading-relaxed custom-scrollbar pt-3 transition-[height] duration-150 ease-out"
                   placeholder="Digite uma mensagem..."
                   value={msgText}
                   onChange={(e) => {

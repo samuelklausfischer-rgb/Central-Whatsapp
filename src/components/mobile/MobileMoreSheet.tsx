@@ -17,6 +17,7 @@ import { useToolAccess } from '@/hooks/use-tool-access'
 import { useInstalarPwa } from '@/hooks/use-instalar-pwa'
 import { useToast } from '@/hooks/use-toast'
 import { gruposDeFerramentas, itensDeConta, ehAcao, type ItemDeFerramenta } from '@/lib/navegacao'
+import { iniciarTour } from '@/components/TourDoApp'
 import { NotificationsDialog } from '@/components/NotificationsDialog'
 import { ReleaseNotesDialog } from '@/components/ReleaseNotesDialog'
 import { ReportarProblemaDialog } from '@/components/ReportarProblemaDialog'
@@ -64,7 +65,15 @@ export function MobileMoreSheet({
       // Fecha a folha ANTES de abrir o diálogo: duas camadas empilhadas fazem o
       // voltar do Android fechar as duas de uma vez.
       onAbrirChange(false)
-      setNotifAberto(true)
+      // Despacha pela AÇÃO: desde o ITEM 5 há mais de uma, e assumir
+      // notificações abriria o diálogo errado ao pedir o tour.
+      if (item.action === 'tour') {
+        // Espera a folha fechar: com ela aberta, os alvos do tour (barra de
+        // abas, botão Mais) estão cobertos e o recorte apontaria para o nada.
+        requestAnimationFrame(() => requestAnimationFrame(iniciarTour))
+      } else {
+        setNotifAberto(true)
+      }
       return
     }
     irPara(item.url)

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Download, ZoomIn, ZoomOut, RotateCcw, Loader2 } from 'lucide-react'
 import * as XLSX from 'xlsx'
@@ -19,6 +19,21 @@ const STEP = 0.25
 
 const clamp = (v: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.round(v * 100) / 100))
 
+/** Prende um deslocamento ao intervalo [-limite, +limite]. */
+const prender = (v: number, limite: number) => Math.max(-limite, Math.min(limite, v))
+
+/**
+ * Estado do transform da imagem, num objeto só.
+ *
+ * Zoom e deslocamento mudam JUNTOS — ampliar num ponto exige recalcular o
+ * deslocamento na mesma passada. Com três estados separados era preciso chamar
+ * `setTx` de dentro do updater do `setScale`, o que faz efeito colateral dentro
+ * de reducer e roda duas vezes em modo estrito.
+ */
+type Vista = { scale: number; tx: number; ty: number }
+
+const VISTA_INICIAL: Vista = { scale: MIN_SCALE, tx: 0, ty: 0 }
+
 /** Mapeia o tipo do visualizador para a categoria usada no nome padrão de download. */
 function tipoParaDownload(tipo: ViewerMedia['type']): TipoArquivoDownload {
   if (tipo === 'video') return 'video'
@@ -33,12 +48,17 @@ function tipoParaDownload(tipo: ViewerMedia['type']): TipoArquivoDownload {
  * - Fechar (X / clique no fundo / ESC) e baixar.
  */
 export function MediaViewer({ media, onClose }: { media: ViewerMedia | null; onClose: () => void }) {
-  const [scale, setScale] = useState(1)
-  const [tx, setTx] = useState(0)
-  const [ty, setTy] = useState(0)
-  const draggingRef = useRef(false)
-  const lastRef = useRef({ x: 0, y: 0 })
+  const [vista, setVista] = useState<Vista>(VISTA_INICIAL)
+  /** Verdadeiro enquanto há dedo/botão pressionado — desliga a transição. */
+  const [interagindo, setInteragindo] = useState(false)
+  const arrastandoRef = useRef(false)
+  const ultimoRef = useRef({ x: 0, y: 0 })
   const wrapRef = useRef<HTMLDivElement>(null)
+  const imgRef = useRef<HTMLImageElement>(null)
+  /** Ponteiros ativos por id: é o que permite reconhecer a pinça de dois dedos. */
+  const ponteirosRef = useRef(new Map<number, { x: number; y: number }>())
+  /** Distância e escala no instante em que a pinça começou. */
+  const pincaRef = useRef<{ distancia: number; escala: number } | null>(null)
 
   const isImage = media?.type === 'image'
   const isPdf = media?.type === 'pdf'
@@ -52,10 +72,64 @@ export function MediaViewer({ media, onClose }: { media: ViewerMedia | null; onC
 
   // Reseta o transform sempre que a mídia muda.
   useEffect(() => {
-    setScale(1)
-    setTx(0)
-    setTy(0)
+    setVista(VISTA_INICIAL)
   }, [url])
+
+  /**
+   * Até onde dá para arrastar: metade do que a imagem ESCALADA sobra para fora
+   * do contêiner (o transform tem origem no centro). Quando a imagem cabe
+   * inteira, o limite é zero e o arrasto simplesmente não sai do lugar.
+   *
+   * Sem isso o arrasto era ilimitado — bastava puxar um pouco com zoom baixo
+   * para a foto sumir da tela e não haver como trazê-la de volta.
+   */
+  const limitesDoPan = useCallback((escala: number) => {
+    const img = imgRef.current
+    const wrap = wrapRef.current
+    if (!img || !wrap) return { x: 0, y: 0 }
+    return {
+      x: Math.max(0, (img.clientWidth * escala - wrap.clientWidth) / 2),
+      y: Math.max(0, (img.clientHeight * escala - wrap.clientHeight) / 2),
+    }
+  }, [])
+
+  /**
+   * Novo zoom mantendo fixo o ponto (px, py) da TELA — o que está sob o cursor,
+   * ou no meio dos dois dedos, continua ali depois de ampliar.
+   *
+   * A conta sai de `tela - centro = imagem * escala + deslocamento`: isolando o
+   * ponto da imagem antes e depois, o deslocamento novo é
+   * `(P - c) - (P - c - t) * (escala nova / escala velha)`.
+   *
+   * Antes só a escala mudava e o deslocamento ficava parado: o trecho que a
+   * pessoa queria ver fugia do cursor, e ao reduzir o zoom a imagem saltava
+   * para longe porque o deslocamento seguia com a magnitude do zoom anterior.
+   * Agora o clamp cuida disso sozinho — em escala 1 o limite é 0 e o
+   * deslocamento volta ao centro sem precisar de caso especial.
+   */
+  const zoomAncorado = useCallback(
+    (alvo: number | ((atual: number) => number), px?: number, py?: number) => {
+      setVista((v) => {
+        const escala = clamp(typeof alvo === 'function' ? alvo(v.scale) : alvo)
+        if (escala === v.scale) return v
+        const wrap = wrapRef.current
+        if (!wrap) return { scale: escala, tx: 0, ty: 0 }
+        const r = wrap.getBoundingClientRect()
+        const cx = r.left + r.width / 2
+        const cy = r.top + r.height / 2
+        const ax = px ?? cx
+        const ay = py ?? cy
+        const fator = escala / v.scale
+        const lim = limitesDoPan(escala)
+        return {
+          scale: escala,
+          tx: prender(ax - cx - (ax - cx - v.tx) * fator, lim.x),
+          ty: prender(ay - cy - (ay - cy - v.ty) * fator, lim.y),
+        }
+      })
+    },
+    [limitesDoPan],
+  )
 
   // Busca e faz o parse da planilha quando o preview é de Excel.
   useEffect(() => {
@@ -105,61 +179,84 @@ export function MediaViewer({ media, onClose }: { media: ViewerMedia | null; onC
   }, [media, onClose])
 
   // Zoom pela roda do mouse (listener não-passivo p/ permitir preventDefault).
+  // Ancorado no cursor: a roda amplia o que está debaixo do ponteiro.
   useEffect(() => {
     const el = wrapRef.current
     if (!el || !isImage) return
     const handler = (e: WheelEvent) => {
       e.preventDefault()
       const delta = e.deltaY < 0 ? STEP : -STEP
-      setScale((s) => {
-        const ns = clamp(s + delta)
-        if (ns === MIN_SCALE) {
-          setTx(0)
-          setTy(0)
-        }
-        return ns
-      })
+      zoomAncorado((s) => s + delta, e.clientX, e.clientY)
     }
     el.addEventListener('wheel', handler, { passive: false })
     return () => el.removeEventListener('wheel', handler)
-  }, [isImage, url])
+  }, [isImage, url, zoomAncorado])
 
   if (!media) return null
 
-  const zoomBy = (delta: number) =>
-    setScale((s) => {
-      const ns = clamp(s + delta)
-      if (ns === MIN_SCALE) {
-        setTx(0)
-        setTy(0)
-      }
-      return ns
-    })
+  /** Botões +/− do topo: sem ponto de âncora, ampliam pelo centro. */
+  const zoomBy = (delta: number) => zoomAncorado((s) => s + delta)
 
-  const resetZoom = () => {
-    setScale(1)
-    setTx(0)
-    setTy(0)
-  }
+  const resetZoom = () => setVista(VISTA_INICIAL)
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if (!isImage || scale <= 1) return
-    draggingRef.current = true
-    lastRef.current = { x: e.clientX, y: e.clientY }
+    if (!isImage) return
+    ponteirosRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    setInteragindo(true)
     try {
       ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
     } catch {
       /* ignore */
     }
+
+    // Dois dedos: começa pinça e cancela qualquer arrasto em curso. Guardamos a
+    // distância e a escala do INÍCIO do gesto, para o zoom acompanhar a razão
+    // entre as distâncias em vez de acumular incrementos.
+    if (ponteirosRef.current.size === 2) {
+      const [a, b] = [...ponteirosRef.current.values()]
+      pincaRef.current = { distancia: Math.hypot(a.x - b.x, a.y - b.y), escala: vista.scale }
+      arrastandoRef.current = false
+      return
+    }
+
+    if (vista.scale > MIN_SCALE) {
+      arrastandoRef.current = true
+      ultimoRef.current = { x: e.clientX, y: e.clientY }
+    }
   }
+
   const onPointerMove = (e: React.PointerEvent) => {
-    if (!draggingRef.current) return
-    setTx((v) => v + (e.clientX - lastRef.current.x))
-    setTy((v) => v + (e.clientY - lastRef.current.y))
-    lastRef.current = { x: e.clientX, y: e.clientY }
+    if (!isImage) return
+    if (!ponteirosRef.current.has(e.pointerId)) return
+    ponteirosRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+    const pinca = pincaRef.current
+    if (ponteirosRef.current.size >= 2 && pinca && pinca.distancia > 0) {
+      const [a, b] = [...ponteirosRef.current.values()]
+      const distancia = Math.hypot(a.x - b.x, a.y - b.y)
+      zoomAncorado(pinca.escala * (distancia / pinca.distancia), (a.x + b.x) / 2, (a.y + b.y) / 2)
+      return
+    }
+
+    if (!arrastandoRef.current) return
+    const dx = e.clientX - ultimoRef.current.x
+    const dy = e.clientY - ultimoRef.current.y
+    ultimoRef.current = { x: e.clientX, y: e.clientY }
+    setVista((v) => {
+      const lim = limitesDoPan(v.scale)
+      return { ...v, tx: prender(v.tx + dx, lim.x), ty: prender(v.ty + dy, lim.y) }
+    })
   }
-  const endDrag = () => {
-    draggingRef.current = false
+
+  const encerrarPonteiro = (e: React.PointerEvent) => {
+    ponteirosRef.current.delete(e.pointerId)
+    // Sobrando menos de dois dedos não há mais pinça. O dedo que ficou NÃO
+    // vira arrasto no meio do gesto: quem quiser arrastar levanta e toca de novo.
+    if (ponteirosRef.current.size < 2) pincaRef.current = null
+    if (ponteirosRef.current.size === 0) {
+      arrastandoRef.current = false
+      setInteragindo(false)
+    }
   }
 
   const toolBtn =
@@ -181,7 +278,7 @@ export function MediaViewer({ media, onClose }: { media: ViewerMedia | null; onC
               <ZoomOut className="h-5 w-5" />
             </button>
             <span className="min-w-[3.5rem] text-center text-sm font-medium tabular-nums text-white/90">
-              {Math.round(scale * 100)}%
+              {Math.round(vista.scale * 100)}%
             </span>
             <button type="button" onClick={() => zoomBy(STEP)} title="Aumentar zoom" className={toolBtn}>
               <ZoomIn className="h-5 w-5" />
@@ -217,18 +314,28 @@ export function MediaViewer({ media, onClose }: { media: ViewerMedia | null; onC
       >
         {isImage ? (
           <img
+            ref={imgRef}
             src={media.url}
             alt={media.name || 'Imagem'}
             draggable={false}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
-            onPointerUp={endDrag}
-            onPointerCancel={endDrag}
-            onDoubleClick={() => (scale > 1 ? resetZoom() : zoomBy(1))}
+            onPointerUp={encerrarPonteiro}
+            onPointerCancel={encerrarPonteiro}
+            onDoubleClick={(e) =>
+              zoomAncorado(vista.scale > MIN_SCALE ? MIN_SCALE : 2, e.clientX, e.clientY)
+            }
             style={{
-              transform: `translate(${tx}px, ${ty}px) scale(${scale})`,
-              cursor: scale > 1 ? 'grab' : 'zoom-in',
-              transition: draggingRef.current ? 'none' : 'transform 150ms ease-out',
+              transform: `translate(${vista.tx}px, ${vista.ty}px) scale(${vista.scale})`,
+              cursor: vista.scale > MIN_SCALE ? 'grab' : 'zoom-in',
+              // `interagindo` é estado, e não ref: a transição precisa sumir no
+              // MESMO render em que o arrasto começa, senão cada quadro do gesto
+              // ficaria perseguindo uma animação de 150ms e o arrasto vira borracha.
+              transition: interagindo ? 'none' : 'transform 150ms ease-out',
+              // Sem isto o navegador trata pinça e arrasto como gesto da página
+              // (rolar, dar zoom no documento) e o visualizador nunca recebe os
+              // eventos de ponteiro.
+              touchAction: 'none',
             }}
             className="max-h-full max-w-full select-none object-contain"
           />

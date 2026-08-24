@@ -6,6 +6,8 @@ import { MobileTabBar } from '@/components/mobile/MobileTabBar'
 import { MobileMoreSheet } from '@/components/mobile/MobileMoreSheet'
 import { PrnBackground } from '@/components/ui/prn-background'
 import { BroadcastListener } from '@/components/BroadcastListener'
+import { NovidadesDaVersao } from '@/components/ReleaseNotesDialog'
+import { TourDoApp } from '@/components/TourDoApp'
 import { ToolHost } from '@/components/tools/ToolHost'
 import { useAppHeartbeat } from '@/hooks/use-app-heartbeat'
 import { useAndroidBack } from '@/hooks/use-android-back'
@@ -76,6 +78,18 @@ export default function Layout() {
       */}
       {!location.pathname.startsWith('/chat') && <PrnBackground />}
       <BroadcastListener />
+      {/*
+        ITEM 4: aviso de "o que mudou" depois de uma atualização. Mora aqui, e
+        não no Header, porque precisa valer também no celular — onde o Header
+        nem é renderizado. Não desenha nada até ter o que avisar.
+      */}
+      <NovidadesDaVersao />
+      {/*
+        ITEM 5. Os dois não brigam pela tela: o tour só dispara para quem nunca
+        o viu, e o aviso de novidades só para quem JÁ tinha uma versão gravada —
+        condições que nunca são verdadeiras ao mesmo tempo na mesma pessoa.
+      */}
+      <TourDoApp />
 
       {!semCasca && (noCelular ? <MobileHeader onAbrirMais={() => setMaisAberto(true)} /> : <Header />)}
 

@@ -9,6 +9,8 @@ interface ToolAccessValue {
   licitacoes: boolean
   /** Proposta Comercial — liberada pela chave em public.tool_access. */
   propostaComercial: boolean
+  /** PRN Hub (ITEM 2) — liberado pela chave em public.tool_access. */
+  prnHub: boolean
   loading: boolean
 }
 
@@ -16,6 +18,7 @@ const ToolAccessContext = createContext<ToolAccessValue>({
   relatorios: false,
   licitacoes: false,
   propostaComercial: false,
+  prnHub: false,
   loading: true,
 })
 
@@ -32,6 +35,7 @@ export function ToolAccessProvider({ children }: { children: ReactNode }) {
   const [relatorios, setRelatorios] = useState(false)
   const [licitacoes, setLicitacoes] = useState(false)
   const [propostaComercial, setPropostaComercial] = useState(false)
+  const [prnHub, setPrnHub] = useState(false)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -39,6 +43,7 @@ export function ToolAccessProvider({ children }: { children: ReactNode }) {
       setRelatorios(false)
       setLicitacoes(false)
       setPropostaComercial(false)
+      setPrnHub(false)
       setLoading(false)
       return
     }
@@ -56,6 +61,7 @@ export function ToolAccessProvider({ children }: { children: ReactNode }) {
       setRelatorios(perfil.status === 'fulfilled' && perfil.value)
       setLicitacoes(liberadas.includes('licitacoes'))
       setPropostaComercial(liberadas.includes('proposta-comercial'))
+      setPrnHub(liberadas.includes('prn-hub'))
       setLoading(false)
     })
 
@@ -65,8 +71,8 @@ export function ToolAccessProvider({ children }: { children: ReactNode }) {
   }, [userId])
 
   const value = useMemo(
-    () => ({ relatorios, licitacoes, propostaComercial, loading }),
-    [relatorios, licitacoes, propostaComercial, loading],
+    () => ({ relatorios, licitacoes, propostaComercial, prnHub, loading }),
+    [relatorios, licitacoes, propostaComercial, prnHub, loading],
   )
 
   return <ToolAccessContext.Provider value={value}>{children}</ToolAccessContext.Provider>

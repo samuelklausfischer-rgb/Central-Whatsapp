@@ -42,6 +42,7 @@ const ChatHub = lazy(() => import('./pages/ChatHub'))
 const EmailHub = lazy(() => import('./pages/EmailHub'))
 const EmailAccountSettings = lazy(() => import('./pages/settings/EmailAccountSettings'))
 const CRM = lazy(() => import('./pages/CRM'))
+const Agenda = lazy(() => import('./pages/Agenda'))
 const Notes = lazy(() => import('./pages/Notes'))
 const Triggers = lazy(() => import('./pages/Triggers'))
 const ScheduledMessages = lazy(() => import('./pages/ScheduledMessages'))
@@ -98,7 +99,11 @@ const FinanceiroToolRoute = () => {
 // A liberação das ferramentas externas vem do banco, não do perfil já carregado.
 // Enquanto ela não chega, esperar: redirecionar no `false` inicial jogaria para
 // o dashboard todo mundo que abre a rota direto (link salvo, F5 na própria tela).
-const ExternalToolRoute = ({ tool }: { tool: 'relatorios' | 'licitacoes' | 'propostaComercial' }) => {
+const ExternalToolRoute = ({
+  tool,
+}: {
+  tool: 'relatorios' | 'licitacoes' | 'propostaComercial' | 'prnHub'
+}) => {
   const access = useToolAccess()
   if (access.loading)
     return (
@@ -143,6 +148,7 @@ const App = () => {
                 <Route path="/chat" element={<ChatHub />} />
                 <Route path="/email" element={<EmailHub />} />
                 <Route path="/crm" element={<CRM />} />
+                <Route path="/agenda" element={<Agenda />} />
                 <Route path="/notes" element={<Notes />} />
                 <Route path="/triggers" element={<Triggers />} />
                 <Route path="/scheduled-messages" element={<ScheduledMessages />} />
@@ -177,6 +183,9 @@ const App = () => {
                     path="/ferramentas/proposta-comercial"
                     element={<FerramentaHospedada slug="proposta-comercial" />}
                   />
+                </Route>
+                <Route element={<ExternalToolRoute tool="prnHub" />}>
+                  <Route path="/ferramentas/prn-hub" element={<FerramentaHospedada slug="prn-hub" />} />
                 </Route>
                 {/*
                   Assinaturas não tem guarda: é assinatura de e-mail, todo mundo

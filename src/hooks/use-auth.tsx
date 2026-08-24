@@ -151,6 +151,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (session?.user) {
         if (isInitialAuthRef.current) {
           setLoading(true)
+          // Zerado AQUI, de forma SÍNCRONA, e não no `finally` lá embaixo.
+          //
+          // O `finally` só roda depois do `await loadUserData` — uma ida à
+          // rede. E o supabase-js dispara INITIAL_SESSION e SIGNED_IN em
+          // sequência na abertura da página: o segundo evento caía dentro
+          // dessa janela, ainda enxergava o ref em `true` e levantava
+          // `loading` DE NOVO.
+          //
+          // Levantar `loading` no meio da sessão não é cosmético: o
+          // `ProtectedRoute` (App.tsx:68) troca a árvore inteira pelo
+          // "Entrando…" e o `<Outlet/>` desmonta junto. Quem tinha acabado de
+          // abrir uma conversa via a tela piscar e voltava para a home do
+          // painel, porque o ChatHub remontava do zero e a conversa
+          // selecionada se perdia. Só na PRIMEIRA abertura, que é a única em
+          // que o ref ainda está em `true`.
+          isInitialAuthRef.current = false
         }
         // Defer async work outside the callback to prevent Supabase auth deadlock
         setTimeout(async () => {
@@ -175,7 +191,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           } finally {
             if (mounted) {
               setLoading(false)
-              isInitialAuthRef.current = false
             }
           }
         }, 0)

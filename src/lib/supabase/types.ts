@@ -158,11 +158,20 @@ export interface AiPrompt {
   updated_at: string
 }
 
+/**
+ * ITEM 9: `waiting` e `in_review` entraram para a tarefa poder dizer POR QUE
+ * ainda não acabou, em vez de ficar parada em "em andamento" sem explicação.
+ * A situação é COMPARTILHADA — é o que permite a conferência de outra pessoa.
+ */
+export type TaskStatus = 'pending' | 'in_progress' | 'waiting' | 'in_review' | 'completed'
+
 export interface Task {
   id: string
   title: string
   description: string | null
-  status: 'pending' | 'in_progress' | 'completed'
+  status: TaskStatus
+  /** ITEM 9: o motivo de estar parada. Visível a todos que veem a tarefa. */
+  status_reason: string | null
   /** Nula para tarefa avulsa — nem toda tarefa nasce de uma conversa. */
   contact_id: string | null
   /** Quem criou. Quem deve executar é `assigned_to`. */
@@ -171,6 +180,63 @@ export interface Task {
   due_date: string | null
   created_at: string
   updated_at: string
+}
+
+/** ITEM 11: um item do checklist de uma tarefa. */
+export interface TaskChecklistItem {
+  id: string
+  task_id: string
+  texto: string
+  feito: boolean
+  ordem: number
+  created_at: string
+}
+
+/**
+ * ITEM 11: como ESTA pessoa quer ver a coluna. Não muda a tarefa nem o quadro
+ * de ninguém — só a apresentação. Sem linha, vale o padrão.
+ */
+export interface TaskBoardPreference {
+  user_id: string
+  status: TaskStatus
+  visivel: boolean
+  ordem: number
+  titulo: string | null
+  cor: string | null
+  updated_at: string
+}
+
+/** ITEM 1: escopo de um compromisso da agenda. */
+export type AgendaEscopo = 'usuario' | 'setor' | 'grupo'
+export type AgendaImportancia = 'baixa' | 'normal' | 'alta' | 'urgente'
+
+export interface AgendaEvent {
+  id: string
+  titulo: string
+  descricao: string | null
+  starts_at: string
+  ends_at: string
+  dia_inteiro: boolean
+  importancia: AgendaImportancia
+  link: string | null
+  email: string | null
+  escopo: AgendaEscopo
+  /** Preenchido quando `escopo` é 'setor'; casa com `profiles.department`. */
+  setor: string | null
+  /** Preenchido quando `escopo` é 'grupo'. */
+  group_id: string | null
+  created_by: string
+  /** Quem deve cumprir. Nulo = o próprio criador. */
+  assigned_to: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AgendaGroup {
+  id: string
+  nome: string
+  created_by: string
+  created_at: string
 }
 
 export interface ConversationAssignment {

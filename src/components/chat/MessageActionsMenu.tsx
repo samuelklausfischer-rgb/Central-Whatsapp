@@ -25,6 +25,13 @@ export interface MessageActionsMenuProps {
   msg: any
   /** A mensagem é do próprio atendente (habilita Editar e Apagar). */
   isMe: boolean
+  /**
+   * ITENS 8 e 14: se a edição tem como chegar ao WhatsApp. Não basta ser
+   * mensagem própria — o WhatsApp só aceita editar até 15 minutos depois do
+   * envio, e só mensagem que ele conhece. Quem calcula é o ChatWindow, que tem
+   * o relógio; aqui só se obedece.
+   */
+  podeEditar: boolean
   onReply: (msg: any) => void
   onCopy: (msg: any) => void
   onEdit: (msg: any) => void
@@ -51,6 +58,7 @@ export interface MessageActionsMenuProps {
 export function MessageActionsMenu({
   msg,
   isMe,
+  podeEditar,
   onReply,
   onCopy,
   onEdit,
@@ -125,7 +133,7 @@ export function MessageActionsMenu({
         <Info className="h-4 w-4 mr-2" />
         Informações da mensagem
       </DropdownMenuItem>
-      {isMe && !msg.deleted_at && (
+      {podeEditar && (
         <DropdownMenuItem
           className="cursor-pointer focus:bg-chat-hover"
           onClick={(e) => {
