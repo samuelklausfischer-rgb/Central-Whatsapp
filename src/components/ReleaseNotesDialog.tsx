@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Sparkles, Lightbulb } from 'lucide-react'
 import { releaseNotes, classificarNota, type ReleaseNote } from '@/data/release-notes'
 import { getBundleVersion } from '@/lib/app-info'
+import { tourJaFoiVisto } from '@/components/TourDoApp'
 
 function groupByVersion(notes: ReleaseNote[]) {
   const map = new Map<string, ReleaseNote[]>()
@@ -171,9 +172,16 @@ const CHAVE_VERSAO_VISTA = 'central-whats:ultima-versao-vista'
  * ITEM 4: mostra as novidades UMA vez, quando a pessoa entra depois de uma
  * atualização. Depois disso só pelo botão de sempre.
  *
- * **Não aparece para quem nunca abriu o app.** Sem versão guardada não houve
- * atualização nenhuma — houve uma primeira vez, que é outra coisa. Isso também
- * evita que o aviso e o tour de boas-vindas disputem a tela no mesmo instante.
+ * A PRIMEIRA VERSÃO DISTO NÃO APARECIA PARA NINGUÉM, e vale registrar por quê:
+ * ela gravava a versão EM SILÊNCIO quando não havia nenhuma guardada, para não
+ * disputar a tela com o tour de boas-vindas. Só que a versão anunciada sai de
+ * `releaseNotes[0].version`, e o app foi publicado sem entrada nova nas notas —
+ * então todo mundo gravou a MESMA versão que ja estava rodando, e a condição
+ * "mudou de versão" nunca mais pôde ser verdadeira.
+ *
+ * A disputa com o tour agora é resolvida de frente: se o tour ainda está
+ * pendente, ele tem a vez e este aviso **não grava nada** — volta na entrada
+ * seguinte, quando o tour já terá sido visto. Ninguém perde o anúncio.
  *
  * O `localStorage` é por navegador e por aparelho, de propósito: quem usa o app
  * no computador e no celular vê o aviso nos dois, que é o comportamento certo —
@@ -189,14 +197,12 @@ export function NovidadesDaVersao() {
   useEffect(() => {
     const atual = getBundleVersion()
     if (!atual) return
+    // O tour de boas-vindas vem primeiro. Sem gravar nada: o aviso volta na
+    // próxima entrada em vez de ser engolido.
+    if (!tourJaFoiVisto()) return
     try {
       const vista = localStorage.getItem(CHAVE_VERSAO_VISTA)
       if (vista === atual) return
-      if (vista === null) {
-        // Primeira vez: registra em silêncio e não interrompe ninguém.
-        localStorage.setItem(CHAVE_VERSAO_VISTA, atual)
-        return
-      }
       setVersao(atual)
       setAberto(true)
     } catch {
