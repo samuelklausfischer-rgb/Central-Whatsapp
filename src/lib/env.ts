@@ -31,6 +31,7 @@ const LICITACAO_SUPABASE_URL_PADRAO = 'https://qndymclntzdrdhrwlcda.supabase.co'
  */
 const RELATORIOS_APP_URL_PADRAO = 'https://frontends-relatorios.srofjl.easypanel.host'
 const LICITACAO_APP_URL_PADRAO = 'https://frontends-front-licitacao.srofjl.easypanel.host'
+const PRN_HUB_APP_URL_PADRAO = 'https://frontends-projetos-hub.srofjl.easypanel.host'
 
 declare global {
   interface Window {
@@ -61,12 +62,18 @@ export const appEnv = {
     runtimeConfig?.VITE_LICITACAO_SUPABASE_URL ||
     import.meta.env.VITE_LICITACAO_SUPABASE_URL ||
     LICITACAO_SUPABASE_URL_PADRAO,
-  // ITEM 2: PRN-hub. Sem padrão no código porque a URL de publicação ainda não
-  // foi informada — e chutar um domínio seria pior que a tela de "não
-  // configurado", que ao menos diz o que falta. Assim que a URL existir, ela
-  // deve virar uma constante aqui em cima como as outras duas, pela lição da
-  // v0.0.207 registrada no comentário acima: só em `.env.local` ela falta no
+  // ITEM 2: PRN Hub. Com padrão no código, como as outras duas e pela mesma
+  // lição da v0.0.207 explicada acima — só em `.env.local` a variável falta no
   // build e a ferramenta vai quebrada para a frota, em silêncio.
+  //
+  // ATENÇÃO: em 24/08/2026 esta URL respondia `401` com
+  // `WWW-Authenticate: Basic realm="PRN Hub"`. Enquanto essa proteção existir, o
+  // iframe NÃO carrega: o Chrome não deixa um quadro de outra origem pedir
+  // usuário e senha, então a ferramenta abre vazia. A URL fica aqui pronta, mas
+  // o que destrava a ferramenta é tirar o Basic auth do serviço — o app já exige
+  // login próprio, então ele é uma segunda tranca na mesma porta.
   VITE_PRN_HUB_APP_URL:
-    runtimeConfig?.VITE_PRN_HUB_APP_URL || import.meta.env.VITE_PRN_HUB_APP_URL || '',
+    runtimeConfig?.VITE_PRN_HUB_APP_URL ||
+    import.meta.env.VITE_PRN_HUB_APP_URL ||
+    PRN_HUB_APP_URL_PADRAO,
 }

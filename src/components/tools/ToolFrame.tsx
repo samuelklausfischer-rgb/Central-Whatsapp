@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, Download, Loader2, RefreshCw, X } from 'lucide-react'
+import { AlertCircle, Download, ExternalLink, Loader2, RefreshCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   buildEmbedUrl,
@@ -141,6 +141,36 @@ export function ToolFrame({
     }
   }, [send, target, title])
 
+  /**
+   * Desistir de esperar.
+   *
+   * O aperto de mão depende de o app filho mandar `ready`. Se ele NUNCA carrega,
+   * `ready` nunca vem, e antes disto a tela ficava em "Conectando…" para sempre
+   * — sem erro, sem explicação, sem saída.
+   *
+   * O caso que motivou isto: o endereço do PRN Hub responde `401` com
+   * `WWW-Authenticate: Basic`, ou seja, pede usuário e senha no nível do
+   * servidor. O Chrome se recusa a mostrar esse pedido dentro de um quadro de
+   * outra origem — comportamento dele, não nosso —, então o iframe fica em
+   * branco e ninguém descobre por quê. Quinze segundos é folgado para um app
+   * que carrega, e curto o bastante para não parecer travado.
+   */
+  const ESPERA_MAXIMA_MS = 15000
+
+  useEffect(() => {
+    if (!target || status !== 'connecting') return
+    const t = setTimeout(() => {
+      setError(
+        `O ${title} não respondeu. Quase sempre é uma de duas coisas: o endereço pede ` +
+          `usuário e senha do próprio servidor — e o navegador não permite esse pedido ` +
+          `dentro do app, então a tela fica em branco para sempre — ou o serviço está fora ` +
+          `do ar. Abrir em outra aba mostra qual dos dois é.`,
+      )
+      setStatus('error')
+    }, ESPERA_MAXIMA_MS)
+    return () => clearTimeout(t)
+  }, [target, status, title, retryNonce])
+
   const retry = () => {
     setError(null)
     setStatus('connecting')
@@ -222,10 +252,24 @@ export function ToolFrame({
               <AlertCircle className="mx-auto h-6 w-6 text-destructive" />
               <p className="font-medium text-foreground">Não foi possível abrir o {title}</p>
               <p className="text-sm text-muted-foreground">{error}</p>
-              <Button variant="outline" size="sm" onClick={retry}>
-                <RefreshCw className="mr-2 h-4 w-4" />
-                Tentar novamente
-              </Button>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button variant="outline" size="sm" onClick={retry}>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Tentar novamente
+                </Button>
+                {/*
+                  Saída de emergência. Numa aba de verdade o navegador PODE pedir
+                  a senha do servidor — o que ele recusa a fazer aqui dentro. Não
+                  é o desenho pretendido, mas é a diferença entre trabalhar e
+                  ficar olhando uma tela em branco.
+                */}
+                <Button variant="ghost" size="sm" asChild>
+                  <a href={baseUrl} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    Abrir em outra aba
+                  </a>
+                </Button>
+              </div>
             </div>
           )}
         </div>
