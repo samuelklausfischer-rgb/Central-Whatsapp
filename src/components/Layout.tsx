@@ -8,6 +8,7 @@ import { PrnBackground } from '@/components/ui/prn-background'
 import { BroadcastListener } from '@/components/BroadcastListener'
 import { NovidadesDaVersao } from '@/components/ReleaseNotesDialog'
 import { TourDoApp } from '@/components/TourDoApp'
+import { AvisoDeVersaoNova } from '@/components/AvisoDeVersaoNova'
 import { ToolHost } from '@/components/tools/ToolHost'
 import { useAppHeartbeat } from '@/hooks/use-app-heartbeat'
 import { useAndroidBack } from '@/hooks/use-android-back'
@@ -78,6 +79,12 @@ export default function Layout() {
       */}
       {!location.pathname.startsWith('/chat') && <PrnBackground />}
       <BroadcastListener />
+      {/*
+        ITEM 3: explica a recarga em vez de o app pular sozinho. Mora aqui,
+        acima do Header, porque o pedaço que falha costuma ser o da ROTA — um
+        aviso dentro dela não teria como aparecer.
+      */}
+      <AvisoDeVersaoNova />
       {/*
         ITEM 4: aviso de "o que mudou" depois de uma atualização. Mora aqui, e
         não no Header, porque precisa valer também no celular — onde o Header

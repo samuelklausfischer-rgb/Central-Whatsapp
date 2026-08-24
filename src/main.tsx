@@ -4,6 +4,12 @@ import App from './App.tsx'
 import './main.css'
 import { notifyMobileUpdaterReady } from './lib/mobile-updater'
 import { getAppPlatform } from './lib/app-info'
+import {
+  CHAVE_RECARGA,
+  EVENTO_VERSAO_NOVA,
+  avisoAtendido,
+  registrarRastro,
+} from './lib/recarga-forcada'
 
 /**
  * Chunk que sumiu do servidor porque saiu um deploy novo.
@@ -38,7 +44,25 @@ import { getAppPlatform } from './lib/app-info'
  * prática. A trava "uma tentativa por aba" acima segue valendo do mesmo jeito
  * para os casos em que ainda dispara (ex.: SW desatualizando em background).
  */
-const CHAVE_RECARGA = 'preload-error-recarregado'
+/**
+ * ITEM 3 — a recarga deixou de ser às escondidas.
+ *
+ * Antes isto chamava `window.location.reload()` direto. Funcionava, mas era
+ * vivido do lado de cá como "abri uma conversa e o app voltou para o início":
+ * a pessoa clica num contato, o pedaço da tela de Conversas toma 404 (é o
+ * primeiro `import()` sob demanda depois do deploy, exatamente como o
+ * comentário acima descreve), e a tela inteira reinicia sem explicação nenhuma.
+ *
+ * Agora o app AVISA e deixa a pessoa mandar recarregar. A recarga continua
+ * sendo o conserto certo — o que muda é ela deixar de ser um susto.
+ *
+ * A rede de segurança segue existindo: se o pedaço que falhou for justamente o
+ * que desenharia o aviso, ninguém atende e a recarga acontece sozinha, senão a
+ * pessoa ficaria olhando uma tela quebrada. Nos dois caminhos fica um rastro,
+ * que é o que permite confirmar ou descartar este diagnóstico na próxima vez —
+ * ver `lib/recarga-forcada.ts`.
+ */
+const ESPERA_PELO_AVISO_MS = 5000
 
 window.addEventListener('vite:preloadError', (event) => {
   if (getAppPlatform() !== 'web') return
@@ -52,8 +76,16 @@ window.addEventListener('vite:preloadError', (event) => {
 
   event.preventDefault()
   sessionStorage.setItem(CHAVE_RECARGA, '1')
-  console.warn('[preload] chunk ausente após deploy — recarregando uma vez')
-  window.location.reload()
+  registrarRastro('preload')
+  console.warn('[preload] chunk ausente após deploy — oferecendo recarga')
+
+  window.dispatchEvent(new CustomEvent(EVENTO_VERSAO_NOVA))
+
+  setTimeout(() => {
+    if (avisoAtendido()) return
+    console.warn('[preload] ninguém desenhou o aviso — recarregando sozinho')
+    window.location.reload()
+  }, ESPERA_PELO_AVISO_MS)
 })
 
 // @skip-protected: Do not remove. Required for React rendering.

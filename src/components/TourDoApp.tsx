@@ -3,7 +3,23 @@ import { createPortal } from 'react-dom'
 import { Button } from '@/components/ui/button'
 import { X } from 'lucide-react'
 
-const CHAVE_TOUR_VISTO = 'central-whats:tour-visto'
+/**
+ * Exportada porque o aviso de novidades precisa saber se o tour ainda está
+ * pendente para ceder a vez. Repetir a string nos dois arquivos faria uma
+ * mudança aqui virar um bug silencioso lá.
+ */
+export const CHAVE_TOUR_VISTO = 'central-whats:tour-visto'
+
+/** O tour já foi visto por esta pessoa neste navegador? */
+export function tourJaFoiVisto(): boolean {
+  try {
+    return localStorage.getItem(CHAVE_TOUR_VISTO) === '1'
+  } catch {
+    // Sem armazenamento não dá para saber, e o tour tambem nao roda — tratar
+    // como "já visto" evita segurar o aviso de novidades para sempre.
+    return true
+  }
+}
 const EVENTO_INICIAR = 'prnhub:iniciar-tour'
 
 /** Abre o tour de qualquer lugar, sem precisar de contexto nem prop. */

@@ -34,6 +34,29 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.215',
+    date: '2026-08-24 18:10',
+    title: 'A fila do Hub inteira: agenda, tarefas e um monte de correção',
+    details: [
+      '📅 Agenda nova: compromissos seus, do seu setor e de grupos, com quatro formas de ver — só os seus, do setor, dos grupos, ou tudo junto. Dá para marcar importância, anexar um link ou um e-mail, e o administrador pode designar um compromisso para alguém do próprio setor',
+      '✅ Tarefas ficaram completas: agora dá para abrir a tarefa, escrever um checklist dentro dela, e marcar como "aguardando" ou "em validação" dizendo o motivo. O motivo aparece no cartão, para quem confere entender na hora por que a tarefa ainda não terminou',
+      '🎨 O quadro de tarefas ficou seu: escolha quais colunas aparecem, em que ordem, com que nome e cor. Muda só o seu quadro — a situação de cada tarefa continua a mesma para a equipe inteira',
+      '🧭 Tour do app: uma apresentação rápida das ferramentas na primeira vez que você entra, e que dá para rever quando quiser',
+      '🎉 Aviso de novidades: ao entrar depois de uma atualização, aparece uma vez o que mudou, separando o que é função nova do que é correção',
+      '🧩 PRN Hub dentro do app: a fila de melhorias virou uma ferramenta, para acompanhar o que foi pedido sem sair daqui',
+      '💬 Clicar numa mensagem citada leva você até a mensagem original, como no WhatsApp',
+      '🐛 Corrigido: editar uma mensagem agora vale também no WhatsApp de quem recebe. Antes o texto mudava só aqui, e os dois lados ficavam diferentes sem ninguém perceber',
+      '🐛 Corrigido: a resposta mostrava a pessoa errada na prévia — às vezes o seu próprio nome — e, ao responder uma resposta, mostrava o texto errado',
+      '🐛 Corrigido: a citação chegava quebrada no celular de quem recebe quando a mensagem original era antiga',
+      '🐛 Corrigido: a barra de texto cresce conforme você escreve, até cinco linhas, em vez de ficar presa numa linha só',
+      '🐛 Corrigido: dar zoom e arrastar uma foto aberta funciona de verdade, inclusive com dois dedos, e a foto não some mais da tela ao arrastar',
+      '🐛 Corrigido: a foto enviada no chat ficou mais parecida com o WhatsApp, sem moldura e maior',
+      '🐛 Corrigido: o app não volta mais para a tela inicial ao abrir uma conversa. Quando sai uma versão nova, agora ele avisa e espera você mandar recarregar, em vez de recarregar sozinho no meio do que você estava fazendo',
+    ],
+    usabilidade:
+      'Para experimentar a Agenda: clique em Agenda no topo, escolha um dia no calendário e use "Novo compromisso". Em Agenda do compromisso, escolha "Do meu setor" para todo o setor enxergar. Nas Tarefas, clique no título de uma tarefa para abrir o checklist, e use o botão "Colunas" para deixar o quadro do seu jeito.',
+  },
+  {
     version: '0.0.214',
     date: '2026-08-20 15:50',
     title: 'A fila de melhorias que vocês pediram',
