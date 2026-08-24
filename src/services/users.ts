@@ -21,6 +21,38 @@ export const getUsers = async () => {
   })) as ManagedUser[])
 }
 
+export type AdminAuditEntry = {
+  id: number
+  occurred_at: string
+  actor_id: string | null
+  actor_label: string | null
+  target_user_id: string | null
+  target_label: string | null
+  entity: string
+  action: string
+  changes: Record<string, unknown> | null
+  source: string | null
+}
+
+/**
+ * Histórico de alterações de cadastro e permissão. A RLS já limita a leitura a
+ * admin — para quem não é, a consulta volta vazia em vez de dar erro.
+ */
+export const getAdminAuditLog = async (limit = 100) => {
+  const { data, error } = await supabase
+    .from('admin_audit_log')
+    .select('*')
+    .order('occurred_at', { ascending: false })
+    .limit(limit)
+
+  if (error) {
+    console.error('Error fetching admin audit log:', error)
+    return []
+  }
+
+  return (data as AdminAuditEntry[]) || []
+}
+
 export const createUser = async (data: {
   email: string
   password: string
@@ -53,7 +85,16 @@ export const createUser = async (data: {
 
 export const updateUser = async (
   id: string,
-  data: Partial<Profile & { password?: string; allowed_devices: string[] }>,
+  data: Partial<
+    Profile & {
+      password?: string
+      allowed_devices: string[]
+      /** Marca a lista como escolha deliberada — sem isso a edge function se
+       * recusa a esvaziar os aparelhos de alguém. Ver o comentário em
+       * `manage-user/index.ts`. */
+      devices_explicit?: boolean
+    }
+  >,
 ) => {
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || ''
   const session = await supabase.auth.getSession()

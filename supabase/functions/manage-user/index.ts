@@ -15,6 +15,18 @@ const serviceHeaders = {
   apikey: SUPABASE_SERVICE_KEY,
 }
 
+// A service_role não tem `sub` no JWT, então `auth.uid()` é nulo dentro dos
+// triggers e o banco não tem como saber quem clicou em "Salvar". Estes headers
+// declaram o autor: `audit_actor()` e `audit_source()` leem daqui via
+// `current_setting('request.headers')`. Sem isso o histórico grava autor nulo.
+function headersDoAutor(actorId: string) {
+  return {
+    ...serviceHeaders,
+    'x-actor-id': actorId,
+    'x-actor-source': 'manage-user',
+  }
+}
+
 function json(data: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -47,12 +59,23 @@ async function requireAdmin(authHeader: string) {
   return { user: authUser }
 }
 
-async function replaceAllowedDevices(userId: string, allowedDevices: unknown, isAdmin: boolean) {
+// Troca a lista de aparelhos do usuário pela lista recebida.
+//
+// NÃO recebe mais `isAdmin`. Antes, ser admin fazia esta função apagar tudo e
+// desistir de regravar — o que, em 18/08/2026, tirou a Renata de todas as
+// instâncias numa edição que só queria mexer no e-mail dela. Quem decide os
+// aparelhos é a lista enviada, não o cargo. Lista vazia continua significando
+// "limpar tudo", mas agora só chega aqui quando quem chamou realmente quis isso.
+async function replaceAllowedDevices(
+  userId: string,
+  allowedDevices: unknown,
+  headers: Record<string, string>,
+) {
   const deleteResp = await fetch(
     `${SUPABASE_URL}/rest/v1/user_allowed_devices?user_id=eq.${encodeURIComponent(userId)}`,
     {
       method: 'DELETE',
-      headers: { ...serviceHeaders, Prefer: 'return=minimal' },
+      headers: { ...headers, Prefer: 'return=minimal' },
     },
   )
 
@@ -61,20 +84,53 @@ async function replaceAllowedDevices(userId: string, allowedDevices: unknown, is
     throw new Error(`Failed to clear allowed devices: ${err}`)
   }
 
-  if (isAdmin || !Array.isArray(allowedDevices) || allowedDevices.length === 0) return
+  if (!Array.isArray(allowedDevices) || allowedDevices.length === 0) return
 
   const uniqueDeviceIds = [...new Set(allowedDevices.filter((id) => typeof id === 'string'))]
   if (uniqueDeviceIds.length === 0) return
 
   const insertResp = await fetch(`${SUPABASE_URL}/rest/v1/user_allowed_devices`, {
     method: 'POST',
-    headers: { ...serviceHeaders, Prefer: 'return=minimal' },
+    headers: { ...headers, Prefer: 'return=minimal' },
     body: JSON.stringify(uniqueDeviceIds.map((deviceId) => ({ user_id: userId, device_id: deviceId }))),
   })
 
   if (!insertResp.ok) {
     const err = await insertResp.text()
     throw new Error(`Failed to save allowed devices: ${err}`)
+  }
+}
+
+// As chamadas ao /auth/v1/admin/users não passam pelo PostgREST, então nenhum
+// trigger as enxerga: e-mail e senha mudariam sem deixar rastro atribuível.
+// Esta é a única linha de auditoria que a função grava na mão.
+//
+// A senha NUNCA vai gravada, nem a antiga nem a nova — só o fato de ter mudado.
+async function logAuthChange(
+  actorId: string,
+  targetUserId: string,
+  changes: Record<string, unknown>,
+  headers: Record<string, string>,
+) {
+  if (Object.keys(changes).length === 0) return
+
+  const resp = await fetch(`${SUPABASE_URL}/rest/v1/admin_audit_log`, {
+    method: 'POST',
+    headers: { ...headers, Prefer: 'return=minimal' },
+    body: JSON.stringify({
+      actor_id: actorId,
+      target_user_id: targetUserId,
+      entity: 'auth.users',
+      action: 'update',
+      changes,
+      source: 'manage-user',
+    }),
+  })
+
+  // Falhar a auditoria não pode desfazer uma alteração que já foi aplicada no
+  // auth. Registra no log da função para não sumir em silêncio.
+  if (!resp.ok) {
+    console.error('Falha ao gravar auditoria de auth.users:', await resp.text())
   }
 }
 
@@ -98,6 +154,11 @@ Deno.serve(async (req: Request) => {
   if (!body || !body.action) {
     return json({ error: 'action is required' }, 400)
   }
+
+  // Daqui para baixo TODA escrita usa estes headers: é o que faz o histórico
+  // sair com o nome de quem clicou em vez de "service_role".
+  const actorId: string = admin.user?.id ?? ''
+  const escrita = headersDoAutor(actorId)
 
   try {
     switch (body.action) {
@@ -135,7 +196,7 @@ Deno.serve(async (req: Request) => {
 
         const profileResp = await fetch(`${SUPABASE_URL}/rest/v1/profiles?on_conflict=id`, {
           method: 'POST',
-          headers: { ...serviceHeaders, Prefer: 'resolution=merge-duplicates,return=minimal' },
+          headers: { ...escrita, Prefer: 'resolution=merge-duplicates,return=minimal' },
           body: JSON.stringify(profile),
         })
 
@@ -144,13 +205,13 @@ Deno.serve(async (req: Request) => {
           return json({ error: err }, profileResp.status)
         }
 
-        await replaceAllowedDevices(authUser.id, allowed_devices, Boolean(is_admin))
+        await replaceAllowedDevices(authUser.id, allowed_devices, escrita)
 
         return json({ id: authUser.id, email: authUser.email })
       }
 
       case 'update': {
-        const { id, email, password, name, username, is_admin, department, allowed_devices } = body
+        const { id, email, password, name, username, is_admin, department, allowed_devices, devices_explicit } = body
         if (!id) return json({ error: 'id required' }, 400)
 
         const updateData: Record<string, unknown> = {}
@@ -168,6 +229,13 @@ Deno.serve(async (req: Request) => {
             const err = await authResp.text()
             return json({ error: err }, authResp.status)
           }
+
+          // A troca de e-mail já fica registrada pelo trigger do profiles logo
+          // abaixo, com valor antigo e novo. A senha não passa por lá — só o
+          // fato de ter mudado é gravado, nunca o valor.
+          if (password) {
+            await logAuthChange(actorId, id, { password: { de: null, para: 'alterada' } }, escrita)
+          }
         }
 
         const profileUpdate: Record<string, unknown> = {}
@@ -182,7 +250,7 @@ Deno.serve(async (req: Request) => {
             `${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(id)}`,
             {
               method: 'PATCH',
-              headers: { ...serviceHeaders, Prefer: 'return=minimal' },
+              headers: { ...escrita, Prefer: 'return=minimal' },
               body: JSON.stringify(profileUpdate),
             },
           )
@@ -193,8 +261,19 @@ Deno.serve(async (req: Request) => {
           }
         }
 
-        if (allowed_devices !== undefined || is_admin !== undefined) {
-          await replaceAllowedDevices(id, allowed_devices, Boolean(is_admin))
+        // Só mexe nos aparelhos quando a chamada realmente trouxe uma lista.
+        // O gatilho antigo era `allowed_devices !== undefined || is_admin !== undefined`,
+        // e como a tela sempre manda `is_admin`, qualquer edição de nome ou
+        // e-mail entrava aqui e apagava os aparelhos da pessoa — inclusive os
+        // que o painel de super-admin tinha concedido.
+        //
+        // `devices_explicit` existe por causa da versão ANTIGA da tela, que
+        // continua publicada por um tempo depois deste deploy: ela manda
+        // `allowed_devices: []` para todo admin, e `[]` é um array — sem esta
+        // segunda condição a limpeza aconteceria exatamente igual. Só o cliente
+        // novo declara a flag, então só ele consegue esvaziar a lista de alguém.
+        if (Array.isArray(allowed_devices) && (devices_explicit === true || allowed_devices.length > 0)) {
+          await replaceAllowedDevices(id, allowed_devices, escrita)
         }
 
         return json({ status: 'updated' })

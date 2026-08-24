@@ -49,6 +49,7 @@ import { useAuth } from '@/hooks/use-auth'
 import { Badge } from '@/components/ui/badge'
 import { extractFieldErrors } from '@/lib/errors'
 import { SuperAdminPanel } from '@/components/admin/SuperAdminPanel'
+import { AdminAuditLog } from '@/components/admin/AdminAuditLog'
 import { FINANCEIRO_DEPARTMENT } from '@/lib/permissions'
 
 const DEFAULT_DEPARTMENTS = [FINANCEIRO_DEPARTMENT, 'Administrativo', 'RH', 'Comercial']
@@ -187,7 +188,7 @@ export default function AdminPage() {
     setFormData((prev) => ({
       ...prev,
       department,
-      allowed_devices: prev.is_admin ? [] : getDevicesForDepartment(department),
+      allowed_devices: getDevicesForDepartment(department),
     }))
   }
 
@@ -320,7 +321,15 @@ export default function AdminPage() {
         username,
         department: formData.department || null,
         is_admin: formData.is_admin,
-        allowed_devices: formData.is_admin ? [] : formData.allowed_devices,
+        // Admin também tem lista de aparelhos. Zerar aqui porque a pessoa é
+        // admin foi o que apagou o acesso da Renata em 18/08/2026: a lista é o
+        // que faz alguém aparecer no "Designar" de cada instância, e não tem
+        // nada a ver com o cargo.
+        allowed_devices: formData.allowed_devices,
+        // Diz à edge function que esta lista é uma escolha de verdade, e não o
+        // `[]` que a versão antiga da tela mandava para todo admin. Sem esta
+        // flag a função se recusa a esvaziar a lista de alguém.
+        devices_explicit: true,
       }
 
       if (formData.password) dataToSave.password = formData.password
@@ -524,7 +533,10 @@ export default function AdminPage() {
                           <Smartphone className="h-4 w-4" /> Aparelhos Permitidos
                         </p>
                         <div className="flex flex-wrap gap-2">
-                          {user.is_admin ? (
+                          {/* "Todos" só vale para admin SEM restrição. Admin
+                              restrito respeita a lista igual a qualquer um, e
+                              mostrar "todos" para ele escondia o acesso real. */}
+                          {user.is_admin && !user.devices_restricted ? (
                             <Badge variant="secondary" className="bg-accent">
                               Todos os aparelhos
                             </Badge>
@@ -575,6 +587,10 @@ export default function AdminPage() {
           </div>
         )}
       </div>
+
+      {/* Depois da lista de propósito: o histórico é consulta pontual ("quem
+          mexeu nisso?"), não a tarefa principal da tela. */}
+      <AdminAuditLog />
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         {/* `bg-card border-border` saiu daqui: `GlassDialogContent` já define
@@ -675,11 +691,7 @@ export default function AdminPage() {
                 id="is_admin"
                 checked={formData.is_admin}
                 onCheckedChange={(checked) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    is_admin: checked as boolean,
-                    allowed_devices: checked ? [] : prev.allowed_devices,
-                  }))
+                  setFormData((prev) => ({ ...prev, is_admin: checked as boolean }))
                 }
               />
               <Label htmlFor="is_admin" className="font-medium">
@@ -721,34 +733,40 @@ export default function AdminPage() {
               acesso enxerga e reaproveita as propostas de todo mundo.
             </p>
 
-            {!formData.is_admin && (
-              <div className="pt-4 border-t border-border">
-                <Label className="mb-3 block">Acesso aos Celulares</Label>
-                <div className="space-y-2 max-h-56 overflow-y-auto pr-2">
-                  {devices.map((device) => (
-                    <div
-                      key={device.id}
-                      className="flex items-center gap-2 bg-accent p-2 rounded-md"
-                    >
-                      <Checkbox
-                        id={`device-${device.id}`}
-                        checked={formData.allowed_devices.includes(device.id)}
-                        onCheckedChange={() => handleDeviceToggle(device.id)}
-                      />
-                      <Label htmlFor={`device-${device.id}`} className="flex-1 cursor-pointer">
-                        {device.name}
-                      </Label>
-                      <Badge variant="outline" className="shrink-0">
-                        {getDepartmentLabel(device.department)}
-                      </Badge>
-                    </div>
-                  ))}
-                  {devices.length === 0 && (
-                    <p className="text-sm text-muted-foreground">Nenhum aparelho cadastrado.</p>
-                  )}
-                </div>
+            {/* A seção aparece TAMBÉM para admin. Escondê-la fazia o cadastro
+                salvar sem nenhum aparelho, e quem não tem aparelho marcado não
+                entra na lista de "Designar" de instância nenhuma. */}
+            <div className="pt-4 border-t border-border">
+              <Label className="mb-1 block">Acesso aos Celulares</Label>
+              <p className="mb-3 text-xs text-muted-foreground">
+                {formData.is_admin
+                  ? 'Administrador sem restrição enxerga todas as instâncias de qualquer jeito, mas é esta lista que faz a pessoa aparecer no "Designar" de cada uma.'
+                  : 'Marque as instâncias que a pessoa pode abrir. É a mesma lista que a coloca no "Designar".'}
+              </p>
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-2">
+                {devices.map((device) => (
+                  <div
+                    key={device.id}
+                    className="flex items-center gap-2 bg-accent p-2 rounded-md"
+                  >
+                    <Checkbox
+                      id={`device-${device.id}`}
+                      checked={formData.allowed_devices.includes(device.id)}
+                      onCheckedChange={() => handleDeviceToggle(device.id)}
+                    />
+                    <Label htmlFor={`device-${device.id}`} className="flex-1 cursor-pointer">
+                      {device.name}
+                    </Label>
+                    <Badge variant="outline" className="shrink-0">
+                      {getDepartmentLabel(device.department)}
+                    </Badge>
+                  </div>
+                ))}
+                {devices.length === 0 && (
+                  <p className="text-sm text-muted-foreground">Nenhum aparelho cadastrado.</p>
+                )}
               </div>
-            )}
+            </div>
           </div>
 
           <DialogFooter>
