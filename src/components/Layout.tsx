@@ -11,6 +11,7 @@ import { TourDoApp } from '@/components/TourDoApp'
 import { AvisoDeVersaoNova } from '@/components/AvisoDeVersaoNova'
 import { ToolHost } from '@/components/tools/ToolHost'
 import { useAppHeartbeat } from '@/hooks/use-app-heartbeat'
+import { useNotificacoesDeMensagem } from '@/hooks/use-notificacoes-de-mensagem'
 import { useAndroidBack } from '@/hooks/use-android-back'
 import { useAndroidShell } from '@/hooks/use-android-shell'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -54,6 +55,13 @@ export default function Layout() {
 
   // Layout só é montado dentro de ProtectedRoute, então aqui já há sessão.
   useAppHeartbeat(true)
+  /**
+   * Som e notificação de mensagem nova. Mora aqui, e não no ChatHub, porque o
+   * ChatHub é rota `lazy()` e desmonta ao navegar — ir para o Painel ou para
+   * uma ferramenta deixava a pessoa sem aviso nenhum. Mesmo motivo do
+   * `BroadcastListener` logo abaixo.
+   */
+  useNotificacoesDeMensagem()
   // Botão voltar do Android. Fora do APK, não faz nada.
   useAndroidBack()
   // Barra de status e teclado. Idem.

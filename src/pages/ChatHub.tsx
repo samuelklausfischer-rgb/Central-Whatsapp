@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import logoUrl from '/logo.png'
 import { useSearchParams } from 'react-router-dom'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { ChatList } from '@/components/chat/ChatList'
@@ -37,7 +36,6 @@ import { definirConversaAberta } from '@/stores/mobileChrome'
 import { getNotes } from '@/services/notes'
 import { useRealtime } from '@/hooks/use-realtime'
 import { useAuth } from '@/hooks/use-auth'
-import { getRawDevicePrefs } from '@/hooks/use-notification-prefs'
 import { useToast } from '@/hooks/use-toast'
 import {
   Dialog,
@@ -102,31 +100,14 @@ const SIDEBAR_DEFAULT = 384
 const CHAT_MIN = 420
 const SIDEBAR_STORAGE_KEY = 'central-whats.chatSidebarWidth.v1'
 
-let audioCtx: AudioContext | null = null
-
-function getAudioContext() {
-  if (!audioCtx) audioCtx = new AudioContext()
-  if (audioCtx.state === 'suspended') audioCtx.resume()
-  return audioCtx
-}
-
-function playNotificationSound() {
-  try {
-    const ctx = getAudioContext()
-    const gain = ctx.createGain()
-    gain.connect(ctx.destination)
-    gain.gain.setValueAtTime(0.12, ctx.currentTime)
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5)
-
-    const osc = ctx.createOscillator()
-    osc.type = 'sine'
-    osc.frequency.setValueAtTime(523.25, ctx.currentTime)
-    osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.12)
-    osc.connect(gain)
-    osc.start(ctx.currentTime)
-    osc.stop(ctx.currentTime + 0.4)
-  } catch { /* silent fail */ }
-}
+/**
+ * O som e a notificação de mensagem nova NÃO moram mais aqui. Foram para
+ * `hooks/use-notificacoes-de-mensagem.ts`, montado no `Layout`.
+ *
+ * Estar nesta tela era o problema: `ChatHub` é rota `lazy()`, então sair para o
+ * Painel, o CRM ou uma ferramenta desmontava tudo e a pessoa parava de ser
+ * avisada — sem nenhum sinal de que isso tinha acontecido.
+ */
 
 export default function ChatHub() {
   const isMobile = useIsMobile()
@@ -167,7 +148,6 @@ export default function ChatHub() {
   selectedDeviceIdRef.current = selectedDeviceId
   selectedContactRef.current = selectedContact
   const devicesRef = useRef<any[]>(devices)
-  const userIdRef = useRef<string | undefined>(user?.id)
   // Mensagens otimistas pendentes (temp) aguardando o eco do realtime.
   // `chave` guarda a conversa de ORIGEM do envio. Sem ela, a confirmação usaria a
   // conversa aberta no momento em que a RPC responde — e quem enviasse e trocasse
@@ -206,16 +186,6 @@ export default function ChatHub() {
   useEffect(() => {
     devicesRef.current = devices
   }, [devices])
-
-  useEffect(() => {
-    userIdRef.current = user?.id
-  }, [user])
-
-  useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission()
-    }
-  }, [])
 
   useEffect(() => {
     getNotes().then((notes) => {
@@ -572,57 +542,10 @@ export default function ChatHub() {
     }
   }, [selectedDeviceId, devices])
 
-  useEffect(() => {
-    const enable = () => {
-      getAudioContext()
-      document.removeEventListener('click', enable)
-    }
-    document.addEventListener('click', enable, { once: true })
-  }, [])
-
+  // Esta assinatura cuida SÓ da tela: lista, store e resumos. O aviso de
+  // mensagem nova (som e notificação) tem canal próprio, no `Layout` — ver
+  // `hooks/use-notificacoes-de-mensagem.ts`.
   useRealtime('messages', (e) => {
-    if (e.action === 'create' && e.record.direction === 'inbound') {
-      const uid = userIdRef.current
-      const deviceId = e.record.device_id
-      const remoteSender = e.record.remote_sender as string
-      const prefs = uid ? getRawDevicePrefs(uid, deviceId) : { sound: true, background: true }
-
-      // `assignments` é só do aparelho ABERTO, e a mensagem pode ser de qualquer um.
-      // Consultá-lo para mensagem de outra instância silenciava a notificação com
-      // base no dono errado. Sem saber quem pegou a conversa lá, o padrão é NOTIFICAR:
-      // perder aviso de mensagem é pior do que um aviso a mais.
-      const assignment =
-        deviceId === selectedDeviceId
-          ? assignments.get(chaveDaConversa(deviceId, remoteSender))
-          : undefined
-      const isAssignedToSomeoneElse =
-        assignment?.assigned_to != null && assignment.assigned_to !== uid
-
-      if (!isAssignedToSomeoneElse && prefs.sound) {
-        playNotificationSound()
-      }
-
-      if (!isAssignedToSomeoneElse && prefs.background && 'Notification' in window && Notification.permission === 'granted') {
-        const device = devicesRef.current.find((d) => d.id === deviceId)
-        const deviceName = device?.name || 'WhatsApp'
-        const senderName =
-          e.record.sender_name ||
-          e.record.remote_sender?.split('@')[0] ||
-          'Contato'
-        const preview = e.record.content?.slice(0, 80) || '📎 Mídia'
-        const notif = new Notification(deviceName, {
-          body: `${senderName}: ${preview}`,
-          icon: logoUrl,
-          silent: true,
-        })
-        notif.onclick = () => {
-          window.focus()
-          ;(window as any).electronAPI?.focusWindow?.()
-          notif.close()
-        }
-      }
-    }
-
     if (e.record.device_id === selectedDeviceId) {
       if (e.action === 'create') setMessages((prev) => [...prev, e.record])
       else if (e.action === 'update')
