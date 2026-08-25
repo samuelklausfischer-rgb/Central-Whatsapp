@@ -42,6 +42,7 @@ import {
   Play,
   UserCheck,
   Users,
+  Undo2,
   Share2,
   User,
   CheckCircle,
@@ -2062,7 +2063,15 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     }
   }
 
-  const handleActionWaiting = async () => {
+  /**
+   * Devolve a conversa para a fila (status `waiting`, sem dono).
+   *
+   * A MESMA RPC atende dois botões: "Não posso" (a conversa é minha ou não tem
+   * dono) e "Devolver" (a conversa é de outra pessoa). Só o texto do erro muda —
+   * daí o parâmetro. Sem ele, quem clicasse em Devolver e falhasse leria "não foi
+   * possível marcar como 'não posso'", que não é a ação que ele pediu.
+   */
+  const handleActionWaiting = async (rotulo = 'marcar como "não posso"') => {
     if (!device || !contact || loadingAction) return
     setLoadingAction('waiting')
     try {
@@ -2075,7 +2084,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       onBack?.()
     } catch (e: any) {
       console.error('set_conversation_waiting error:', e)
-      toast({ title: 'Não foi possível marcar como "não posso"', description: e?.message, variant: 'destructive' })
+      toast({ title: `Não foi possível ${rotulo}`, description: e?.message, variant: 'destructive' })
     } finally {
       setLoadingAction(null)
     }
@@ -3533,7 +3542,17 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         </div>
 
         <div className="flex items-center gap-1">
-          {BARRA_ATENDIMENTO_VISIVEL && assignment && (assignment.status === 'open' || assignment.status === 'waiting') && (
+          {/*
+            SEM DONO — inclui `assignment` nulo, e isso não é detalhe: 44 das
+            2.202 conversas não têm linha em `conversation_assignments`
+            (`get_conversation_assignment` devolve vazio, não uma linha 'open'
+            sintética). Exigindo `assignment &&`, essas ficavam sem barra
+            nenhuma — a mesma queixa de "não aparece botão", por outro caminho.
+
+            É seguro porque as três RPCs são `INSERT ... ON CONFLICT`: agir numa
+            conversa sem registro simplesmente cria a linha.
+          */}
+          {BARRA_ATENDIMENTO_VISIVEL && (!assignment || assignment.status === 'open' || assignment.status === 'waiting') && (
             <>
               <button
                 onClick={handleActionTake}
@@ -3552,7 +3571,9 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                 Designar
               </button>
               <button
-                onClick={handleActionWaiting}
+                // Envolvido numa seta: passar a função direto entregaria o EVENTO
+                // do clique como `rotulo` e o aviso de erro sairia com um objeto.
+                onClick={() => handleActionWaiting()}
                 disabled={!!loadingAction}
                 className={BOTAO_SECUNDARIO}
               >
@@ -3582,7 +3603,9 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                 Designar
               </button>
               <button
-                onClick={handleActionWaiting}
+                // Envolvido numa seta: passar a função direto entregaria o EVENTO
+                // do clique como `rotulo` e o aviso de erro sairia com um objeto.
+                onClick={() => handleActionWaiting()}
                 disabled={!!loadingAction}
                 className={BOTAO_SECUNDARIO}
               >
@@ -3598,6 +3621,80 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
               >
                 {loadingAction === 'finish' ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3 w-3" />}
                 Finalizar
+              </button>
+            </>
+          )}
+          {/*
+            CONVERSA DE OUTRA PESSOA.
+
+            Antes este caso não desenhava nada: a barra acima exige
+            `assigned_to === user?.id`, então designar para a pessoa errada
+            trancava a conversa até ela aparecer — sem botão para devolver nem
+            para repassar. As RPCs também recusavam ("já está sendo atendida por
+            outra pessoa"); a trava saiu na migration 20260825160000, porque só
+            mexer aqui não adiantaria.
+
+            Não há confirmação de propósito (decisão do usuário). O que informa
+            quem clica é o selo "Com: {nome}" logo acima, no cabeçalho — e toda
+            ação fica registrada em `conversation_action_logs`.
+
+            Finalizar fica DE FORA: encerrar o atendimento de outra pessoa sem
+            nem assumir a conversa não é um caminho que alguém peça. Quem
+            precisar, pega primeiro.
+          */}
+          {BARRA_ATENDIMENTO_VISIVEL && assignment && (assignment.status === 'taken' || assignment.status === 'assigned') && assignment.assigned_to !== user?.id && (
+            <>
+              <button
+                onClick={handleActionTake}
+                disabled={!!loadingAction}
+                className={BOTAO_DESTAQUE_AZUL}
+              >
+                {loadingAction === 'take' ? <Loader2 className="h-3 w-3 animate-spin" /> : <UserCheck className="h-3 w-3" />}
+                Pegar
+              </button>
+              <button
+                onClick={() => setTeamAssignOpen(true)}
+                disabled={!!loadingAction}
+                className={BOTAO_SECUNDARIO}
+              >
+                <Users className="h-3 w-3" />
+                Designar
+              </button>
+              <button
+                onClick={() => handleActionWaiting('devolver a conversa')}
+                disabled={!!loadingAction}
+                className={BOTAO_SECUNDARIO}
+              >
+                {loadingAction === 'waiting' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Undo2 className="h-3 w-3" />}
+                Devolver
+              </button>
+            </>
+          )}
+          {/*
+            CONVERSA FINALIZADA — reabrir por engano tem que ter volta.
+
+            Só faltava a tela: o servidor SEMPRE aceitou isto. A trava de posse
+            das RPCs olha apenas `status IN ('taken','assigned')`, e `finished`
+            nunca esteve nessa lista. Eram 114 conversas sem nenhuma ação
+            possível por um `if` que não existia aqui.
+          */}
+          {BARRA_ATENDIMENTO_VISIVEL && assignment && assignment.status === 'finished' && (
+            <>
+              <button
+                onClick={handleActionTake}
+                disabled={!!loadingAction}
+                className={BOTAO_DESTAQUE_AZUL}
+              >
+                {loadingAction === 'take' ? <Loader2 className="h-3 w-3 animate-spin" /> : <UserCheck className="h-3 w-3" />}
+                Pegar
+              </button>
+              <button
+                onClick={() => setTeamAssignOpen(true)}
+                disabled={!!loadingAction}
+                className={BOTAO_SECUNDARIO}
+              >
+                <Users className="h-3 w-3" />
+                Designar
               </button>
             </>
           )}
