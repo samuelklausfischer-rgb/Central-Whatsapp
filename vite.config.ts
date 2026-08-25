@@ -1,6 +1,7 @@
 /* Vite config for building the frontend react app: https://vite.dev/config/ */
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import fs from 'node:fs'
 import path from 'path'
 import { VitePWA } from 'vite-plugin-pwa'
 // @ts-expect-error - uidPlugin is a custom plugin
@@ -19,6 +20,35 @@ import uidPlugin from './vite-plugin-react-uid'
  * alteração para as três variantes de build.
  */
 const pwaAtivo = process.env.PWA === '1'
+
+/**
+ * Copia `sw/notificacoes-sw.js` para a raiz do build. É o trecho que o `sw.js`
+ * gerado carrega por `importScripts` (ver a opção `workbox` abaixo).
+ *
+ * POR QUE NÃO DEIXAR EM `public/`: o Vite copia `public/` inteiro em TODAS as
+ * variantes de build. O arquivo iria parar dentro do instalador do Electron e
+ * do APK — nunca carregado, mas quebrando a invariante "Electron/APK não têm
+ * artefato nenhum de PWA", que é justamente o que se confere ao publicar. Este
+ * plugin só entra quando `PWA=1`, então o arquivo existe exatamente onde faz
+ * sentido: na web.
+ *
+ * `writeBundle` roda depois dos assets e antes do `closeBundle` onde o
+ * vite-plugin-pwa gera o `sw.js` — o arquivo já está no lugar quando o Workbox
+ * olha para o diretório.
+ */
+function copiarScriptDeNotificacao() {
+  return {
+    name: 'notificacoes-sw',
+    apply: 'build' as const,
+    writeBundle(opcoes: { dir?: string }) {
+      const destino = opcoes.dir ?? 'dist'
+      fs.copyFileSync(
+        path.resolve(__dirname, 'sw/notificacoes-sw.js'),
+        path.resolve(destino, 'notificacoes-sw.js'),
+      )
+    },
+  }
+}
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -51,6 +81,7 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     mode === 'development' ? uidPlugin() : undefined,
     react(),
+    pwaAtivo ? copiarScriptDeNotificacao() : undefined,
     pwaAtivo
       ? VitePWA({
           registerType: 'autoUpdate',
@@ -59,12 +90,30 @@ export default defineConfig(({ mode }) => ({
             skipWaiting: true,
             clientsClaim: true,
             cleanupOutdatedCaches: true,
+            /**
+             * `notificationclick` só existe DENTRO do service worker, e o nosso é
+             * GERADO (`generateSW`), não escrito à mão. `importScripts` cola o
+             * handler no topo do `sw.js` gerado sem trocar a estratégia.
+             *
+             * Por que não `injectManifest`: obrigaria a reescrever à mão o
+             * `navigateFallback`, a denylist e o `NetworkOnly` do `env-config.js`
+             * aqui embaixo — justamente a parte que, se sair errada, congela a URL
+             * do Supabase no cache sem dar erro nenhum. Ver `sw/notificacoes-sw.js`.
+             */
+            importScripts: ['/notificacoes-sw.js'],
             // env-config.js é sobrescrito em disco pelo Dockerfile DEPOIS do
             // `npm run build`, com a URL real do Supabase. O conteúdo que o
             // Workbox veria durante o build é sempre o stub — a revisão no
             // precache manifest nunca mudaria, e uma troca futura de
             // configuração seria servida do cache antigo sem erro nenhum.
-            globIgnores: ['env-config.js'],
+            //
+            // notificacoes-sw.js sai do precache por outro motivo: quem o carrega
+            // é o `importScripts` acima, de dentro do próprio service worker —
+            // caminho que NÃO passa pelo precache. Guardar uma segunda cópia no
+            // cache das páginas seria peso morto. (Ele precisa constar aqui de
+            // fato: o Workbox varre o diretório FINAL do build, então enxerga o
+            // arquivo que o plugin `notificacoes-sw` copia no `writeBundle`.)
+            globIgnores: ['env-config.js', 'notificacoes-sw.js'],
             navigateFallback: '/index.html',
             navigateFallbackDenylist: [/^\/env-config\.js$/, /^\/api\//, /^\/rest\//, /^\/functions\//],
             runtimeCaching: [
