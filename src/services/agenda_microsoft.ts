@@ -20,6 +20,18 @@ export interface EventoDoOutlook {
   dia_inteiro: boolean
   link: string | null
   origem: 'outlook'
+  /**
+   * `singleInstance` | `occurrence` | `exception` | `seriesMaster`.
+   * A leitura usa `calendarView`, que expande a repetição: o que chega aqui é
+   * uma OCORRÊNCIA, e mexer nela vale só para aquele dia.
+   */
+  tipo?: string
+  serie_id?: string | null
+}
+
+/** Faz parte de um compromisso que se repete? */
+export function seRepete(ev: { tipo?: string; serie_id?: string | null }): boolean {
+  return Boolean(ev.serie_id) || ev.tipo === 'occurrence' || ev.tipo === 'exception'
 }
 
 export interface StatusDaConexao {
@@ -82,13 +94,31 @@ export async function getEventosDoOutlook(inicioIso: string, fimIso: string): Pr
   return dados.eventos ?? []
 }
 
-export async function criarNoOutlook(evento: {
+export interface RascunhoDoOutlook {
   titulo: string
   descricao?: string | null
   /** Horário LOCAL, sem fuso: a função declara America/Sao_Paulo por nós. */
   inicio: string
   fim: string
   dia_inteiro?: boolean
-}): Promise<void> {
+}
+
+export async function criarNoOutlook(evento: RascunhoDoOutlook): Promise<void> {
   await chamar('criar', evento)
+}
+
+/**
+ * Edita um compromisso no Outlook.
+ *
+ * Se o `id` for de uma OCORRÊNCIA de repetição, a mudança vale só para aquele
+ * dia — a Microsoft transforma a ocorrência numa exceção da série. Quem avisa a
+ * pessoa é a tela; aqui só se registra o porquê.
+ */
+export async function atualizarNoOutlook(id: string, evento: RascunhoDoOutlook): Promise<void> {
+  await chamar('atualizar', { ...evento, id })
+}
+
+/** Idem: apagar uma ocorrência apaga só aquele dia, não a série. */
+export async function excluirDoOutlook(id: string): Promise<void> {
+  await chamar('excluir', { id })
 }

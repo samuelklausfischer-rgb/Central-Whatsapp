@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  addDays,
   addMonths,
+  addWeeks,
   eachDayOfInterval,
+  endOfDay,
   endOfMonth,
   endOfWeek,
   format,
@@ -10,23 +13,33 @@ import {
   startOfDay,
   startOfMonth,
   startOfWeek,
+  subDays,
   subMonths,
+  subWeeks,
 } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { CalendarDays, ChevronLeft, ChevronRight, Link2, Mail, Plus, Trash2, Users } from 'lucide-react'
-import { Dialog, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { GlassDialogContent } from '@/components/ui/glass-dialog'
+import { ChevronLeft, ChevronRight, CalendarDays, Plus, RefreshCw, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAuth } from '@/hooks/use-auth'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+import { GradeDoMes } from '@/components/agenda/GradeDoMes'
+import { GradeDeHoras } from '@/components/agenda/GradeDeHoras'
+import { CartaoDoCompromisso } from '@/components/agenda/CartaoDoCompromisso'
+import { DialogoDeGrupos } from '@/components/agenda/DialogoDeGrupos'
+import { BarraDoOutlook } from '@/components/agenda/BarraDoOutlook'
+import { DialogoDoCompromisso } from '@/components/agenda/DialogoDoCompromisso'
 import {
+  HORA_FINAL,
+  HORA_INICIAL,
+  paraCampoLocal,
+  type ItemDaAgenda,
+  type Rascunho,
+  type Visao,
+} from '@/components/agenda/tipos'
+import {
+  atualizarEvento,
   criarEvento,
   excluirEvento,
   getEventos,
@@ -34,16 +47,20 @@ import {
   type EventoComPessoas,
   type ModoDaAgenda,
 } from '@/services/agenda'
-import type { AgendaEscopo, AgendaGroup, AgendaImportancia } from '@/lib/supabase/types'
+import type { AgendaGroup } from '@/lib/supabase/types'
 import {
   conectar as conectarOutlook,
   desconectar as desconectarOutlook,
   getEventosDoOutlook,
   getStatus as getStatusDoOutlook,
   criarNoOutlook,
+  atualizarNoOutlook,
+  excluirDoOutlook,
+  seRepete as seRepeteNoOutlook,
   type EventoDoOutlook,
   type StatusDaConexao,
 } from '@/services/agenda_microsoft'
+import { useRealtime } from '@/hooks/use-realtime'
 
 /**
  * ITEM 1: a Agenda.
@@ -65,47 +82,36 @@ const MODOS: { valor: ModoDaAgenda; rotulo: string }[] = [
   { valor: 'tudo', rotulo: 'Tudo junto' },
 ]
 
-/**
- * Cor por importância. Fica aqui, e não no banco, porque é decisão de tela:
- * mudar a paleta não deveria pedir migration.
- */
-const CORES_IMPORTANCIA: Record<AgendaImportancia, string> = {
-  baixa: 'bg-slate-500/15 text-slate-300 border-slate-500/30',
-  normal: 'bg-blue-500/15 text-blue-300 border-blue-500/30',
-  alta: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-  urgente: 'bg-red-500/15 text-red-300 border-red-500/30',
-}
-
-const DIAS_DA_SEMANA = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb']
-
-/** `datetime-local` quer 'YYYY-MM-DDTHH:mm' no horário LOCAL, sem fuso. */
-function paraCampoLocal(d: Date): string {
-  return format(d, "yyyy-MM-dd'T'HH:mm")
-}
+const VISOES: { valor: Visao; rotulo: string }[] = [
+  { valor: 'mes', rotulo: 'Mês' },
+  { valor: 'semana', rotulo: 'Semana' },
+  { valor: 'dia', rotulo: 'Dia' },
+]
 
 /**
- * Um compromisso na tela pode vir de dois lugares: do nosso banco ou do Outlook
- * da pessoa. Esta é a forma comum, para a grade e a lista do dia não precisarem
- * saber a diferença — só o rótulo de origem muda.
+ * De quanto em quanto tempo reler o Outlook com a tela aberta.
+ *
+ * Dois minutos: cada ciclo é uma chamada ao Microsoft Graph por pessoa com a
+ * Agenda aberta. Mais curto que isso gasta cota para ganhar segundos que
+ * ninguém percebe; mais longo faz a pessoa desconfiar do que está vendo.
  */
-interface ItemDaAgenda {
-  id: string
-  titulo: string
-  descricao: string | null
-  starts_at: string
-  ends_at: string
-  dia_inteiro: boolean
-  importancia: AgendaImportancia
-  link: string | null
-  email: string | null
-  origem: 'interna' | 'outlook'
-  escopo: AgendaEscopo | null
-  setor: string | null
-  /** Só compromisso NOSSO pode ser excluído daqui; o do Outlook é leitura. */
-  podeExcluir: boolean
+const INTERVALO_SYNC_MS = 2 * 60 * 1000
+
+/** "agora", "há 3 min", "há 2 h" — sem trazer biblioteca só para isto. */
+function haQuantoTempo(quando: Date | null): string {
+  if (!quando) return ''
+  const min = Math.floor((Date.now() - quando.getTime()) / 60000)
+  if (min < 1) return 'agora'
+  if (min < 60) return `há ${min} min`
+  return `há ${Math.floor(min / 60)} h`
 }
 
-function daNossaAgenda(ev: EventoComPessoas, meuId: string | undefined): ItemDaAgenda {
+function daNossaAgenda(
+  ev: EventoComPessoas,
+  meuId: string | undefined,
+  souAdmin: boolean,
+): ItemDaAgenda {
+  const meu = ev.created_by === meuId
   return {
     id: ev.id,
     titulo: ev.titulo,
@@ -119,7 +125,10 @@ function daNossaAgenda(ev: EventoComPessoas, meuId: string | undefined): ItemDaA
     origem: 'interna',
     escopo: ev.escopo,
     setor: ev.setor,
-    podeExcluir: ev.created_by === meuId,
+    podeEditar: meu || ev.assigned_to === meuId || souAdmin,
+    podeExcluir: meu || souAdmin,
+    seRepete: false,
+    groupId: ev.group_id,
   }
 }
 
@@ -139,23 +148,17 @@ function doOutlook(ev: EventoDoOutlook): ItemDaAgenda {
     origem: 'outlook',
     escopo: null,
     setor: null,
-    podeExcluir: false,
+    // É a agenda da própria pessoa — quem consegue ler, consegue mexer.
+    podeEditar: true,
+    podeExcluir: true,
+    seRepete: seRepeteNoOutlook(ev),
+    groupId: null,
   }
 }
 
-interface Rascunho {
-  titulo: string
-  descricao: string
-  inicio: string
-  fim: string
-  diaInteiro: boolean
-  importancia: AgendaImportancia
-  link: string
-  email: string
-  escopo: AgendaEscopo
-  groupId: string
-  /** Salvar no Outlook em vez de na nossa agenda. Só para escopo pessoal. */
-  noOutlook: boolean
+/** Desmonta o `outlook:<id>` que a tela usa para não colidir com o id interno. */
+function idNoOutlook(idDaTela: string): string {
+  return idDaTela.startsWith('outlook:') ? idDaTela.slice('outlook:'.length) : idDaTela
 }
 
 function rascunhoVazio(dia: Date): Rascunho {
@@ -200,15 +203,46 @@ export default function Agenda() {
   const [dialogoAberto, setDialogoAberto] = useState(false)
   const [rascunho, setRascunho] = useState<Rascunho>(() => rascunhoVazio(new Date()))
   const [salvando, setSalvando] = useState(false)
+  /** null = criando. Preenchido = editando aquele compromisso. */
+  const [editando, setEditando] = useState<ItemDaAgenda | null>(null)
+  /** Visão do calendário. Filtro de desenho, não de dado. */
+  const [visao, setVisao] = useState<Visao>('mes')
+  const [atualizandoOutlook, setAtualizandoOutlook] = useState(false)
+  const [gruposAberto, setGruposAberto] = useState(false)
+  const [ultimaSync, setUltimaSync] = useState<Date | null>(null)
+  /** Reconta sozinho para o "há X min" andar sem depender de outra mudança. */
+  const [, setTiquetaque] = useState(0)
 
-  // A grade cobre semanas inteiras, então vai um pouco além do mês nas duas
-  // pontas — e a consulta precisa cobrir o MESMO intervalo, senão os dias que
-  // sobram do mês vizinho aparecem sempre vazios.
-  const gradeInicio = useMemo(() => startOfWeek(startOfMonth(mes), { locale: ptBR }), [mes])
-  const gradeFim = useMemo(() => endOfWeek(endOfMonth(mes), { locale: ptBR }), [mes])
+  const souAdmin = Boolean(user?.is_admin)
+
+  /**
+   * O período consultado muda com a VISÃO — e a consulta tem de cobrir
+   * exatamente o que a tela desenha.
+   *
+   * No mês a grade cobre semanas inteiras, então passa das bordas do mês nas
+   * duas pontas: sem isso os dias que sobram do mês vizinho apareceriam sempre
+   * vazios. Na semana e no dia o intervalo é o próprio período — pedir o mês
+   * inteiro ali seria trazer dezenas de compromissos para desenhar um.
+   */
+  const [gradeInicio, gradeFim] = useMemo<[Date, Date]>(() => {
+    if (visao === 'semana') {
+      return [
+        startOfWeek(diaSelecionado, { locale: ptBR }),
+        endOfWeek(diaSelecionado, { locale: ptBR }),
+      ]
+    }
+    if (visao === 'dia') return [startOfDay(diaSelecionado), endOfDay(diaSelecionado)]
+    return [startOfWeek(startOfMonth(mes), { locale: ptBR }), endOfWeek(endOfMonth(mes), { locale: ptBR })]
+  }, [visao, mes, diaSelecionado])
+
   const dias = useMemo(
     () => eachDayOfInterval({ start: gradeInicio, end: gradeFim }),
     [gradeInicio, gradeFim],
+  )
+
+  const horas = useMemo(
+    () => Array.from({ length: HORA_FINAL - HORA_INICIAL + 1 }, (_, i) => HORA_INICIAL + i),
+    [],
   )
 
   const carregar = useCallback(async () => {
@@ -250,21 +284,22 @@ export default function Agenda() {
    * Só nos modos que incluem a agenda pessoal: em "Setor" e "Grupos" o Outlook
    * de alguém não tem o que fazer ali.
    */
-  useEffect(() => {
-    if (!conexao.conectado || (modo !== 'meus' && modo !== 'tudo')) {
-      setDoOutlookNoPeriodo([])
-      setErroOutlook(null)
-      return
-    }
-    let vivo = true
-    getEventosDoOutlook(gradeInicio.toISOString(), gradeFim.toISOString())
-      .then((lista) => {
-        if (!vivo) return
+  const outlookNoModo = conexao.conectado && (modo === 'meus' || modo === 'tudo')
+
+  const recarregarOutlook = useCallback(
+    async (comIndicador = false) => {
+      if (!outlookNoModo) {
+        setDoOutlookNoPeriodo([])
+        setErroOutlook(null)
+        return
+      }
+      if (comIndicador) setAtualizandoOutlook(true)
+      try {
+        const lista = await getEventosDoOutlook(gradeInicio.toISOString(), gradeFim.toISOString())
         setDoOutlookNoPeriodo(lista)
         setErroOutlook(null)
-      })
-      .catch((e) => {
-        if (!vivo) return
+        setUltimaSync(new Date())
+      } catch (e) {
         setDoOutlookNoPeriodo([])
         setErroOutlook(e instanceof Error ? e.message : 'Não foi possível ler o Outlook')
         // Conexão revogada ou expirada: o servidor apaga a linha e responde 409,
@@ -272,11 +307,85 @@ export default function Agenda() {
         if (e instanceof Error && /não conectado|expirou/i.test(e.message)) {
           setConexao((c) => ({ ...c, conectado: false }))
         }
-      })
-    return () => {
-      vivo = false
+      } finally {
+        if (comIndicador) setAtualizandoOutlook(false)
+      }
+    },
+    [outlookNoModo, gradeInicio, gradeFim],
+  )
+
+  useEffect(() => {
+    void recarregarOutlook()
+  }, [recarregarOutlook, recarregaOutlook])
+
+  /**
+   * Atualização automática — SÓ COM A ABA VISÍVEL.
+   *
+   * O `visibilitychange` é o que reagenda: com a aba escondida o intervalo é
+   * desmontado inteiro, e volta ao reaparecer (já disparando uma vez, para quem
+   * volta depois de horas não olhar dado velho).
+   *
+   * Este cuidado não é teórico. O `setInterval(refetchOpen, 25000)` do ChatHub
+   * seguia disparando com o app minimizado — cada ciclo aqui é uma ida ao
+   * Microsoft Graph, e a janela minimizada a noite inteira somaria centenas de
+   * chamadas para uma tela que ninguém está olhando.
+   */
+  useEffect(() => {
+    if (!outlookNoModo) return
+    let timer: ReturnType<typeof setInterval> | null = null
+
+    const parar = () => {
+      if (timer) clearInterval(timer)
+      timer = null
     }
-  }, [conexao.conectado, modo, gradeInicio, gradeFim, recarregaOutlook])
+    const comecar = () => {
+      parar()
+      timer = setInterval(() => void recarregarOutlook(), INTERVALO_SYNC_MS)
+    }
+    const aoMudarVisibilidade = () => {
+      if (document.visibilityState === 'visible') {
+        void recarregarOutlook()
+        comecar()
+      } else {
+        parar()
+      }
+    }
+
+    if (document.visibilityState === 'visible') comecar()
+    document.addEventListener('visibilitychange', aoMudarVisibilidade)
+    window.addEventListener('focus', aoMudarVisibilidade)
+    return () => {
+      parar()
+      document.removeEventListener('visibilitychange', aoMudarVisibilidade)
+      window.removeEventListener('focus', aoMudarVisibilidade)
+    }
+  }, [outlookNoModo, recarregarOutlook])
+
+  /** Só para o rótulo "atualizado há X" não congelar na tela. */
+  useEffect(() => {
+    const t = setInterval(() => setTiquetaque((n) => n + 1), 30_000)
+    return () => clearInterval(t)
+  }, [])
+
+  /**
+   * Agenda interna ao vivo: compromisso de setor ou de grupo criado por outra
+   * pessoa aparece sem ninguém recarregar nada.
+   *
+   * `onSubscribed` refaz a consulta quando o canal (re)conecta — é a janela
+   * entre o primeiro fetch e o handshake do websocket, em que uma mudança
+   * chegaria e se perderia em silêncio.
+   */
+  useRealtime<Record<string, unknown>>(
+    'agenda_events',
+    // O payload é ignorado de propósito: `carregar()` refaz a consulta com o
+    // filtro de período e de modo já aplicados, e o `DELETE` do realtime traz
+    // só a chave primária — não daria para decidir se a linha apagada sequer
+    // estava na tela. Uma consulta a mais custa menos que um estado errado.
+    () => void carregar(),
+    Boolean(user?.id),
+    undefined,
+    () => void carregar(),
+  )
 
   /**
    * Tudo o que aparece na tela, das duas origens, na forma comum — e por dia,
@@ -288,7 +397,7 @@ export default function Agenda() {
    */
   const porDia = useMemo(() => {
     const todos: ItemDaAgenda[] = [
-      ...eventos.map((ev) => daNossaAgenda(ev, user?.id)),
+      ...eventos.map((ev) => daNossaAgenda(ev, user?.id, souAdmin)),
       ...doOutlookNoPeriodo.map(doOutlook),
     ]
     const mapa = new Map<string, ItemDaAgenda[]>()
@@ -304,12 +413,75 @@ export default function Agenda() {
       lista.sort((a, b) => a.starts_at.localeCompare(b.starts_at))
     }
     return mapa
-  }, [eventos, doOutlookNoPeriodo, user?.id])
+  }, [eventos, doOutlookNoPeriodo, user?.id, souAdmin])
 
   const doDiaSelecionado = porDia.get(format(diaSelecionado, 'yyyy-MM-dd')) || []
 
-  const abrirNovo = () => {
-    setRascunho(rascunhoVazio(diaSelecionado))
+  /**
+   * Navegar significa coisa diferente em cada visão — mês a mês, semana a
+   * semana, dia a dia. No mês o `diaSelecionado` acompanha, senão a lista
+   * lateral continuaria mostrando um dia que não está mais na grade.
+   */
+  const navegar = (passo: number) => {
+    if (visao === 'mes') {
+      const novo = passo > 0 ? addMonths(mes, 1) : subMonths(mes, 1)
+      setMes(novo)
+      setDiaSelecionado(startOfDay(startOfMonth(novo)))
+      return
+    }
+    const salto = visao === 'semana'
+      ? (passo > 0 ? addWeeks(diaSelecionado, 1) : subWeeks(diaSelecionado, 1))
+      : (passo > 0 ? addDays(diaSelecionado, 1) : subDays(diaSelecionado, 1))
+    setDiaSelecionado(startOfDay(salto))
+    setMes(startOfMonth(salto))
+  }
+
+  const irParaHoje = () => {
+    const hoje = new Date()
+    setDiaSelecionado(startOfDay(hoje))
+    setMes(startOfMonth(hoje))
+  }
+
+  const rotuloDoPeriodo = useMemo(() => {
+    if (visao === 'dia') return format(diaSelecionado, "d 'de' MMMM 'de' yyyy", { locale: ptBR })
+    if (visao === 'semana') {
+      const de = startOfWeek(diaSelecionado, { locale: ptBR })
+      const ate = endOfWeek(diaSelecionado, { locale: ptBR })
+      // Semana que atravessa o mês precisa dizer os dois, senão "1 – 7 de set"
+      // esconderia que começou em agosto.
+      return isSameMonth(de, ate)
+        ? `${format(de, 'd')} – ${format(ate, "d 'de' MMMM", { locale: ptBR })}`
+        : `${format(de, "d 'de' MMM", { locale: ptBR })} – ${format(ate, "d 'de' MMM", { locale: ptBR })}`
+    }
+    return format(mes, "MMMM 'de' yyyy", { locale: ptBR })
+  }, [visao, mes, diaSelecionado])
+
+  const abrirNovo = (dia?: Date) => {
+    setEditando(null)
+    setRascunho(rascunhoVazio(dia ?? diaSelecionado))
+    setDialogoAberto(true)
+  }
+
+  /**
+   * Abre o diálogo já preenchido. `datetime-local` exige horário LOCAL sem
+   * fuso, e o que temos é ISO — daí o `paraCampoLocal(new Date(...))`, que
+   * converte para o fuso do navegador em vez de cortar a string.
+   */
+  const abrirEdicao = (ev: ItemDaAgenda) => {
+    setEditando(ev)
+    setRascunho({
+      titulo: ev.titulo,
+      descricao: ev.descricao ?? '',
+      inicio: paraCampoLocal(new Date(ev.starts_at)),
+      fim: paraCampoLocal(new Date(ev.ends_at)),
+      diaInteiro: ev.dia_inteiro,
+      importancia: ev.importancia,
+      link: ev.link ?? '',
+      email: ev.email ?? '',
+      escopo: ev.escopo ?? 'usuario',
+      groupId: ev.groupId ?? '',
+      noOutlook: ev.origem === 'outlook',
+    })
     setDialogoAberto(true)
   }
 
@@ -346,25 +518,37 @@ export default function Agenda() {
     setSalvando(true)
     try {
       /*
-        Salvar no Outlook NÃO grava também no nosso banco. O compromisso volta
-        pela consulta ao vivo — gravar dos dois lados criaria exatamente o
-        compromisso duplicado que a consulta ao vivo existe para evitar.
+        Compromisso do Outlook mora SÓ no Outlook. Ele volta para a tela pela
+        consulta ao vivo — gravar também no nosso banco criaria exatamente a
+        duplicata que a consulta ao vivo existe para evitar.
       */
-      if (rascunho.escopo === 'usuario' && rascunho.noOutlook) {
-        await criarNoOutlook({
+      const noOutlook = rascunho.escopo === 'usuario' && rascunho.noOutlook
+      const doOutlookEditando = editando?.origem === 'outlook'
+
+      if (noOutlook || doOutlookEditando) {
+        const corpo = {
           titulo: rascunho.titulo.trim(),
           descricao: rascunho.descricao.trim() || null,
           inicio: rascunho.inicio,
           fim: rascunho.fim,
           dia_inteiro: rascunho.diaInteiro,
-        })
+        }
+        if (doOutlookEditando) {
+          await atualizarNoOutlook(idNoOutlook(editando.id), corpo)
+          toast({
+            title: 'Compromisso atualizado no Outlook',
+            description: editando.seRepete ? 'A mudança vale só para este dia.' : undefined,
+          })
+        } else {
+          await criarNoOutlook(corpo)
+          toast({ title: 'Compromisso criado no Outlook' })
+        }
         setDialogoAberto(false)
-        toast({ title: 'Compromisso criado no Outlook' })
         setRecarregaOutlook((n) => n + 1)
         return
       }
 
-      await criarEvento({
+      const campos = {
         titulo: rascunho.titulo.trim(),
         descricao: rascunho.descricao.trim() || null,
         starts_at: inicio.toISOString(),
@@ -376,11 +560,18 @@ export default function Agenda() {
         escopo: rascunho.escopo,
         setor: rascunho.escopo === 'setor' ? user.department : null,
         group_id: rascunho.escopo === 'grupo' ? rascunho.groupId : null,
-        created_by: user.id,
-        assigned_to: null,
-      })
+      }
+
+      if (editando) {
+        // `created_by` e `assigned_to` ficam DE FORA: quem editou não vira dono,
+        // e a designação tem gatilho próprio no banco (`agenda_events_designacao`).
+        await atualizarEvento(editando.id, campos)
+        toast({ title: 'Compromisso atualizado' })
+      } else {
+        await criarEvento({ ...campos, created_by: user.id, assigned_to: null })
+        toast({ title: 'Compromisso criado' })
+      }
       setDialogoAberto(false)
-      toast({ title: 'Compromisso criado' })
       await carregar()
     } catch (e) {
       toast({
@@ -392,9 +583,28 @@ export default function Agenda() {
     }
   }
 
-  const remover = async (id: string) => {
+  /**
+   * Excluir, pedindo confirmação — e avisando o caso que engana.
+   *
+   * Uma OCORRÊNCIA de compromisso que se repete tem id próprio: apagá-la apaga
+   * aquele dia e a repetição continua. Sem dizer isso, alguém apaga "a reunião
+   * de segunda" achando que cancelou a série inteira e só descobre na semana
+   * seguinte.
+   */
+  const remover = async (ev: ItemDaAgenda) => {
+    const aviso = ev.seRepete
+      ? `"${ev.titulo}" se repete.\n\nIsto apaga SÓ este dia. A repetição continua nas outras datas.`
+      : `Excluir "${ev.titulo}"?`
+    if (!window.confirm(aviso)) return
+
     try {
-      await excluirEvento(id)
+      if (ev.origem === 'outlook') {
+        await excluirDoOutlook(idNoOutlook(ev.id))
+        toast({ title: ev.seRepete ? 'Este dia foi excluído' : 'Compromisso excluído do Outlook' })
+        setRecarregaOutlook((n) => n + 1)
+        return
+      }
+      await excluirEvento(ev.id)
       toast({ title: 'Compromisso excluído' })
       await carregar()
     } catch (e) {
@@ -463,371 +673,175 @@ export default function Agenda() {
             Compromissos seus, do seu setor e dos seus grupos.
           </p>
         </div>
-        <Button onClick={abrirNovo} className="gap-1.5">
-          <Plus className="h-4 w-4" />
-          Novo compromisso
-        </Button>
+        <div className="flex items-center gap-2">
+          {outlookNoModo && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void recarregarOutlook(true)}
+              disabled={atualizandoOutlook}
+              className="gap-1.5"
+            >
+              <RefreshCw className={cn('h-3.5 w-3.5', atualizandoOutlook && 'animate-spin')} />
+              {atualizandoOutlook ? 'Atualizando…' : 'Atualizar'}
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={() => setGruposAberto(true)} className="gap-1.5">
+            <Users className="h-3.5 w-3.5" />
+            Grupos
+          </Button>
+          <Button onClick={() => abrirNovo()} className="gap-1.5">
+            <Plus className="h-4 w-4" />
+            Novo compromisso
+          </Button>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3 px-6 pt-4">
-        <Tabs value={modo} onValueChange={(v) => setModo(v as ModoDaAgenda)}>
-          <TabsList>
-            {MODOS.map((m) => (
-              <TabsTrigger key={m.valor} value={m.valor}>
-                {m.rotulo}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+        <div className="flex flex-wrap items-center gap-2">
+          <Tabs value={modo} onValueChange={(v) => setModo(v as ModoDaAgenda)}>
+            <TabsList>
+              {MODOS.map((m) => (
+                <TabsTrigger key={m.valor} value={m.valor}>
+                  {m.rotulo}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+
+          <Tabs value={visao} onValueChange={(v) => setVisao(v as Visao)}>
+            <TabsList>
+              {VISOES.map((v) => (
+                <TabsTrigger key={v.valor} value={v.valor}>
+                  {v.rotulo}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        </div>
 
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" onClick={() => setMes((m) => subMonths(m, 1))} aria-label="Mês anterior">
+          <Button variant="ghost" size="sm" onClick={irParaHoje}>
+            Hoje
+          </Button>
+          <Button variant="ghost" size="icon" onClick={() => navegar(-1)} aria-label="Período anterior">
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <span className="min-w-[10rem] text-center text-sm font-medium capitalize">
-            {format(mes, "MMMM 'de' yyyy", { locale: ptBR })}
+          <span className="min-w-[12rem] text-center text-sm font-medium capitalize">
+            {rotuloDoPeriodo}
           </span>
-          <Button variant="ghost" size="icon" onClick={() => setMes((m) => addMonths(m, 1))} aria-label="Próximo mês">
+          <Button variant="ghost" size="icon" onClick={() => navegar(1)} aria-label="Próximo período">
             <ChevronRight className="h-4 w-4" />
           </Button>
         </div>
       </div>
 
-      {/*
-        Só aparece quando o servidor já tem as chaves do aplicativo. Sem elas,
-        oferecer "Conectar" seria prometer um botão que daria erro.
-      */}
-      {conexao.configurado && (
-        <div className="mx-6 mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-border/60 bg-accent/30 px-4 py-2.5">
-          <CalendarDays className="h-4 w-4 shrink-0 text-sky-400" aria-hidden="true" />
-          {conexao.conectado ? (
-            <>
-              <span className="min-w-0 flex-1 break-words text-sm text-muted-foreground">
-                Outlook conectado{conexao.conta_email ? ` como ${conexao.conta_email}` : ''}
-              </span>
-              <Button variant="ghost" size="sm" onClick={desligarOutlook}>
-                Desconectar
-              </Button>
-            </>
-          ) : (
-            <>
-              <span className="min-w-0 flex-1 break-words text-sm text-muted-foreground">
-                Conecte seu Outlook para ver aqui os compromissos que já estão lá.
-              </span>
-              <Button size="sm" onClick={ligarOutlook}>
-                Conectar Outlook
-              </Button>
-            </>
-          )}
-        </div>
-      )}
+      <BarraDoOutlook
+        conexao={conexao}
+        erroOutlook={erroOutlook}
+        erro={erro}
+        aoConectar={ligarOutlook}
+        aoDesconectar={desligarOutlook}
+      />
 
-      {erroOutlook && (
-        <p className="mx-6 mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300">
-          {erroOutlook} — os compromissos criados aqui continuam aparecendo normalmente.
-        </p>
-      )}
+      <div
+        className={cn(
+          'grid flex-1 gap-6 overflow-auto p-6',
+          visao === 'mes' && 'lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]',
+          visao === 'dia' && 'lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]',
+        )}
+      >
+        {visao === 'mes' && (
+          <GradeDoMes
+            dias={dias}
+            mes={mes}
+            diaSelecionado={diaSelecionado}
+            porDia={porDia}
+            aoSelecionarDia={setDiaSelecionado}
+            aoMarcarNoDia={abrirNovo}
+          />
+        )}
 
-      {erro && (
-        <p className="mx-6 mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
-          {erro}
-        </p>
-      )}
+        {(visao === 'semana' || visao === 'dia') && (
+          <GradeDeHoras
+            dias={dias}
+            horas={horas}
+            porDia={porDia}
+            aoSelecionarDia={setDiaSelecionado}
+            aoMarcarNoDia={abrirNovo}
+            aoAbrirCompromisso={abrirEdicao}
+          />
+        )}
 
-      <div className="grid flex-1 gap-6 overflow-auto p-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <div className="superficie-vidro rounded-xl p-3">
-          <div className="grid grid-cols-7 gap-1 pb-2 text-center text-[11px] font-medium uppercase text-muted-foreground">
-            {DIAS_DA_SEMANA.map((d) => (
-              <span key={d}>{d}</span>
-            ))}
-          </div>
-          <div className="grid grid-cols-7 gap-1">
-            {dias.map((dia) => {
-              const doDia = porDia.get(format(dia, 'yyyy-MM-dd')) || []
-              const noMes = isSameMonth(dia, mes)
-              const selecionado = isSameDay(dia, diaSelecionado)
-              const hoje = isSameDay(dia, new Date())
-              return (
+        {/* A lista lateral não aparece na semana: ali as sete colunas já são a
+            lista, e uma coluna a mais só espremeria a grade. */}
+        {visao !== 'semana' && (
+          <div className="superficie-vidro flex flex-col gap-3 rounded-xl p-4">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="text-sm font-medium capitalize">
+                {format(diaSelecionado, "EEEE, d 'de' MMMM", { locale: ptBR })}
+              </p>
+              {ultimaSync && outlookNoModo && (
+                <span className="shrink-0 text-[11px] text-muted-foreground">
+                  Outlook {haQuantoTempo(ultimaSync)}
+                </span>
+              )}
+            </div>
+
+            {carregando ? (
+              <p className="text-sm text-muted-foreground">Carregando…</p>
+            ) : doDiaSelecionado.length === 0 ? (
+              <div className="text-sm text-muted-foreground">
+                <p>Nada marcado para este dia.</p>
                 <button
-                  key={dia.toISOString()}
                   type="button"
-                  onClick={() => setDiaSelecionado(startOfDay(dia))}
-                  className={cn(
-                    'flex min-h-[76px] flex-col items-start gap-1 rounded-lg border p-1.5 text-left transition-colors',
-                    noMes ? 'border-border/50' : 'border-transparent opacity-40',
-                    selecionado ? 'border-primary bg-primary/10' : 'hover:bg-accent/50',
-                  )}
+                  onClick={() => abrirNovo(diaSelecionado)}
+                  className="mt-2 inline-flex items-center gap-1 text-xs text-primary hover:underline"
                 >
-                  <span
-                    className={cn(
-                      'text-xs tabular-nums',
-                      hoje ? 'rounded-full bg-primary px-1.5 font-semibold text-primary-foreground' : '',
-                    )}
-                  >
-                    {format(dia, 'd')}
-                  </span>
-                  {/* No máximo dois no quadradinho: com mais, a célula cresce e a
-                      grade inteira desalinha. O resto vira "+N" e aparece na
-                      lista ao lado. */}
-                  {doDia.slice(0, 2).map((ev) => (
-                    <span
-                      key={ev.id}
-                      className={cn(
-                        'w-full truncate rounded border px-1 text-[10px] leading-4',
-                        CORES_IMPORTANCIA[ev.importancia],
-                      )}
-                    >
-                      {ev.titulo}
-                    </span>
-                  ))}
-                  {doDia.length > 2 && (
-                    <span className="text-[10px] text-muted-foreground">+{doDia.length - 2}</span>
-                  )}
+                  <Plus className="h-3 w-3" /> Marcar algo neste dia
                 </button>
-              )
-            })}
-          </div>
-        </div>
-
-        <div className="superficie-vidro flex flex-col gap-3 rounded-xl p-4">
-          <p className="text-sm font-medium capitalize">
-            {format(diaSelecionado, "EEEE, d 'de' MMMM", { locale: ptBR })}
-          </p>
-
-          {carregando ? (
-            <p className="text-sm text-muted-foreground">Carregando…</p>
-          ) : doDiaSelecionado.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nada marcado para este dia.</p>
-          ) : (
-            doDiaSelecionado.map((ev) => (
-              <div key={ev.id} className="rounded-lg border border-border/60 bg-accent/30 p-3">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="min-w-0 flex-1 break-words text-sm font-medium">{ev.titulo}</p>
-                  {/* Origem antes de importância: saber DE ONDE vem é o que
-                      responde "por que isso está aqui se eu não marquei". */}
-                  {ev.origem === 'outlook' ? (
-                    <span className="shrink-0 rounded border border-sky-500/30 bg-sky-500/10 px-1.5 text-[10px] text-sky-300">
-                      Outlook
-                    </span>
-                  ) : (
-                    <span
-                      className={cn('shrink-0 rounded border px-1.5 text-[10px]', CORES_IMPORTANCIA[ev.importancia])}
-                    >
-                      {ev.importancia}
-                    </span>
-                  )}
-                </div>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  {ev.dia_inteiro
-                    ? 'Dia inteiro'
-                    : `${format(new Date(ev.starts_at), 'HH:mm')} – ${format(new Date(ev.ends_at), 'HH:mm')}`}
-                  {ev.escopo === 'setor' && ` · setor ${ev.setor}`}
-                  {ev.escopo === 'grupo' && ' · grupo'}
-                </p>
-                {ev.descricao && (
-                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{ev.descricao}</p>
-                )}
-                <div className="mt-2 flex flex-wrap items-center gap-3">
-                  {ev.link && (
-                    <a
-                      href={ev.link}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                    >
-                      <Link2 className="h-3 w-3" />
-                      {ev.origem === 'outlook' ? 'Abrir no Outlook' : 'Abrir link'}
-                    </a>
-                  )}
-                  {ev.email && (
-                    <a
-                      href={`mailto:${ev.email}`}
-                      className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                    >
-                      <Mail className="h-3 w-3" /> {ev.email}
-                    </a>
-                  )}
-                  {/* Compromisso do Outlook é somente leitura aqui: apagar e
-                      editar continuam sendo lá, para não existirem dois donos
-                      do mesmo item. */}
-                  {ev.podeExcluir && (
-                    <button
-                      type="button"
-                      onClick={() => remover(ev.id)}
-                      className="ml-auto inline-flex items-center gap-1 text-xs text-red-400 hover:underline"
-                    >
-                      <Trash2 className="h-3 w-3" /> Excluir
-                    </button>
-                  )}
-                </div>
               </div>
-            ))
-          )}
-        </div>
+            ) : (
+              doDiaSelecionado.map((ev) => (
+                <CartaoDoCompromisso
+                  key={ev.id}
+                  ev={ev}
+                  aoEditar={abrirEdicao}
+                  aoExcluir={remover}
+                />
+              ))
+            )}
+          </div>
+        )}
       </div>
 
-      <Dialog open={dialogoAberto} onOpenChange={setDialogoAberto}>
-        <GlassDialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Novo compromisso</DialogTitle>
-          </DialogHeader>
+      <DialogoDeGrupos
+        aberto={gruposAberto}
+        aoFechar={() => setGruposAberto(false)}
+        meuId={user?.id ?? ''}
+        souAdmin={souAdmin}
+        // Recarrega o seletor de escopo do diálogo de compromisso: sem isto, um
+        // grupo recém-criado não apareceria na lista até recarregar a página.
+        aoMudarGrupos={() => {
+          getGrupos().then(setGrupos).catch(() => setGrupos([]))
+          void carregar()
+        }}
+      />
 
-          <div className="grid gap-3 py-2">
-            <div className="grid gap-1.5">
-              <Label htmlFor="ag-titulo">Título</Label>
-              <Input
-                id="ag-titulo"
-                value={rascunho.titulo}
-                onChange={(e) => setRascunho((r) => ({ ...r, titulo: e.target.value }))}
-                placeholder="Reunião de fechamento"
-              />
-            </div>
-
-            <div className="grid gap-1.5">
-              <Label htmlFor="ag-desc">Descrição</Label>
-              <Textarea
-                id="ag-desc"
-                value={rascunho.descricao}
-                onChange={(e) => setRascunho((r) => ({ ...r, descricao: e.target.value }))}
-                placeholder="Detalhes, pauta, o que levar…"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1.5">
-                <Label htmlFor="ag-inicio">Início</Label>
-                <Input
-                  id="ag-inicio"
-                  type="datetime-local"
-                  value={rascunho.inicio}
-                  onChange={(e) => setRascunho((r) => ({ ...r, inicio: e.target.value }))}
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="ag-fim">Término</Label>
-                <Input
-                  id="ag-fim"
-                  type="datetime-local"
-                  value={rascunho.fim}
-                  onChange={(e) => setRascunho((r) => ({ ...r, fim: e.target.value }))}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1.5">
-                <Label>Importância</Label>
-                <Select
-                  value={rascunho.importancia}
-                  onValueChange={(v) => setRascunho((r) => ({ ...r, importancia: v as AgendaImportancia }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="baixa">Baixa</SelectItem>
-                    <SelectItem value="normal">Normal</SelectItem>
-                    <SelectItem value="alta">Alta</SelectItem>
-                    <SelectItem value="urgente">Urgente</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="grid gap-1.5">
-                <Label>Agenda</Label>
-                <Select
-                  value={rascunho.escopo}
-                  onValueChange={(v) => setRascunho((r) => ({ ...r, escopo: v as AgendaEscopo }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="usuario">Só minha</SelectItem>
-                    <SelectItem value="setor">Do meu setor</SelectItem>
-                    <SelectItem value="grupo">De um grupo</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/*
-              Só na agenda pessoal: "setor" e "grupo" são conceitos nossos, que
-              não existem no Outlook de ninguém.
-            */}
-            {rascunho.escopo === 'usuario' && conexao.conectado && (
-              <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border/60 bg-accent/30 p-3">
-                <Checkbox
-                  checked={rascunho.noOutlook}
-                  onCheckedChange={(v) => setRascunho((r) => ({ ...r, noOutlook: v === true }))}
-                  className="mt-0.5"
-                />
-                <span className="min-w-0 text-sm">
-                  Salvar no Outlook
-                  <span className="block text-xs text-muted-foreground">
-                    Vai para a sua agenda da Microsoft e aparece também no celular. Depois, editar
-                    e excluir se faz por lá.
-                  </span>
-                </span>
-              </label>
-            )}
-
-            {rascunho.escopo === 'grupo' && (
-              <div className="grid gap-1.5">
-                <Label className="flex items-center gap-1.5">
-                  <Users className="h-3.5 w-3.5" /> Grupo
-                </Label>
-                <Select
-                  value={rascunho.groupId}
-                  onValueChange={(v) => setRascunho((r) => ({ ...r, groupId: v }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder={grupos.length ? 'Escolha o grupo' : 'Você ainda não tem grupos'} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {grupos.map((g) => (
-                      <SelectItem key={g.id} value={g.id}>
-                        {g.nome}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1.5">
-                <Label htmlFor="ag-link">Link</Label>
-                <Input
-                  id="ag-link"
-                  value={rascunho.link}
-                  onChange={(e) => setRascunho((r) => ({ ...r, link: e.target.value }))}
-                  placeholder="https://…"
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="ag-email">E-mail</Label>
-                <Input
-                  id="ag-email"
-                  type="email"
-                  value={rascunho.email}
-                  onChange={(e) => setRascunho((r) => ({ ...r, email: e.target.value }))}
-                  placeholder="pessoa@prn.com"
-                />
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setDialogoAberto(false)} disabled={salvando}>
-              Cancelar
-            </Button>
-            <Button onClick={salvar} disabled={salvando}>
-              {salvando ? 'Salvando…' : 'Criar'}
-            </Button>
-          </DialogFooter>
-        </GlassDialogContent>
-      </Dialog>
+      <DialogoDoCompromisso
+        aberto={dialogoAberto}
+        aoAbrirMudar={(v) => {
+          setDialogoAberto(v)
+          if (!v) setEditando(null)
+        }}
+        editando={editando}
+        rascunho={rascunho}
+        setRascunho={setRascunho}
+        grupos={grupos}
+        conexaoConectada={conexao.conectado}
+        salvando={salvando}
+        aoSalvar={salvar}
+      />
     </div>
   )
 }

@@ -221,6 +221,18 @@ interface EventoNormalizado {
   dia_inteiro: boolean
   link: string | null
   origem: 'outlook'
+  /**
+   * `singleInstance` | `occurrence` | `exception` | `seriesMaster`.
+   *
+   * Vem junto porque `calendarView` devolve OCORRÊNCIAS já expandidas de um
+   * compromisso que se repete, e o `id` de uma ocorrência não é o da série.
+   * Sem este campo, a tela não teria como avisar que excluir ali apaga só
+   * aquele dia — e alguém apagaria um dia achando que cancelou a reunião
+   * semanal inteira.
+   */
+  tipo: string
+  /** Id do compromisso mestre, quando este é uma ocorrência dele. */
+  serie_id: string | null
 }
 
 function normalizar(ev: Record<string, any>): EventoNormalizado {
@@ -233,6 +245,8 @@ function normalizar(ev: Record<string, any>): EventoNormalizado {
     dia_inteiro: Boolean(ev.isAllDay),
     link: ev.webLink ? String(ev.webLink) : null,
     origem: 'outlook',
+    tipo: String(ev.type ?? 'singleInstance'),
+    serie_id: ev.seriesMasterId ? String(ev.seriesMasterId) : null,
   }
 }
 
@@ -267,12 +281,35 @@ async function buscarEventos(token: string, inicioIso: string, fimIso: string) {
 
 // ——— Entrada ———
 
+/**
+ * O endereço PÚBLICO desta função — o único que a Microsoft aceita.
+ *
+ * `new URL(req.url).origin` NÃO serve no self-hosted. O Kong repassa a chamada
+ * para o container interno, então `req.url` chega como
+ * `http://functions:9000/...` — e era exatamente isso que ia para a Microsoft,
+ * que respondia `AADSTS50011: redirect URI does not match`. No Supabase Cloud o
+ * `req.url` já traz o host público, e por isso o defeito não aparece lá.
+ *
+ * Quem sabe o endereço de verdade é o `x-forwarded-host`, posto pelo Kong.
+ *
+ * O `x-forwarded-proto` é ignorado DE PROPÓSITO: ele chega como `http`, porque
+ * o TLS termina no Traefik, uma camada antes do Kong. Confiar nele produziria
+ * `http://apps-supabase…`, que também não bate com o que está cadastrado no
+ * portal — trocaria um AADSTS50011 por outro. Https é a regra; localhost, a
+ * exceção.
+ */
+function origemPublica(req: Request, url: URL): string {
+  const host = req.headers.get('x-forwarded-host') || url.host
+  const local = host.startsWith('localhost') || host.startsWith('127.0.0.1')
+  return `${local ? 'http' : 'https'}://${host}`
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   const url = new URL(req.url)
   const rota = url.pathname.split('/').filter(Boolean).pop() || ''
-  const redirectUri = `${url.origin}/functions/v1/agenda-microsoft/callback`
+  const redirectUri = `${origemPublica(req, url)}/functions/v1/agenda-microsoft/callback`
   const s = await lerSegredos()
 
   // O callback vem do navegador da pessoa, SEM o cabeçalho de autorização do
@@ -371,24 +408,55 @@ Deno.serve(async (req) => {
     return json({ eventos })
   }
 
-  if (rota === 'criar') {
+  if (rota === 'criar' || rota === 'atualizar') {
     const c = await req.json().catch(() => ({}))
     if (!c.titulo || !c.inicio || !c.fim) return json({ error: 'Informe titulo, inicio e fim' }, 400)
 
-    const resp = await fetch(`${GRAPH}/me/events`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        subject: String(c.titulo),
-        body: { contentType: 'text', content: String(c.descricao ?? '') },
-        start: { dateTime: String(c.inicio), timeZone: FUSO },
-        end: { dateTime: String(c.fim), timeZone: FUSO },
-        isAllDay: Boolean(c.dia_inteiro),
-      }),
-    })
+    const editando = rota === 'atualizar'
+    const idDoEvento = String(c.id ?? '')
+    if (editando && !idDoEvento) return json({ error: 'Informe o id do compromisso' }, 400)
+
+    // Mesmo corpo nos dois casos. O Graph aceita PATCH parcial, mas mandar o
+    // conjunto inteiro evita o caso em que limpar a descrição não apagaria nada
+    // — campo ausente num PATCH é "não mexa", não "deixe vazio".
+    const corpo = {
+      subject: String(c.titulo),
+      body: { contentType: 'text', content: String(c.descricao ?? '') },
+      start: { dateTime: String(c.inicio), timeZone: FUSO },
+      end: { dateTime: String(c.fim), timeZone: FUSO },
+      isAllDay: Boolean(c.dia_inteiro),
+    }
+
+    const resp = await fetch(
+      editando ? `${GRAPH}/me/events/${encodeURIComponent(idDoEvento)}` : `${GRAPH}/me/events`,
+      {
+        method: editando ? 'PATCH' : 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(corpo),
+      },
+    )
     const dados = await resp.json().catch(() => ({}))
     if (!resp.ok) return json({ error: String(dados?.error?.message ?? `Graph respondeu ${resp.status}`) }, 502)
-    return json({ ok: true, id: dados.id })
+    return json({ ok: true, id: dados.id ?? idDoEvento })
+  }
+
+  if (rota === 'excluir') {
+    const c = await req.json().catch(() => ({}))
+    const idDoEvento = String(c.id ?? '')
+    if (!idDoEvento) return json({ error: 'Informe o id do compromisso' }, 400)
+
+    const resp = await fetch(`${GRAPH}/me/events/${encodeURIComponent(idDoEvento)}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+
+    // O DELETE do Graph responde 204 SEM CORPO. Tentar `.json()` aqui lançaria
+    // no caminho de sucesso — por isso o corpo só é lido quando deu errado.
+    if (!resp.ok) {
+      const dados = await resp.json().catch(() => ({}))
+      return json({ error: String(dados?.error?.message ?? `Graph respondeu ${resp.status}`) }, 502)
+    }
+    return json({ ok: true })
   }
 
   return json({ error: 'Rota desconhecida' }, 404)
