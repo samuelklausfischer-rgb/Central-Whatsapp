@@ -1,0 +1,21 @@
+-- Correção do lookup de nome do contato no alerta de 10 minutos.
+--
+-- A versão aplicada primeiro em produção buscava `contacts.remote_sender` — mas
+-- a coluna se chama `remote_jid`. O erro passou pela criação porque **plpgsql só
+-- valida SINTAXE no `CREATE FUNCTION`**: referência de coluna dentro do corpo só
+-- é resolvida em tempo de execução. Como nenhuma pendência tinha chegado aos 10
+-- minutos ainda, o trecho nunca rodou e a função parecia sã. Teria estourado
+-- exatamente no primeiro alerta que importava.
+--
+-- ESTE ARQUIVO NÃO TEM DDL DE PROPÓSITO. A correção foi dobrada de volta na
+-- migration anterior (`20260825192218_alertas_escalonados_de_pendencia.sql`),
+-- que já cria a função com `remote_jid` e `coalesce(nickname, name)`. Aplicar a
+-- sequência num banco novo produz o estado certo sem passar pela versão quebrada.
+--
+-- O arquivo existe só para o ledger de migrations bater com o repositório: a
+-- versão 20260825192432 está registrada em produção e precisa ter um par aqui.
+--
+-- Lição que vale além deste caso: função em plpgsql criada com sucesso NÃO é
+-- função correta. Só exercitar o caminho prova.
+
+select 1;
