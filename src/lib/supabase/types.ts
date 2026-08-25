@@ -9,6 +9,12 @@ export interface Profile {
   is_admin: boolean
   is_super_admin?: boolean
   devices_restricted?: boolean
+  /**
+   * Aviso de mensagem nova por aparelho: `{ "<device_id>": { sound, background } }`.
+   * Mora no perfil, e não no localStorage, para a configuração seguir a PESSOA
+   * entre desktop, web e PWA — ver `hooks/use-notification-prefs.ts`.
+   */
+  notification_prefs?: Record<string, { sound: boolean; background: boolean }>
   created_at: string
   updated_at: string
 }

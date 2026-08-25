@@ -4,6 +4,7 @@ import { clearAllDrafts } from '@/stores/conversationDrafts'
 import { clearDeviceSnapshots } from '@/stores/conversationSummaries'
 import { limparConversas } from '@/stores/conversationMessages'
 import { limparFerramentas } from '@/stores/ferramentasVivas'
+import { sincronizarPrefsDoPerfil, esquecerPromocaoDePrefs } from '@/hooks/use-notification-prefs'
 import type { Profile, Device } from '@/lib/supabase/types'
 
 interface AuthContextType {
@@ -105,6 +106,12 @@ async function loadUserData(
 ) {
   const profile = await fetchProfile(session.user.id)
   if (!profile || signal.aborted) return null
+
+  // Espelha o aviso por aparelho no localStorage assim que o perfil chega. O
+  // callback de Realtime que decide notificar é SÍNCRONO e lê o espelho — sem
+  // isto ele cairia no padrão "tudo ligado" até alguém abrir as preferências.
+  // O perfil já vem com `select('*')`, então não custa nenhuma ida a mais.
+  sincronizarPrefsDoPerfil(session.user.id, profile.notification_prefs)
 
   const mergedUser = { ...profile, email: session.user.email || profile.email || '' }
   let deviceList: Device[] = []
@@ -335,6 +342,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // a Análise PRN preenchida, e os iframes seguiriam autenticados como o
     // atendente anterior.
     limparFerramentas()
+    // A promoção "localStorage antigo -> perfil" é uma vez por sessão. Sem
+    // zerar aqui, quem logasse em seguida na mesma máquina não teria direito à
+    // dela — e ficaria com a configuração espelhada de quem saiu.
+    esquecerPromocaoDePrefs()
     /**
      * ESCOPO LOCAL — sair aqui não pode derrubar as outras máquinas.
      *
