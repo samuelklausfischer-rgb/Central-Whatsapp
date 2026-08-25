@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Bell, Volume2, VolumeX, BellOff, Smartphone, Wifi, WifiOff } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { Bell, Volume2, VolumeX, BellOff, Smartphone, Wifi, WifiOff, ShieldAlert } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Switch } from '@/components/ui/switch'
 import { useAuth } from '@/hooks/use-auth'
@@ -11,6 +11,14 @@ interface Props {
   onOpenChange: (v: boolean) => void
 }
 
+/** 'indisponivel' = navegador sem a API (não é o mesmo que "bloqueado"). */
+type EstadoDaPermissao = NotificationPermission | 'indisponivel'
+
+function lerPermissao(): EstadoDaPermissao {
+  if (typeof window === 'undefined' || !('Notification' in window)) return 'indisponivel'
+  return Notification.permission
+}
+
 export function NotificationsDialog({ open, onOpenChange }: Props) {
   const { user } = useAuth()
   const [devices, setDevices] = useState<any[]>([])
@@ -18,13 +26,75 @@ export function NotificationsDialog({ open, onOpenChange }: Props) {
   const { getPrefs, toggleSound, toggleBackground, setAllSound, setAllBackground } =
     useNotificationPrefs(user?.id)
 
+  /**
+   * A permissão do NAVEGADOR, que é coisa diferente das preferências salvas aqui.
+   *
+   * Esta tela mostrava "2° plano" ligado (é o padrão em `use-notification-prefs`)
+   * sem nunca consultar `Notification.permission`. Quem nunca autorizou via a
+   * chave ligada, não recebia nada, e não tinha como descobrir por quê.
+   */
+  const [permissao, setPermissao] = useState<EstadoDaPermissao>(lerPermissao)
+
   useEffect(() => {
     if (!open) return
+    setPermissao(lerPermissao())
     setLoading(true)
     getDevices()
       .then(setDevices)
       .finally(() => setLoading(false))
   }, [open])
+
+  const podeNotificar = permissao === 'granted'
+
+  /**
+   * Pede a permissão A PARTIR DO CLIQUE.
+   *
+   * Isto é o ponto: o pedido antigo rodava num efeito de montagem do ChatHub,
+   * sem gesto nenhum. Chrome e Edge aplicam a *quieter notification UI* a
+   * pedidos assim — o prompt vira um sininho discreto na barra de endereço, que
+   * quase ninguém vê, e a permissão fica em 'default' para sempre. Dentro de um
+   * gesto, o navegador mostra a caixa de verdade.
+   *
+   * Devolve se ficou autorizado, para o clique só ligar a chave quando ligar
+   * significar alguma coisa.
+   */
+  const pedirPermissao = useCallback(async () => {
+    if (!('Notification' in window)) return false
+    try {
+      const resposta = await Notification.requestPermission()
+      setPermissao(resposta)
+      return resposta === 'granted'
+    } catch {
+      setPermissao(lerPermissao())
+      return false
+    }
+  }, [])
+
+  /**
+   * Ligar "2° plano" com a permissão pendente pede a permissão primeiro.
+   * Desligar nunca pede nada — desligar sempre funciona.
+   */
+  const alternarBackground = useCallback(
+    async (deviceId: string, ligando: boolean) => {
+      if (ligando && !podeNotificar) {
+        if (permissao === 'denied' || permissao === 'indisponivel') return
+        if (!(await pedirPermissao())) return
+      }
+      toggleBackground(deviceId)
+    },
+    [podeNotificar, permissao, pedirPermissao, toggleBackground],
+  )
+
+  const alternarBackgroundDeTodos = useCallback(
+    async (ligando: boolean, ids: string[]) => {
+      if (ligando && !podeNotificar) {
+        if (permissao === 'denied' || permissao === 'indisponivel') return
+        if (!(await pedirPermissao())) return
+      }
+      setAllBackground(ligando, ids)
+    },
+    [podeNotificar, permissao, pedirPermissao, setAllBackground],
+  )
 
   const deviceIds = devices.map((d) => d.id)
   const allSoundOn = deviceIds.every((id) => getPrefs(id).sound)
@@ -49,6 +119,35 @@ export function NotificationsDialog({ open, onOpenChange }: Props) {
           </div>
         </DialogHeader>
 
+        {/*
+          O estado da permissão do navegador, dito na cara. Sem isto a tela
+          mostrava tudo ligado enquanto nada chegava.
+        */}
+        {!podeNotificar && (
+          <div className="px-5 py-3 border-b border-border bg-amber-500/10 flex items-start gap-2.5">
+            <ShieldAlert className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+            <p className="text-[11px] leading-relaxed text-amber-200/90">
+              {permissao === 'denied' ? (
+                <>
+                  <span className="font-medium">O navegador bloqueou as notificações.</span>{' '}
+                  O app não consegue reverter isso sozinho: libere no cadeado da barra de
+                  endereço (ou nas configurações do site) e recarregue.
+                </>
+              ) : permissao === 'indisponivel' ? (
+                <>
+                  <span className="font-medium">Este navegador não tem notificações.</span>{' '}
+                  Só o som vai funcionar por aqui.
+                </>
+              ) : (
+                <>
+                  <span className="font-medium">Falta autorizar o navegador.</span>{' '}
+                  Ligue o "2° plano" de um aparelho abaixo — a autorização é pedida na hora.
+                </>
+              )}
+            </p>
+          </div>
+        )}
+
         {/* Controles globais */}
         {devices.length > 1 && (
           <div className="px-5 py-3 border-b border-border bg-muted/30 flex items-center gap-4">
@@ -65,8 +164,9 @@ export function NotificationsDialog({ open, onOpenChange }: Props) {
             <div className="flex items-center gap-1.5">
               <Bell className="h-3.5 w-3.5 text-muted-foreground" />
               <Switch
-                checked={allBgOn}
-                onCheckedChange={(v) => setAllBackground(v, deviceIds)}
+                checked={allBgOn && podeNotificar}
+                disabled={permissao === 'denied' || permissao === 'indisponivel'}
+                onCheckedChange={(v) => void alternarBackgroundDeTodos(v, deviceIds)}
                 className="scale-90"
               />
             </div>
@@ -91,7 +191,11 @@ export function NotificationsDialog({ open, onOpenChange }: Props) {
             const prefs = getPrefs(device.id)
             const isConnected = device.status === 'open' || device.status === 'connected'
             const soundOff = !prefs.sound
-            const bgOff = !prefs.background
+            // A permissão do navegador entra na conta: "ligado, mas o navegador
+            // não deixa" é, na prática, desligado — e é isso que a etiqueta
+            // "Mudo" precisa dizer.
+            const bgLigado = prefs.background && podeNotificar
+            const bgOff = !bgLigado
 
             return (
               <div
@@ -159,26 +263,27 @@ export function NotificationsDialog({ open, onOpenChange }: Props) {
                   </button>
 
                   <button
-                    onClick={() => toggleBackground(device.id)}
-                    className={`flex-1 flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border transition-all duration-150 ${
-                      prefs.background
+                    onClick={() => void alternarBackground(device.id, !prefs.background)}
+                    disabled={permissao === 'denied' || permissao === 'indisponivel'}
+                    className={`flex-1 flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed ${
+                      bgLigado
                         ? 'border-border bg-background hover:bg-accent'
                         : 'border-dashed border-muted-foreground/30 bg-muted/30 hover:bg-muted/50'
                     }`}
                   >
                     <div className="flex items-center gap-2">
-                      {prefs.background ? (
+                      {bgLigado ? (
                         <Bell className="h-3.5 w-3.5 text-blue-400" />
                       ) : (
                         <BellOff className="h-3.5 w-3.5 text-muted-foreground" />
                       )}
-                      <span className={`text-xs font-medium ${prefs.background ? 'text-foreground' : 'text-muted-foreground'}`}>
+                      <span className={`text-xs font-medium ${bgLigado ? 'text-foreground' : 'text-muted-foreground'}`}>
                         2° plano
                       </span>
                     </div>
                     <Switch
-                      checked={prefs.background}
-                      onCheckedChange={() => toggleBackground(device.id)}
+                      checked={bgLigado}
+                      onCheckedChange={() => void alternarBackground(device.id, !prefs.background)}
                       className="scale-75 pointer-events-none"
                     />
                   </button>
@@ -192,6 +297,7 @@ export function NotificationsDialog({ open, onOpenChange }: Props) {
         <div className="px-5 py-3 border-t border-border bg-muted/20">
           <p className="text-[11px] text-muted-foreground">
             As preferências são salvas localmente neste dispositivo.
+            {podeNotificar && ' O navegador já está autorizado a notificar.'}
           </p>
         </div>
       </DialogContent>
