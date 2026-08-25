@@ -11,6 +11,7 @@ import {
   BarChart3,
   Percent,
   Activity,
+  Timer,
   FileText,
   FileSignature,
   Gavel,
@@ -120,6 +121,14 @@ const RELATORIO_APP: DestinoNav = {
   url: '/ferramentas/relatorio-app',
 }
 
+/** Só super-admin, mesmo gate do Relatório App. */
+const CONTROLE_MENSAGENS: DestinoNav = {
+  title: 'Controle de Mensagens',
+  description: 'Tempo de resposta',
+  icon: Timer,
+  url: '/ferramentas/controle-mensagens',
+}
+
 /** Apps externos embutidos em iframe, com a sessão do Central Whats. */
 const RELATORIOS: DestinoNav = {
   title: 'Relatórios',
@@ -203,7 +212,7 @@ export function gruposDeFerramentas(
     ...(externas?.relatorios ? [RELATORIOS] : []),
     ...(externas?.licitacoes ? [LICITACOES] : []),
     ...(externas?.prnHub ? [PRN_HUB] : []),
-    ...(user?.is_super_admin ? [RELATORIO_APP] : []),
+    ...(user?.is_super_admin ? [RELATORIO_APP, CONTROLE_MENSAGENS] : []),
   ]
 
   return [

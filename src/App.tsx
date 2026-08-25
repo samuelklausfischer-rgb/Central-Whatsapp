@@ -171,6 +171,13 @@ const App = () => {
                 </Route>
                 <Route element={<SuperAdminRoute />}>
                   <Route path="/ferramentas/relatorio-app" element={<FerramentaHospedada slug="relatorio-app" />} />
+                  {/*
+                    Controle de Mensagens: tempo de resposta do time. Aqui dentro
+                    do mesmo gate porque hoje só uma pessoa deve ver — e usar a
+                    flag `is_super_admin`, em vez de fixar um e-mail no código,
+                    faz liberar mais alguém virar um clique no cadastro.
+                  */}
+                  <Route path="/ferramentas/controle-mensagens" element={<FerramentaHospedada slug="controle-mensagens" />} />
                 </Route>
                 <Route element={<ExternalToolRoute tool="relatorios" />}>
                   <Route path="/ferramentas/relatorios" element={<FerramentaHospedada slug="relatorios" />} />

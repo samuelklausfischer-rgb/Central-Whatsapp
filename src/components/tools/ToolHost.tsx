@@ -13,6 +13,7 @@ import {
 const AnalisePrn = lazy(() => import('@/pages/tools/AnalisePrn'))
 const RateioMobilemed = lazy(() => import('@/pages/tools/RateioMobilemed'))
 const RelatorioApp = lazy(() => import('@/pages/tools/RelatorioApp'))
+const ControleMensagens = lazy(() => import('@/pages/tools/ControleMensagens'))
 const Relatorios = lazy(() => import('@/pages/tools/Relatorios'))
 const Licitacoes = lazy(() => import('@/pages/tools/Licitacoes'))
 const Assinaturas = lazy(() => import('@/pages/tools/Assinaturas'))
@@ -39,6 +40,13 @@ export const FERRAMENTAS_HOSPEDADAS: Record<string, FerramentaHospedavel> = {
   'analise-prn': { titulo: 'Análise PRN', url: '/ferramentas/analise-prn', Componente: AnalisePrn },
   'rateio-mobilemed': { titulo: 'Rateio', url: '/ferramentas/rateio-mobilemed', Componente: RateioMobilemed },
   'relatorio-app': { titulo: 'Relatório App', url: '/ferramentas/relatorio-app', Componente: RelatorioApp },
+  // Nativa, então SEM `telaCheia`: recebe o respiro e a largura máxima do painel,
+  // como o Relatório App. `telaCheia` é só para as embutidas por iframe.
+  'controle-mensagens': {
+    titulo: 'Controle de Mensagens',
+    url: '/ferramentas/controle-mensagens',
+    Componente: ControleMensagens,
+  },
   relatorios: { titulo: 'Relatórios', url: '/ferramentas/relatorios', Componente: Relatorios, telaCheia: true },
   licitacoes: { titulo: 'Licitações', url: '/ferramentas/licitacoes', Componente: Licitacoes, telaCheia: true },
   // ITEM 2. `telaCheia` como as outras embutidas por iframe: o app filho cuida
