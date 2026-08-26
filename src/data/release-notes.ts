@@ -34,6 +34,24 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.216',
+    date: '2026-08-26 17:00',
+    title: 'Gestão Médica no menu, disparo em massa, e o contato fica de quem responde',
+    details: [
+      '🩺 Gestão Médica agora abre dentro do PRN Hub, em Ferramentas — já logado, sem senha de novo. São 148 médicos com contratos, documentos e pendências. Liberado para o setor Administrativo',
+      '📣 Disparador em massa: monte listas de transmissão, dispare para todas e acompanhe a fila andando. O envio é espaçado de propósito, para não parecer robô',
+      '📧 Email Hub conectado de verdade à Microsoft: as contas entram por login da própria Microsoft, sem senha guardada. Chegaram também campanhas de e-mail e organização das caixas por setor',
+      '🔔 O sino de notificações agora vale no app inteiro, e não só dentro das Conversas. Tem som, e a sua preferência passou a ficar guardada no seu perfil — antes cada navegador tinha a dele, e trocar de computador zerava tudo',
+      '🏷️ Etiqueta agora é da equipe. Quando alguém cria uma etiqueta num contato, ela aparece para todos — antes só quem criou enxergava, e ninguém sabia de quem era a unidade sem perguntar. Renomear e apagar continua com quem criou',
+      '👤 Respondeu um contato que não tinha dono? Ele passa a ser seu automaticamente, até você finalizar ou designar para outra pessoa. Conversa que já está com um colega não muda de mão — ninguém rouba atendimento sem querer',
+      '🐛 Conversa aberta por um colega parou de contar como não lida para os outros',
+      '🐛 Pegar e Finalizar mexem na lista no clique, sem esperar a rede responder',
+      '🐛 O Controle de Mensagens parou de liderar por um número que mentia',
+    ],
+    usabilidade:
+      'Para achar o Gestão Médica: menu Ferramentas → Sistemas PRN → Gestão Médica. Se você é do Administrativo ele já está lá; se não aparece, é porque o acesso vai pelo setor do seu cadastro.',
+  },
+  {
     version: '0.0.215',
     date: '2026-08-24 18:10',
     title: 'A fila do Hub inteira: agenda, tarefas e um monte de correção',
