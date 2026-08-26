@@ -135,7 +135,7 @@ import { createTask, getTaskAssignees, type TaskAssignee } from '@/services/task
 import type { Note, ConversationAssignment, Label as EtiquetaTipo } from '@/lib/supabase/types'
 import { ContactNoteIcon } from '@/components/ui/ContactNoteIcon'
 import { TeamAssignDialog } from '@/components/chat/TeamAssignDialog'
-import { markConversationRead, markConversationReadGlobal, getConversationViewers, getConversationAssignment, registrarProgressoDeLeitura, type ConversationViewer } from '@/services/conversation_states'
+import { markConversationRead, markConversationReadGlobal, getConversationViewers, getConversationAssignment, registrarProgressoDeLeitura, mesclarNomesDaAtribuicao, type ConversationViewer } from '@/services/conversation_states'
 import { buildContactIndex, resolveContactDisplayName, findContactByIdentifier, isGroupJid, normalizeToDigits } from '@/lib/contacts/normalize'
 import { isPdfFile, isExcelFile } from '@/lib/file-type'
 import { DocumentBubble } from '@/components/chat/DocumentBubble'
@@ -1083,7 +1083,7 @@ const LINHAS_MAXIMAS_DO_COMPOSITOR = 5
  */
 const JANELA_DE_EDICAO_MS = 15 * 60 * 1000
 
-export function ChatWindow({ device, contact, conversation, assignment: assignmentProp, contacts, onBack, sheetOpen, onSheetOpenChange, onStartConversation, onOpenConversationByJid, onOptimisticSend, onOptimisticConfirm, onOptimisticFail, estadoConversa = 'pronto', onRetryMessages, conversas = [], onForwardMessage }: any) {
+export function ChatWindow({ device, contact, conversation, assignment: assignmentProp, onAssignmentChange, contacts, onBack, sheetOpen, onSheetOpenChange, onStartConversation, onOpenConversationByJid, onOptimisticSend, onOptimisticConfirm, onOptimisticFail, estadoConversa = 'pronto', onRetryMessages, conversas = [], onForwardMessage }: any) {
   const { user } = useAuth()
   const { toast } = useToast()
 
@@ -1792,8 +1792,17 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
 
   // Reage à assinatura conversation_assignments já mantida em ChatHub.tsx (via prop)
   // em vez de abrir um segundo canal Realtime pra mesma tabela.
+  //
+  // A prop pode chegar CRUA (linha de Realtime ou da carga do aparelho, sem os
+  // `*_name`) ou RICA (`get_conversation_assignment`, com os nomes resolvidos).
+  // Aceitar a crua por cima da rica apagava o selo "Com: fulano" do topo, que só
+  // é desenhado quando `assigned_to_name` existe. `mesclarNomesDaAtribuicao`
+  // herda o nome apenas enquanto o dono for o mesmo — se a conversa passou para
+  // outra pessoa, o nome antigo cai junto.
   useEffect(() => {
-    if (assignmentProp !== undefined) setAssignment(assignmentProp ?? null)
+    if (assignmentProp === undefined) return
+    const nova = (assignmentProp ?? null) as ConversationAssignment | null
+    setAssignment((atual) => (nova ? mesclarNomesDaAtribuicao(atual ?? undefined, nova) : null))
   }, [assignmentProp])
 
   useEffect(() => {
@@ -2078,6 +2087,25 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     }
   }
 
+  /**
+   * Relê a atribuição da conversa e entrega o resultado aos DOIS lados: o estado
+   * local (barra de atendimento aqui em cima) e o ChatHub, via
+   * `onAssignmentChange` — que é quem manda na aba Minhas/Geral, no `pinned` que
+   * sobe a conversa e no cursor de leitura.
+   *
+   * Existir como uma função só é o que impede o bug de voltar. Eram quatro
+   * handlers repetindo `getConversationAssignment` + `setAssignment`, e nenhum
+   * deles avisava o pai: a lista ficava esperando o evento de Realtime dar a volta
+   * pela rede para descobrir o que o clique já sabia. Bastava um handler novo
+   * esquecer a linha do aviso para o "demora para aparecer em Minhas" renascer.
+   */
+  const sincronizarAtribuicao = async () => {
+    if (!device || !contact) return
+    const asgn = await getConversationAssignment(device.id, contact)
+    setAssignment(asgn)
+    onAssignmentChange?.(device.id, contact, asgn)
+  }
+
   const handleActionTake = async () => {
     if (!device || !contact || loadingAction) return
     setLoadingAction('take')
@@ -2087,8 +2115,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         p_remote_sender: contact,
       })
       if (error) throw error
-      const asgn = await getConversationAssignment(device.id, contact)
-      setAssignment(asgn)
+      await sincronizarAtribuicao()
     } catch (e: any) {
       console.error('take_conversation error:', e)
       toast({ title: 'Não foi possível pegar a conversa', description: e?.message, variant: 'destructive' })
@@ -2114,6 +2141,9 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         p_remote_sender: contact,
       })
       if (error) throw error
+      // Sincroniza ANTES de fechar: a conversa está indo para a lista, e ela
+      // precisa já estar na aba certa quando o atendente chegar lá.
+      await sincronizarAtribuicao()
       // Fecha a conversa (volta à lista) após marcar como aguardando
       onBack?.()
     } catch (e: any) {
@@ -2133,8 +2163,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         p_remote_sender: contact,
       })
       if (error) throw error
-      const asgn = await getConversationAssignment(device.id, contact)
-      setAssignment(asgn)
+      await sincronizarAtribuicao()
     } catch (e: any) {
       console.error('finish_conversation error:', e)
       toast({ title: 'Não foi possível finalizar a conversa', description: e?.message, variant: 'destructive' })
@@ -2153,12 +2182,11 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         p_accept: accept,
       })
       if (error) throw error
-      if (accept) {
-        const asgn = await getConversationAssignment(device.id, contact)
-        setAssignment(asgn)
-      } else {
-        onBack?.()
-      }
+      // Sincroniza nos dois desfechos: recusar também muda a atribuição (o
+      // convite deixa de existir), e a lista precisa refletir isso mesmo quando o
+      // painel fecha em seguida.
+      await sincronizarAtribuicao()
+      if (!accept) onBack?.()
     } catch (e: any) {
       console.error('respond_conversation_invite error:', e)
       toast({ title: 'Não foi possível responder ao convite', description: e?.message, variant: 'destructive' })
@@ -5901,9 +5929,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           deviceId={device.id}
           remoteSender={contact}
           onClose={() => setTeamAssignOpen(false)}
-          onAssigned={() => {
-            getConversationAssignment(device.id, contact).then(setAssignment)
-          }}
+          onAssigned={() => { void sincronizarAtribuicao() }}
         />
         {device && contact && (
           <MessageInfoDialog

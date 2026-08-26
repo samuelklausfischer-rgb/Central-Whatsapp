@@ -29,7 +29,7 @@ import {
   aplicarEventoDeMensagem,
   type EstadoDaConversa,
 } from '@/stores/conversationMessages'
-import { getMyStates, getDeviceAssignments, respondidaEm, cursorDeLeitura, type ConversationUserState } from '@/services/conversation_states'
+import { getMyStates, getDeviceAssignments, getConversationAssignment, respondidaEm, cursorDeLeitura, mesclarNomesDaAtribuicao, type ConversationUserState } from '@/services/conversation_states'
 import type { ConversationAssignment } from '@/lib/supabase/types'
 import { registrarVoltar } from '@/lib/android-back'
 import { definirConversaAberta } from '@/stores/mobileChrome'
@@ -571,6 +571,40 @@ export default function ChatHub() {
           matchedTempId = pendingTempsRef.current[idx].tempId
           pendingTempsRef.current.splice(idx, 1)
         }
+
+        // RESPONDER TAMBÉM ATRIBUI, e a lista precisa mostrar isso na hora.
+        //
+        // O gatilho `atribuir_conversa_ao_responder` (migration de 26/08) põe a
+        // conversa no nome de quem respondeu quando ela não tem dono. Como quem
+        // decide é o banco, o cliente não tem retorno de RPC para aplicar — sem
+        // isto aqui, a conversa só entraria em Minhas quando o evento da
+        // atribuição desse a volta pela rede.
+        //
+        // As condições espelham o `WHEN` do gatilho e a guarda da função
+        // (`origin = 'app'`, autor = eu, grupo não, e só quem está sem dono), para
+        // a consulta sair APENAS quando o gatilho de fato vai agir — e não a cada
+        // mensagem enviada. Quem já tem dono não é tocado: a função do banco se
+        // recusa a roubar conversa de colega, e o cliente não pode fingir o
+        // contrário.
+        const atribuicaoAtual = assignments.get(
+          chaveDaConversa(e.record.device_id as string, e.record.remote_sender as string),
+        )
+        const temDono =
+          atribuicaoAtual?.status === 'invited' ||
+          ((atribuicaoAtual?.status === 'taken' || atribuicaoAtual?.status === 'assigned') &&
+            !!atribuicaoAtual?.assigned_to)
+        if (
+          e.record.origin === 'app' &&
+          e.record.sender_id === user?.id &&
+          !(e.record.remote_sender as string)?.endsWith('@g.us') &&
+          !temDono
+        ) {
+          const deviceIdDaLinha = e.record.device_id as string
+          const remetenteDaLinha = e.record.remote_sender as string
+          getConversationAssignment(deviceIdDaLinha, remetenteDaLinha)
+            .then((asgn) => aplicarAtribuicao(deviceIdDaLinha, remetenteDaLinha, asgn))
+            .catch(() => {})
+        }
       }
 
       // `e.record` chega como Record<string, unknown> do handler de Realtime; o
@@ -716,6 +750,49 @@ export default function ChatHub() {
     if (selectedDeviceId) debouncedRefreshSummaries(selectedDeviceId)
   })
 
+  /**
+   * ÚNICO caminho de escrita de uma atribuição no que a tela enxerga.
+   *
+   * O mapa `assignments` decide a aba Minhas/Geral (`ehMinha` no ChatList), o
+   * `pinned` que sobe a conversa, o `pendingReply` e o cursor de leitura. Ele
+   * nascia com três donos — a carga do aparelho, o snapshot e o Realtime — e os
+   * botões de atendimento não eram nenhum deles: `handleActionTake` e companhia
+   * mexiam só no estado interno do ChatWindow, então a lista ficava esperando o
+   * evento dar a volta pela rede para descobrir algo que o clique já sabia. Era
+   * esse o "demora para aparecer em Minhas".
+   *
+   * Agora Realtime, botões e o gatilho de responder passam todos por aqui.
+   *
+   * `linha` nula = a conversa deixou de ter atribuição; a entrada sai do mapa em
+   * vez de ficar com um retrato velho.
+   *
+   * Lê `selectedDeviceIdRef` e não o estado: a função é passada como prop e
+   * guardada em closures, e a ref é o que garante que "o aparelho aberto" seja o
+   * de agora, não o de quando a closure nasceu.
+   */
+  const aplicarAtribuicao = useCallback((
+    deviceId: string,
+    remoteSender: string,
+    linha: ConversationAssignment | null,
+  ) => {
+    const chave = chaveDaConversa(deviceId, remoteSender)
+
+    const aplicar = (mapa: Map<string, ConversationAssignment>) => {
+      if (linha) mapa.set(chave, mesclarNomesDaAtribuicao(mapa.get(chave), linha))
+      else mapa.delete(chave)
+      return mapa
+    }
+
+    // Grava no snapshot do aparelho DA LINHA, mesmo que não seja o aberto: a troca
+    // de instância pinta na hora com o dado já fresco, em vez de esperar o fetch.
+    const snapshot = getDeviceSnapshot(deviceId)
+    if (snapshot) setDeviceAssignments(deviceId, aplicar(new Map(snapshot.assignments)))
+
+    // Só o aparelho aberto mexe na tela.
+    if (deviceId !== selectedDeviceIdRef.current) return
+    setAssignments((prev) => aplicar(new Map(prev)))
+  }, [])
+
   // O canal é a tabela INTEIRA (o `useRealtime` só filtra se receber o 4º
   // parâmetro), então aqui chega atribuição de todos os aparelhos da empresa. Cada
   // evento é ROTEADO para o aparelho dono da linha; antes era aplicado cego num mapa
@@ -756,25 +833,7 @@ export default function ChatHub() {
       return
     }
 
-    const chave = chaveDaConversa(row.device_id, row.remote_sender)
-
-    // Grava no snapshot do aparelho DA LINHA, mesmo que não seja o aberto: a troca
-    // de instância pinta na hora com o dado já fresco, em vez de esperar o fetch.
-    const snapshot = getDeviceSnapshot(row.device_id)
-    if (snapshot) {
-      const mapa = new Map(snapshot.assignments)
-      mapa.set(chave, row)
-      setDeviceAssignments(row.device_id, mapa)
-    }
-
-    // Só o aparelho aberto mexe na tela.
-    if (row.device_id !== selectedDeviceId) return
-
-    setAssignments((prev) => {
-      const next = new Map(prev)
-      next.set(chave, row)
-      return next
-    })
+    aplicarAtribuicao(row.device_id, row.remote_sender, row)
 
     // SEM `debouncedRefreshSummaries` aqui, e isso é deliberado.
     //
@@ -939,7 +998,32 @@ export default function ChatHub() {
       if (deviceId && contact) {
         loadConversationMessages(deviceId, contact)
       }
-      if (deviceId) debouncedRefreshSummaries(deviceId)
+      if (deviceId) {
+        debouncedRefreshSummaries(deviceId)
+        // As atribuições ficavam de fora desta rede: quem perdesse um evento de
+        // `conversation_assignments` (sleep, queda de WebSocket, troca de rede)
+        // seguia com a aba Minhas errada até apertar o botão de recarregar. Só
+        // no reencontro com a tela — foco/visibilidade/rede —, que é justamente
+        // quando pode ter faltado evento.
+        getDeviceAssignments(deviceId)
+          .then((mapa) => {
+            if (selectedDeviceIdRef.current !== deviceId) return
+            // O mapa que chega é a verdade sobre QUAIS conversas têm atribuição —
+            // por isso ele é a base, e quem sumiu do servidor some daqui. Mas as
+            // linhas dele são cruas, sem os `*_name`, então cada uma herda o nome
+            // que já estava em mãos (ver `mesclarNomesDaAtribuicao`). Substituir o
+            // mapa inteiro sem isso apagaria o selo "Com: fulano" a cada volta de
+            // foco.
+            const anterior = getDeviceSnapshot(deviceId)?.assignments
+            const mesclado = new Map<string, ConversationAssignment>()
+            for (const [chave, linha] of mapa) {
+              mesclado.set(chave, mesclarNomesDaAtribuicao(anterior?.get(chave), linha))
+            }
+            setDeviceAssignments(deviceId, mesclado)
+            setAssignments(new Map(mesclado))
+          })
+          .catch(() => {})
+      }
     }
     const onVisibility = () => {
       if (document.visibilityState === 'visible') refetchOpen()
@@ -1323,6 +1407,7 @@ export default function ChatHub() {
           contact={selectedContact}
           conversation={currentConversation}
           assignment={currentAssignment}
+          onAssignmentChange={aplicarAtribuicao}
           contacts={contacts}
           onBack={handleCloseConversation}
           isMobile={isMobile}

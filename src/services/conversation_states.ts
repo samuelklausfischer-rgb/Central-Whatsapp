@@ -393,6 +393,43 @@ export async function getRecibosDaMensagem(
 }
 
 /**
+ * Junta uma linha nova de atribuição com a que já estava em mãos, preservando os
+ * nomes que a nova não traz.
+ *
+ * A MESMA linha chega em duas formas nesta aplicação. `get_conversation_assignment`
+ * devolve os `*_name` resolvidos por join; `getDeviceAssignments` e o payload de
+ * Realtime trazem só as colunas cruas da tabela — os nomes não EXISTEM lá (pedi-los
+ * no `select` devolve 400, como está documentado acima de `getDeviceAssignments`).
+ *
+ * Sem esta junção, a sequência normal de pegar uma conversa apagava o nome da tela:
+ * o clique guardava a linha rica, o eco de Realtime da mesma escrita chegava
+ * milissegundos depois com a linha crua e sobrescrevia, e o selo "Com: fulano" no
+ * topo da conversa simplesmente sumia — ele só é desenhado quando
+ * `assigned_to_name` existe.
+ *
+ * O nome só é herdado quando o id correspondente NÃO mudou. Se a conversa passou
+ * para outra pessoa, herdar o nome antigo seria pior que não ter nome nenhum.
+ */
+export function mesclarNomesDaAtribuicao(
+  anterior: ConversationAssignment | undefined,
+  nova: ConversationAssignment,
+): ConversationAssignment {
+  if (!anterior) return nova
+  const herdar = (
+    campo: 'assigned_to_name' | 'assigned_by_name' | 'invited_to_name' | 'invited_by_name',
+    id: 'assigned_to' | 'assigned_by' | 'invited_to' | 'invited_by',
+  ) => (nova[campo] == null && anterior[id] === nova[id] ? anterior[campo] : nova[campo])
+
+  return {
+    ...nova,
+    assigned_to_name: herdar('assigned_to_name', 'assigned_to'),
+    assigned_by_name: herdar('assigned_by_name', 'assigned_by'),
+    invited_to_name: herdar('invited_to_name', 'invited_to'),
+    invited_by_name: herdar('invited_by_name', 'invited_by'),
+  }
+}
+
+/**
  * Das duas marcas, vale a mais recente — ignorando as nulas.
  *
  * É o `GREATEST` do Postgres em JavaScript, e existe porque o mesmo par de
