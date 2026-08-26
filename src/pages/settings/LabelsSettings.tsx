@@ -4,15 +4,16 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { GlassCard } from '@/components/ui/surface'
-import { getLabels, createLabel, deleteLabel } from '@/services/labels'
+import { getLabels, createLabel, deleteLabel, podeEditarEtiqueta } from '@/services/labels'
 import { useAuth } from '@/hooks/use-auth'
 import { useRealtime } from '@/hooks/use-realtime'
 import { useToast } from '@/hooks/use-toast'
+import type { Label } from '@/lib/supabase/types'
 
 export default function LabelsSettings() {
   const { user } = useAuth()
   const { toast } = useToast()
-  const [labels, setLabels] = useState<any[]>([])
+  const [labels, setLabels] = useState<Label[]>([])
   const [newLabelName, setNewLabelName] = useState('')
   const [newLabelColor, setNewLabelColor] = useState('#3b82f6')
   const [loading, setLoading] = useState(false)
@@ -43,19 +44,30 @@ export default function LabelsSettings() {
       setNewLabelName('')
       toast({ title: 'Etiqueta criada com sucesso!' })
     } catch (err) {
-      toast({ title: 'Erro ao criar etiqueta', variant: 'destructive' })
+      toast({
+        title: 'Erro ao criar etiqueta',
+        description: err instanceof Error ? err.message : undefined,
+        variant: 'destructive',
+      })
     } finally {
       setLoading(false)
     }
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Deseja realmente remover esta etiqueta?')) return
+    if (!confirm('Deseja realmente remover esta etiqueta? Ela sai dos contatos de toda a equipe.'))
+      return
     try {
       await deleteLabel(id)
       toast({ title: 'Etiqueta removida!' })
     } catch (err) {
-      toast({ title: 'Erro ao remover', variant: 'destructive' })
+      // A mensagem vem do service — inclusive a de "é de outra pessoa", que só
+      // aparece se alguém chegar aqui sem passar pelo botão (o botão some).
+      toast({
+        title: 'Erro ao remover',
+        description: err instanceof Error ? err.message : undefined,
+        variant: 'destructive',
+      })
     }
   }
 
@@ -108,34 +120,60 @@ export default function LabelsSettings() {
       <GlassCard>
         <CardHeader className="pb-3">
           <CardTitle className="text-xl font-semibold">Etiquetas Cadastradas</CardTitle>
+          {/*
+            A lista é da EQUIPE INTEIRA desde 26/08/2026. Sem esta frase, ver a
+            etiqueta de um colega sem botão de apagar parece defeito; com ela,
+            fica claro que é o desenho.
+          */}
+          <p className="text-sm text-muted-foreground">
+            Todas as etiquetas da equipe. Qualquer pessoa pode aplicá-las a um contato; renomear e
+            apagar continua com quem criou.
+          </p>
         </CardHeader>
         <CardContent className="pt-0">
           {labels.length === 0 ? (
             <p className="text-muted-foreground text-sm">Nenhuma etiqueta cadastrada.</p>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-              {labels.map((label) => (
-                <div
-                  key={label.id}
-                  className="flex items-center justify-between p-3 rounded-lg border border-border bg-accent"
-                >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className="w-4 h-4 rounded-full shadow-sm"
-                      style={{ backgroundColor: label.color }}
-                    />
-                    <span className="font-medium text-sm">{label.name}</span>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="text-muted-foreground hover:text-red-400 hover:bg-accent h-8 w-8"
-                    onClick={() => handleDelete(label.id)}
+              {labels.map((label) => {
+                const minha = podeEditarEtiqueta(label, user)
+                return (
+                  <div
+                    key={label.id}
+                    className="flex items-center justify-between gap-2 p-3 rounded-lg border border-border bg-accent"
                   >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </div>
-              ))}
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div
+                        className="w-4 h-4 shrink-0 rounded-full shadow-sm"
+                        style={{ backgroundColor: label.color }}
+                      />
+                      <span className="font-medium text-sm truncate">{label.name}</span>
+                      {label.user_id === user?.id && (
+                        <span className="shrink-0 rounded-full border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                          sua
+                        </span>
+                      )}
+                    </div>
+                    {/*
+                      Some em vez de ficar desabilitado: um botão apagado ainda
+                      promete que existe um jeito de habilitá-lo, e não existe.
+                      A trava de verdade é a RLS — isto é só para não oferecer
+                      uma porta que bate na cara.
+                    */}
+                    {minha && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Remover etiqueta ${label.name}`}
+                        className="shrink-0 text-muted-foreground hover:text-red-400 hover:bg-accent h-8 w-8"
+                        onClick={() => handleDelete(label.id)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
         </CardContent>

@@ -124,7 +124,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/co
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { getTriggers } from '@/services/message_triggers'
-import { getLabels, createLabel, updateLabel, deleteLabel } from '@/services/labels'
+import { getLabels, createLabel, updateLabel, deleteLabel, podeEditarEtiqueta } from '@/services/labels'
 import { getContactTags, toggleContactTag } from '@/services/contact_tags'
 import { useRealtime } from '@/hooks/use-realtime'
 import { useAuth } from '@/hooks/use-auth'
@@ -817,15 +817,31 @@ function GerenciarEtiquetasDialog({
   onOpenChange,
   labels,
   userId,
+  isAdmin,
   onChanged,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   labels: EtiquetaTipo[]
   userId?: string
+  /**
+   * Admin renomeia e apaga etiqueta de qualquer um — é o que a policy do banco
+   * diz (`user_id = auth.uid() OR _is_admin()`), então a tela precisa saber
+   * disso para não esconder um botão que funcionaria.
+   */
+  isAdmin?: boolean
   onChanged: () => void
 }) {
   const { toast } = useToast()
+
+  /**
+   * Desde 26/08/2026 a lista é da EQUIPE INTEIRA, não só as suas. Editar e
+   * apagar continuam sendo do dono (ou de um admin), então cada linha decide
+   * sozinha se mostra lápis e lixeira. A regra vem do service para não haver
+   * duas versões dela — a de verdade é a RLS.
+   */
+  const podeMexer = (label: EtiquetaTipo) =>
+    podeEditarEtiqueta(label, userId ? { id: userId, is_admin: isAdmin } : null)
   const [novoNome, setNovoNome] = useState('')
   const [novaCor, setNovaCor] = useState('#3b82f6')
   const [criando, setCriando] = useState(false)
@@ -867,8 +883,12 @@ function GerenciarEtiquetasDialog({
       setEditandoId(null)
       onChanged()
       toast({ title: 'Etiqueta atualizada' })
-    } catch {
-      toast({ title: 'Erro ao salvar etiqueta', variant: 'destructive' })
+    } catch (err) {
+      toast({
+        title: 'Erro ao salvar etiqueta',
+        description: err instanceof Error ? err.message : undefined,
+        variant: 'destructive',
+      })
     } finally {
       setSalvandoEdicao(false)
     }
@@ -882,8 +902,12 @@ function GerenciarEtiquetasDialog({
       setEtiquetaParaExcluir(null)
       onChanged()
       toast({ title: 'Etiqueta excluída' })
-    } catch {
-      toast({ title: 'Erro ao excluir etiqueta', variant: 'destructive' })
+    } catch (err) {
+      toast({
+        title: 'Erro ao excluir etiqueta',
+        description: err instanceof Error ? err.message : undefined,
+        variant: 'destructive',
+      })
     } finally {
       setExcluindo(false)
     }
@@ -979,22 +1003,32 @@ function GerenciarEtiquetasDialog({
                   >
                     <div className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: label.color }} />
                     <span className="flex-1 text-sm text-chat-text truncate">{label.name}</span>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7 text-chat-muted opacity-0 group-hover:opacity-100 hover:text-chat-text transition-opacity"
-                      onClick={() => iniciarEdicao(label)}
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7 text-chat-muted opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity"
-                      onClick={() => setEtiquetaParaExcluir(label)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    {/* Etiqueta de outra pessoa: dá para aplicar no contato (é
+                        o objetivo de compartilhar), mas não para renomear nem
+                        apagar. Some em vez de desabilitar — botão apagado
+                        promete um jeito de habilitar que não existe. */}
+                    {podeMexer(label) && (
+                      <>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label={`Renomear etiqueta ${label.name}`}
+                          className="h-7 w-7 text-chat-muted opacity-0 group-hover:opacity-100 hover:text-chat-text transition-opacity"
+                          onClick={() => iniciarEdicao(label)}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label={`Excluir etiqueta ${label.name}`}
+                          className="h-7 w-7 text-chat-muted opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity"
+                          onClick={() => setEtiquetaParaExcluir(label)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </>
+                    )}
                   </div>
                 ),
               )
@@ -4082,6 +4116,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
               onOpenChange={setIsManageLabelsOpen}
               labels={labels}
               userId={user?.id}
+              isAdmin={!!user?.is_admin}
               onChanged={refreshLabels}
             />
           </Sheet>
