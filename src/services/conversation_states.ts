@@ -222,10 +222,12 @@ export async function getConversationRecentViewers(deviceId: string, remoteSende
 }
 
 // `select('*')` trazia as 18 colunas da tabela — 284-301 kB por troca de aparelho
-// nos aparelhos grandes, ~6x o payload da própria lista de conversas. Estas cinco
-// são as únicas que a UI lê daqui: `status` e `assigned_to` (badge de atribuição
-// e o `pinned` do ChatHub), `invited_to` (convite pendente) e
-// `global_responded_at` (selo de não respondido).
+// nos aparelhos grandes, ~6x o payload da própria lista de conversas. Estas são
+// as únicas que a UI lê daqui: `status` e `assigned_to` (badge de atribuição
+// e o `pinned` do ChatHub), `invited_to` (convite pendente),
+// `global_responded_at` (selo de não respondido) e `global_read_at` (a leitura
+// feita por QUALQUER pessoa da equipe — ver `cursorDeLeitura` no fim deste
+// arquivo).
 //
 // NÃO incluir `assigned_to_name`/`invited_to_name`/`invited_by_name`: eles estão
 // no tipo `ConversationAssignment` e são lidos pelos componentes, mas NÃO existem
@@ -256,7 +258,7 @@ export async function getDeviceAssignments(deviceId: string): Promise<Map<string
         let q = supabase
           .from('conversation_assignments')
           .select(
-            'id, remote_sender, status, assigned_to, assigned_by, assigned_at, finished_at, invited_to, global_responded_at',
+            'id, remote_sender, status, assigned_to, assigned_by, assigned_at, finished_at, invited_to, global_responded_at, global_read_at',
           )
           .eq('device_id', deviceId)
           .order('id', { ascending: true })
@@ -391,6 +393,24 @@ export async function getRecibosDaMensagem(
 }
 
 /**
+ * Das duas marcas, vale a mais recente — ignorando as nulas.
+ *
+ * É o `GREATEST` do Postgres em JavaScript, e existe porque o mesmo par de
+ * tabelas guarda DUAS marcas para cada coisa: uma individual em
+ * `conversation_user_states` e uma da equipe inteira em
+ * `conversation_assignments`. `respondidaEm` e `cursorDeLeitura` abaixo são os
+ * dois usos; ambos delegam aqui para não existir uma terceira cópia da regra.
+ */
+export function maisRecente(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): string | null {
+  if (!a) return b ?? null
+  if (!b) return a
+  return new Date(a) > new Date(b) ? a : b
+}
+
+/**
  * Quando uma conversa conta como RESPONDIDA.
  *
  * São duas marcas diferentes: `conversation_user_states.responded_at`, individual
@@ -406,7 +426,27 @@ export function respondidaEm(
   a: string | null | undefined,
   b: string | null | undefined,
 ): string | null {
-  if (!a) return b ?? null
-  if (!b) return a
-  return new Date(a) > new Date(b) ? a : b
+  return maisRecente(a, b)
+}
+
+/**
+ * Até quando esta conversa já foi LIDA, para efeito do contador de não lidas.
+ *
+ * Mesmas duas marcas: `conversation_user_states.last_read_at` (eu li) e
+ * `conversation_assignments.global_read_at` (alguém da equipe abriu — gravado por
+ * `mark_conversation_read_global` em toda abertura de conversa). Vale a mais
+ * recente, porque conversa já aberta por um colega não deve seguir piscando como
+ * não lida para os outros.
+ *
+ * Isto NÃO é uma regra nova: é exatamente o `GREATEST(cus.last_read_at,
+ * ca.global_read_at)` que a RPC `get_conversation_summaries` já usa para calcular
+ * `unread_count`. Existir aqui é o que permite ao cliente recalcular o badge
+ * sozinho quando o evento de Realtime da atribuição chega, em vez de pedir os
+ * resumos de novo só para descobrir um número que ele já tinha como deduzir.
+ */
+export function cursorDeLeitura(
+  individual: string | null | undefined,
+  global: string | null | undefined,
+): string | null {
+  return maisRecente(individual, global)
 }

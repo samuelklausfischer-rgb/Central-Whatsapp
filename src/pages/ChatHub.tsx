@@ -29,7 +29,7 @@ import {
   aplicarEventoDeMensagem,
   type EstadoDaConversa,
 } from '@/stores/conversationMessages'
-import { getMyStates, getDeviceAssignments, respondidaEm, type ConversationUserState } from '@/services/conversation_states'
+import { getMyStates, getDeviceAssignments, respondidaEm, cursorDeLeitura, type ConversationUserState } from '@/services/conversation_states'
 import type { ConversationAssignment } from '@/lib/supabase/types'
 import { registrarVoltar } from '@/lib/android-back'
 import { definirConversaAberta } from '@/stores/mobileChrome'
@@ -775,7 +775,27 @@ export default function ChatHub() {
       next.set(chave, row)
       return next
     })
-    debouncedRefreshSummaries(selectedDeviceId)
+
+    // SEM `debouncedRefreshSummaries` aqui, e isso é deliberado.
+    //
+    // De tudo que `conversation_assignments` guarda, a RPC `get_conversation_summaries`
+    // lê UMA coluna só: `global_read_at`, no `GREATEST` que forma o cursor de leitura.
+    // Todo o resto que a tela deriva da atribuição — `pinned` (assumida por mim),
+    // `pendingReply` (via `global_responded_at`), a aba Minhas/Geral, a ordenação — já
+    // é calculado aqui no cliente, e agora o cursor de leitura também é (ver
+    // `cursorDeLeitura` no `useMemo` de `conversations`). Então o `setAssignments`
+    // acima é suficiente: a lista se corrige no mesmo quadro, sem rede.
+    //
+    // O refetch que estava aqui custava caro. Abrir uma conversa chama
+    // `mark_conversation_read_global`, que faz UPDATE nesta tabela — 6.574 aberturas
+    // em 7 dias. Cada uma virava um evento para TODOS os clientes conectados, e cada
+    // cliente respondia com um `get_conversation_summaries` inteiro (CTE recursiva
+    // sobre `messages` com contagem por remetente). Com 12 atendentes, uma pessoa
+    // abrindo uma conversa recalculava os resumos nos 12 — para chegar a um número que
+    // o cliente já sabia deduzir.
+    //
+    // Rede de segurança continua existindo: `refetchOpen` (foco/visibilidade/rede e o
+    // tick de 60 s) e o evento de `messages`.
   })
 
   // Copia para o estado o que o store tem NESTA chave. É o único caminho de
@@ -1055,11 +1075,18 @@ export default function ChatHub() {
           && (assignment.status === 'taken' || assignment.status === 'assigned')
           && assignment.assigned_to === user?.id
 
+        // O cursor cobre as DUAS marcas de leitura, individual e da equipe — a
+        // mesma regra que a RPC aplica com `GREATEST` ao montar `unread_count`.
+        // Sem a marca global aqui, o badge de quem NÃO abriu a conversa só
+        // apagava depois de rebuscar os resumos; agora o evento de Realtime da
+        // atribuição já basta, porque `global_read_at` viaja nele.
+        const readCursor = cursorDeLeitura(state?.last_read_at, assignment?.global_read_at)
+
         let unreadCount = summary.unread_count
         if (state?.manual_unread) {
           unreadCount = Math.max(1, unreadCount)
-        } else if (state?.last_read_at) {
-          const lastRead = new Date(state.last_read_at)
+        } else if (readCursor) {
+          const lastRead = new Date(readCursor)
           const lastMsgDate = new Date(summary.last_message_created_at)
           if (lastMsgDate <= lastRead) {
             unreadCount = 0
@@ -1124,12 +1151,15 @@ export default function ChatHub() {
           && (assignment.status === 'taken' || assignment.status === 'assigned')
           && assignment.assigned_to === user?.id
 
+        // Mesmo cursor combinado do caminho por resumos, acima.
+        const readCursor = cursorDeLeitura(state?.last_read_at, assignment?.global_read_at)
+
         if (state?.manual_unread) {
           conv.unread_count = Math.max(1, conv.messages.filter(
-            (m: any) => m.direction === 'inbound' && (!state.last_read_at || new Date(m.created_at) > new Date(state.last_read_at)),
+            (m: any) => m.direction === 'inbound' && (!readCursor || new Date(m.created_at) > new Date(readCursor)),
           ).length)
-        } else if (state?.last_read_at) {
-          const lastRead = new Date(state.last_read_at)
+        } else if (readCursor) {
+          const lastRead = new Date(readCursor)
           conv.unread_count = conv.messages.filter(
             (m: any) => m.direction === 'inbound' && new Date(m.created_at) > lastRead,
           ).length
