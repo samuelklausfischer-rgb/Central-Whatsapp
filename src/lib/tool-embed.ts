@@ -61,7 +61,32 @@ export interface EmbedErrorMessage {
   message: string
 }
 
-export type EmbedMessage = EmbedReadyMessage | EmbedCredentialMessage | EmbedErrorMessage
+/**
+ * pai -> filho: o tema atual do Central Whats.
+ *
+ * Existe porque o tema mora no `localStorage` DESTA origem, e o iframe é de
+ * outra — o app filho não tem como espiar. Sem isto, a ferramenta abriria com a
+ * cor dela (o Gestão Médica ficava travado no escuro) dentro de um app que pode
+ * estar no claro.
+ *
+ * ADITIVA: `isEmbedMessage` só confere `source` e que `type` é string, então
+ * quem ainda não conhece este tipo (Relatórios, Licitações) simplesmente ignora
+ * a mensagem. Não há ordem de deploy a respeitar.
+ *
+ * NÃO carrega segredo, mas viaja com `targetOrigin` exato como a credencial —
+ * usar `'*'` aqui abriria um precedente ao lado da única linha que não pode.
+ */
+export interface EmbedThemeMessage {
+  source: typeof EMBED_PROTOCOL
+  type: 'theme'
+  theme: 'dark' | 'light'
+}
+
+export type EmbedMessage =
+  | EmbedReadyMessage
+  | EmbedCredentialMessage
+  | EmbedErrorMessage
+  | EmbedThemeMessage
 
 export function isEmbedMessage(data: unknown): data is EmbedMessage {
   return (

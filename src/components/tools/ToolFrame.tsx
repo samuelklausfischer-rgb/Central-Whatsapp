@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTheme } from 'next-themes'
 import { AlertCircle, Download, ExternalLink, Loader2, RefreshCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -43,6 +44,7 @@ export function ToolFrame({
   versionCheckIntervalMs,
 }: ToolFrameProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
+  const { resolvedTheme } = useTheme()
   const [status, setStatus] = useState<Status>('connecting')
   const [error, setError] = useState<string | null>(null)
   const [retryNonce, setRetryNonce] = useState(0)
@@ -140,6 +142,31 @@ export function ToolFrame({
       window.removeEventListener('message', onMessage)
     }
   }, [send, target, title])
+
+  /**
+   * O TEMA VIAJA PARA O FILHO, e mora aqui e não em cada ferramenta de propósito:
+   * seguir o tema é propriedade de "estar embutido no Central Whats", não de uma
+   * ferramenta específica. Posto aqui, quem já sabe ouvir aproveita (Gestão
+   * Médica) e as demais herdam quando adotarem, sem mexer neste arquivo de novo.
+   *
+   * O filho não tem como ler nossa escolha: ela vive no `localStorage` desta
+   * origem, e o iframe é de outra.
+   *
+   * `resolvedTheme` e não `theme` porque é ele que resolve o "system" em `dark`
+   * ou `light` — mandar a string "system" faria o filho ter que reimplementar a
+   * mesma decisão, e com a preferência do sistema de quem abriu, não a nossa.
+   *
+   * Reenvia a cada troca E a cada vez que o quadro fica pronto (o `status` entra
+   * nas dependências): depois de um retry o iframe é outro, e o tema precisa ir
+   * de novo.
+   */
+  useEffect(() => {
+    if (status !== 'ready' || !target || !resolvedTheme) return
+    iframeRef.current?.contentWindow?.postMessage(
+      { source: EMBED_PROTOCOL, type: 'theme', theme: resolvedTheme === 'dark' ? 'dark' : 'light' },
+      target.origin, // exato, como na credencial — ver a nota em `tool-embed.ts`
+    )
+  }, [status, resolvedTheme, target])
 
   /**
    * Desistir de esperar.
