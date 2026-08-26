@@ -5,6 +5,7 @@ type AppRuntimeConfig = {
   VITE_LICITACAO_APP_URL?: string
   VITE_LICITACAO_SUPABASE_URL?: string
   VITE_PRN_HUB_APP_URL?: string
+  VITE_GESTAO_MEDICA_APP_URL?: string
 }
 
 /**
@@ -32,6 +33,12 @@ const LICITACAO_SUPABASE_URL_PADRAO = 'https://qndymclntzdrdhrwlcda.supabase.co'
 const RELATORIOS_APP_URL_PADRAO = 'https://frontends-relatorios.srofjl.easypanel.host'
 const LICITACAO_APP_URL_PADRAO = 'https://frontends-front-licitacao.srofjl.easypanel.host'
 const PRN_HUB_APP_URL_PADRAO = 'https://frontends-projetos-hub.srofjl.easypanel.host'
+/**
+ * Gestão Médica. Ao contrário do Licitações, NÃO há URL de Supabase própria aqui:
+ * o banco dele é o schema `gestao_medica` deste mesmo projeto, então a sessão
+ * atravessa direto e não existe ponte para configurar.
+ */
+const GESTAO_MEDICA_APP_URL_PADRAO = 'https://frontends-gestao-medica.srofjl.easypanel.host'
 
 declare global {
   interface Window {
@@ -76,4 +83,9 @@ export const appEnv = {
     runtimeConfig?.VITE_PRN_HUB_APP_URL ||
     import.meta.env.VITE_PRN_HUB_APP_URL ||
     PRN_HUB_APP_URL_PADRAO,
+
+  VITE_GESTAO_MEDICA_APP_URL:
+    runtimeConfig?.VITE_GESTAO_MEDICA_APP_URL ||
+    import.meta.env.VITE_GESTAO_MEDICA_APP_URL ||
+    GESTAO_MEDICA_APP_URL_PADRAO,
 }
