@@ -8,7 +8,7 @@ import supabase from '@/lib/supabase/client'
  * `use-tool-access.tsx` (para o app saber consultar) e na Gestão de Equipe
  * (para alguém conseguir liberar).
  */
-export type ToolName = 'licitacoes' | 'proposta-comercial' | 'prn-hub'
+export type ToolName = 'licitacoes' | 'proposta-comercial' | 'prn-hub' | 'disparador-em-massa'
 
 /**
  * Ferramentas liberadas para o usuário logado.

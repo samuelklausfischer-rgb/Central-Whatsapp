@@ -19,6 +19,8 @@ const Licitacoes = lazy(() => import('@/pages/tools/Licitacoes'))
 const Assinaturas = lazy(() => import('@/pages/tools/Assinaturas'))
 const PropostaComercial = lazy(() => import('@/pages/tools/PropostaComercial'))
 const PrnHub = lazy(() => import('@/pages/tools/PrnHub'))
+const DisparadorEmMassa = lazy(() => import('@/pages/tools/DisparadorEmMassa'))
+const GestaoMedica = lazy(() => import('@/pages/tools/GestaoMedica'))
 
 interface FerramentaHospedavel {
   titulo: string
@@ -52,11 +54,26 @@ export const FERRAMENTAS_HOSPEDADAS: Record<string, FerramentaHospedavel> = {
   // ITEM 2. `telaCheia` como as outras embutidas por iframe: o app filho cuida
   // da própria altura, e o respiro do painel daria barra de rolagem dupla.
   'prn-hub': { titulo: 'PRN Hub', url: '/ferramentas/prn-hub', Componente: PrnHub, telaCheia: true },
+  // `telaCheia` como as outras embutidas por iframe: o app filho tem barra
+  // lateral própria e cuida da própria altura.
+  'gestao-medica': {
+    titulo: 'Gestão Médica',
+    url: '/ferramentas/gestao-medica',
+    Componente: GestaoMedica,
+    telaCheia: true,
+  },
   assinaturas: { titulo: 'Assinaturas', url: '/ferramentas/assinaturas', Componente: Assinaturas },
   'proposta-comercial': {
     titulo: 'Proposta Comercial',
     url: '/ferramentas/proposta-comercial',
     Componente: PropostaComercial,
+  },
+  // Nativa, como o Controle de Mensagens: sem `telaCheia`, para receber o respiro
+  // e a largura máxima do painel.
+  'disparador-em-massa': {
+    titulo: 'Disparador em massa',
+    url: '/ferramentas/disparador-em-massa',
+    Componente: DisparadorEmMassa,
   },
 }
 

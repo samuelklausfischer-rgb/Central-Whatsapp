@@ -1,0 +1,17 @@
+{
+  "name": "prn-hub-disparador",
+  "version": "1.0.0",
+  "description": "Worker do Disparador em massa do PRN Hub",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "seco": "DRY_RUN=true bun run src/index.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.99.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
+  }
+}

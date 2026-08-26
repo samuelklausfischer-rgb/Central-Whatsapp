@@ -35,7 +35,7 @@ import { ToolAccessProvider, useToolAccess } from './hooks/use-tool-access'
 import { FerramentaHospedada } from './components/tools/FerramentaHospedada'
 import { UpdateGate } from './components/UpdateGate'
 import { ErrorBoundary } from './components/ErrorBoundary'
-import { canAccessFinanceiroTools } from './lib/permissions'
+import { canAccessFinanceiroTools, canAccessGestaoMedica } from './lib/permissions'
 
 const Index = lazy(() => import('./pages/Index'))
 const ChatHub = lazy(() => import('./pages/ChatHub'))
@@ -96,13 +96,22 @@ const FinanceiroToolRoute = () => {
   return canAccessFinanceiroTools(user) ? <Outlet /> : <Navigate to="/dashboard" replace />
 }
 
+// Gate por SETOR, como o financeiro — e não por `tool_access` como Licitações e
+// PRN Hub. Não precisa esperar consulta ao banco: `department` já vem no perfil
+// carregado, então não há o "false inicial" que obriga o ExternalToolRoute a
+// segurar a tela em "Carregando...".
+const AdministrativoToolRoute = () => {
+  const { user } = useAuth()
+  return canAccessGestaoMedica(user) ? <Outlet /> : <Navigate to="/dashboard" replace />
+}
+
 // A liberação das ferramentas externas vem do banco, não do perfil já carregado.
 // Enquanto ela não chega, esperar: redirecionar no `false` inicial jogaria para
 // o dashboard todo mundo que abre a rota direto (link salvo, F5 na própria tela).
 const ExternalToolRoute = ({
   tool,
 }: {
-  tool: 'relatorios' | 'licitacoes' | 'propostaComercial' | 'prnHub'
+  tool: 'relatorios' | 'licitacoes' | 'propostaComercial' | 'prnHub' | 'disparador'
 }) => {
   const access = useToolAccess()
   if (access.loading)
@@ -193,6 +202,18 @@ const App = () => {
                 </Route>
                 <Route element={<ExternalToolRoute tool="prnHub" />}>
                   <Route path="/ferramentas/prn-hub" element={<FerramentaHospedada slug="prn-hub" />} />
+                </Route>
+                <Route element={<ExternalToolRoute tool="disparador" />}>
+                  <Route
+                    path="/ferramentas/disparador-em-massa"
+                    element={<FerramentaHospedada slug="disparador-em-massa" />}
+                  />
+                </Route>
+                <Route element={<AdministrativoToolRoute />}>
+                  <Route
+                    path="/ferramentas/gestao-medica"
+                    element={<FerramentaHospedada slug="gestao-medica" />}
+                  />
                 </Route>
                 {/*
                   Assinaturas não tem guarda: é assinatura de e-mail, todo mundo

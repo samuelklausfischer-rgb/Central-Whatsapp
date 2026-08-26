@@ -10,6 +10,7 @@ import {
   Bell,
   BarChart3,
   Percent,
+  Stethoscope,
   Activity,
   Timer,
   FileText,
@@ -18,10 +19,11 @@ import {
   ClipboardList,
   Compass,
   PenLine,
+  Send,
   ShieldAlert,
   Settings,
 } from 'lucide-react'
-import { canAccessFinanceiroTools } from '@/lib/permissions'
+import { canAccessFinanceiroTools, canAccessGestaoMedica } from '@/lib/permissions'
 import type { Profile } from '@/lib/supabase/types'
 
 /**
@@ -113,6 +115,21 @@ const RATEIO: DestinoNav = {
   url: '/ferramentas/rateio-mobilemed',
 }
 
+/**
+ * Gestão Médica: cadastro de médicos, contratos e documentos. Liberado pelo
+ * SETOR (Administrativo), como Análise PRN e Rateio são pelo Financeiro — e não
+ * pessoa a pessoa via `tool_access`, como Licitações e PRN Hub.
+ *
+ * Embutido por iframe, mas no mesmo projeto Supabase (schema `gestao_medica`),
+ * então a sessão atravessa direto — ver `pages/tools/GestaoMedica.tsx`.
+ */
+const GESTAO_MEDICA: DestinoNav = {
+  title: 'Gestão Médica',
+  description: 'Cadastro de médicos',
+  icon: Stethoscope,
+  url: '/ferramentas/gestao-medica',
+}
+
 /** Só super-admin. Ver a explicação em `SuperAdminRoute` (App.tsx). */
 const RELATORIO_APP: DestinoNav = {
   title: 'Relatório App',
@@ -167,6 +184,19 @@ const PROPOSTA_COMERCIAL: DestinoNav = {
   url: '/ferramentas/proposta-comercial',
 }
 
+/**
+ * Nativa como o Controle de Mensagens, mas liberada por `tool_access` e não por
+ * super-admin: a ideia é que quem precisa disparar consiga, sem depender do
+ * Samuel. Fica junto das outras porque o risco (queimar o número do atendimento)
+ * pede que ela seja tão visível quanto qualquer sistema.
+ */
+const DISPARADOR_EM_MASSA: DestinoNav = {
+  title: 'Disparador em massa',
+  description: 'Listas de transmissão e envio em massa',
+  icon: Send,
+  url: '/ferramentas/disparador-em-massa',
+}
+
 type UsuarioDeNav = Pick<Profile, 'is_admin' | 'department'> & { is_super_admin?: boolean | null }
 
 /**
@@ -180,6 +210,7 @@ export interface AcessoFerramentasExternas {
   licitacoes: boolean
   propostaComercial: boolean
   prnHub: boolean
+  disparador: boolean
 }
 
 export interface GrupoDeFerramentas {
@@ -208,10 +239,12 @@ export function gruposDeFerramentas(
 ): GrupoDeFerramentas[] {
   const sistemas: DestinoNav[] = [
     ...(canAccessFinanceiroTools(user) ? [ANALISE_PRN, RATEIO] : []),
+    ...(canAccessGestaoMedica(user) ? [GESTAO_MEDICA] : []),
     ...(externas?.propostaComercial ? [PROPOSTA_COMERCIAL] : []),
     ...(externas?.relatorios ? [RELATORIOS] : []),
     ...(externas?.licitacoes ? [LICITACOES] : []),
     ...(externas?.prnHub ? [PRN_HUB] : []),
+    ...(externas?.disparador ? [DISPARADOR_EM_MASSA] : []),
     ...(user?.is_super_admin ? [RELATORIO_APP, CONTROLE_MENSAGENS] : []),
   ]
 
