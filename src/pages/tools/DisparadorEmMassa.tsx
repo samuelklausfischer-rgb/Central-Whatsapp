@@ -4,10 +4,15 @@ import {
   AlertTriangle,
   ClipboardPaste,
   Clock,
+  Copy,
+  FlaskConical,
+  RotateCcw,
+  Save,
   Loader2,
   Pause,
   Play,
   Plus,
+  Radio,
   RefreshCw,
   Send,
   ShieldCheck,
@@ -25,11 +30,11 @@ import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Dialog,
-  DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { GlassDialogContent } from '@/components/ui/glass-dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useToast } from '@/hooks/use-toast'
 import { getDevices } from '@/services/devices'
@@ -48,13 +53,19 @@ import {
   normalizarColagem,
   PERFIS_DE_RITMO,
   preverDuracaoSegundos,
+  duplicarDisparo,
+  listarModelos,
+  prepararParaReal,
   removerMembro,
+  salvarModelo,
+  TETO_CONFIRMACAO,
   verificarWhatsApp,
   workerEstaVivo,
   type AlvoDoDisparo,
   type Campanha,
   type ListaDeTransmissao,
   type MembroDaLista,
+  type ModeloDeMensagem,
   type NomeDoPerfil,
   type ProgressoDaCampanha,
 } from '@/services/disparador'
@@ -113,7 +124,8 @@ export default function DisparadorEmMassa() {
 
   const [listaAberta, setListaAberta] = useState<ListaDeTransmissao | null>(null)
   const [novoDisparoAberto, setNovoDisparoAberto] = useState(false)
-  const [disparoAberto, setDisparoAberto] = useState<Campanha | null>(null)
+  const [disparoAberto, setDisparoAberto] =
+    useState<(Campanha & { progresso: ProgressoDaCampanha }) | null>(null)
 
   const carregar = useCallback(async () => {
     setErro(null)
@@ -234,7 +246,12 @@ export default function DisparadorEmMassa() {
       )}
 
       {disparoAberto && (
-        <DialogoDoDisparo campanha={disparoAberto} onFechar={() => setDisparoAberto(null)} />
+        <DialogoDoDisparo
+          campanha={disparoAberto}
+          worker={worker}
+          onFechar={() => setDisparoAberto(null)}
+          onMudou={carregar}
+        />
       )}
     </div>
   )
@@ -463,7 +480,7 @@ function DialogoDaLista({
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onFechar() }}>
-      <DialogContent className="max-w-2xl">
+      <GlassDialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>{lista.nome}</DialogTitle>
           <DialogDescription>
@@ -581,7 +598,7 @@ function DialogoDaLista({
             )}
           </div>
         </div>
-      </DialogContent>
+      </GlassDialogContent>
     </Dialog>
   )
 }
@@ -600,7 +617,7 @@ function PainelDeDisparos({
   carregando: boolean
   devices: { id: string; name: string }[]
   onNovo: () => void
-  onAbrir: (c: Campanha) => void
+  onAbrir: (c: Campanha & { progresso: ProgressoDaCampanha }) => void
   onMudou: () => void
 }) {
   const { toast } = useToast()
@@ -614,6 +631,36 @@ function PainelDeDisparos({
     try {
       await mudarStatusDoDisparo(id, a)
       onMudou()
+    } catch (e: any) {
+      toast({ title: 'Não foi possível', description: e?.message, variant: 'destructive' })
+    }
+  }
+
+  /**
+   * Duplicar e reenviar-falhas são a mesma operação com um filtro diferente, e
+   * as duas nascem como RASCUNHO: copiar não pode virar disparo saindo sem
+   * ninguém reler a mensagem e a data.
+   */
+  async function copiar(c: Campanha & { progresso: ProgressoDaCampanha }, apenasFalhas: boolean) {
+    try {
+      await duplicarDisparo(c.id, apenasFalhas)
+      onMudou()
+      toast({
+        title: apenasFalhas ? 'Reenvio criado como rascunho.' : 'Cópia criada como rascunho.',
+        description: 'Revise a mensagem e a data antes de agendar.',
+      })
+    } catch (e: any) {
+      toast({ title: 'Não foi possível copiar', description: e?.message, variant: 'destructive' })
+    }
+  }
+
+  /** Devolve os `simulado` para a fila: o ensaio não queima a campanha. */
+  async function paraReal(c: Campanha) {
+    if (!confirm(`"${c.nome}" vai deixar de ser ensaio e passar a enviar de verdade. Confirma?`)) return
+    try {
+      const n = await prepararParaReal(c.id)
+      onMudou()
+      toast({ title: `${n} destinatário(s) de volta na fila.`, description: 'Agora é envio real.' })
     } catch (e: any) {
       toast({ title: 'Não foi possível', description: e?.message, variant: 'destructive' })
     }
@@ -651,7 +698,15 @@ function PainelDeDisparos({
                 const pct = p.total ? Math.round((feitos / p.total) * 100) : 0
                 return (
                   <TableRow key={c.id} className="cursor-pointer" onClick={() => onAbrir(c)}>
-                    <TableCell className="font-medium">{c.nome}</TableCell>
+                    <TableCell className="font-medium">
+                      {c.nome}
+                      {c.ensaio && (
+                        <Badge variant="outline"
+                               className="ml-2 text-[10px] bg-purple-500/15 text-purple-400 border-purple-500/30">
+                          ensaio
+                        </Badge>
+                      )}
+                    </TableCell>
                     <TableCell className="text-muted-foreground">
                       {nomeDoAparelho.get(c.device_id) ?? '—'}
                     </TableCell>
@@ -685,6 +740,20 @@ function PainelDeDisparos({
                             <X className="h-3.5 w-3.5 text-red-400" />
                           </Button>
                         )}
+                        {c.ensaio && c.status === 'concluido' && (
+                          <Button size="sm" variant="outline" onClick={() => void paraReal(c)}>
+                            <RotateCcw className="h-3.5 w-3.5" /> Enviar de verdade
+                          </Button>
+                        )}
+                        {c.progresso.falhas > 0 && (
+                          <Button size="sm" variant="ghost" title="Reenviar só quem falhou"
+                                  onClick={() => void copiar(c, true)}>
+                            <RotateCcw className="h-3.5 w-3.5 text-orange-400" />
+                          </Button>
+                        )}
+                        <Button size="sm" variant="ghost" title="Duplicar" onClick={() => void copiar(c, false)}>
+                          <Copy className="h-3.5 w-3.5 text-muted-foreground" />
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -718,6 +787,8 @@ function DialogoDeNovoDisparo({
   const [avulsos, setAvulsos] = useState<string[]>([])
   const [recusados, setRecusados] = useState<string[]>([])
   const [perfil, setPerfil] = useState<NomeDoPerfil>('seguro')
+  const [ensaio, setEnsaio] = useState(false)
+  const [modelos, setModelos] = useState<ModeloDeMensagem[]>([])
   const [inicio, setInicio] = useState(() => {
     const d = new Date(Date.now() + 5 * 60_000)
     d.setSeconds(0, 0)
@@ -727,6 +798,8 @@ function DialogoDeNovoDisparo({
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
   })
   const [enviando, setEnviando] = useState(false)
+
+  useEffect(() => { listarModelos().then(setModelos).catch(() => {}) }, [])
 
   const lista = listas.find((l) => l.id === listId)
   const ritmo = PERFIS_DE_RITMO[perfil]
@@ -747,8 +820,22 @@ function DialogoDeNovoDisparo({
     } catch { /* silencioso: a validação final é do banco */ }
   }
 
-  async function confirmar() {
+  async function confirmar(rascunho: boolean) {
     if (!nome.trim() || !deviceId || !mensagem.trim() || quantidade === 0) return
+
+    // O banco RECUSA acima do teto sem `confirmado`. A tela não consegue "esquecer"
+    // de perguntar — se esquecesse, a criação falharia em vez de passar batido.
+    let confirmado = false
+    if (quantidade > TETO_CONFIRMACAO) {
+      confirmado = confirm(
+        `São ${quantidade} destinatários e o disparo levaria cerca de ${duracao(previsao)}.
+
+` +
+        'Disparo grande pelo número do atendimento aumenta o risco de bloqueio. Confirma?',
+      )
+      if (!confirmado) return
+    }
+
     setEnviando(true)
     try {
       await criarDisparo({
@@ -759,8 +846,14 @@ function DialogoDeNovoDisparo({
         listId: listId || null,
         avulsos,
         ritmo,
+        rascunho,
+        ensaio,
+        confirmado,
       })
-      toast({ title: 'Disparo agendado.', description: `${quantidade} destinatário(s).` })
+      toast({
+        title: rascunho ? 'Rascunho salvo.' : ensaio ? 'Ensaio agendado.' : 'Disparo agendado.',
+        description: `${quantidade} destinatário(s).`,
+      })
       onFechar(true)
     } catch (e: any) {
       toast({ title: 'Não foi possível criar', description: e?.message, variant: 'destructive' })
@@ -769,9 +862,23 @@ function DialogoDeNovoDisparo({
     }
   }
 
+  async function guardarModelo() {
+    const texto = mensagem.trim()
+    if (!texto) return
+    const nomeModelo = prompt('Nome do modelo:')?.trim()
+    if (!nomeModelo) return
+    try {
+      await salvarModelo(nomeModelo, texto)
+      setModelos(await listarModelos())
+      toast({ title: 'Modelo salvo.' })
+    } catch (e: any) {
+      toast({ title: 'Não foi possível salvar', description: e?.message, variant: 'destructive' })
+    }
+  }
+
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onFechar(false) }}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <GlassDialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Novo disparo em massa</DialogTitle>
           <DialogDescription>
@@ -826,7 +933,30 @@ function DialogoDeNovoDisparo({
           </div>
 
           <div className="grid gap-1.5">
-            <Label htmlFor="d-msg">Mensagem</Label>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Label htmlFor="d-msg">Mensagem</Label>
+              <div className="flex items-center gap-1.5">
+                {modelos.length > 0 && (
+                  <select
+                    className="h-8 rounded-md border border-border bg-background px-2 text-xs"
+                    defaultValue=""
+                    onChange={(e) => {
+                      const m = modelos.find((x) => x.id === e.target.value)
+                      if (m) setMensagem(m.texto)
+                      e.currentTarget.value = ''
+                    }}
+                  >
+                    <option value="">Usar modelo…</option>
+                    {modelos.map((m) => (
+                      <option key={m.id} value={m.id}>{m.nome}</option>
+                    ))}
+                  </select>
+                )}
+                <Button size="sm" variant="ghost" disabled={!mensagem.trim()} onClick={() => void guardarModelo()}>
+                  <Save className="h-3.5 w-3.5" /> Salvar modelo
+                </Button>
+              </div>
+            </div>
             <Textarea id="d-msg" rows={4} value={mensagem} onChange={(e) => setMensagem(e.target.value)}
                       placeholder="Olá {nome}, tudo bem?" />
             <span className="text-[11px] text-muted-foreground">
@@ -867,72 +997,253 @@ function DialogoDeNovoDisparo({
                   : 'escolha uma lista ou cole números'}
               </span>
             </div>
-            <Button
-              onClick={() => void confirmar()}
-              disabled={enviando || !nome.trim() || !deviceId || !mensagem.trim() || quantidade === 0}
-            >
-              {enviando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              Agendar disparo
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Ensaio percorre a fila inteira sem chamar a Evolution, e a MESMA
+                  campanha vira real depois com um botão — em vez de virar lixo,
+                  como acontecia com o DRY_RUN global. */}
+              <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">
+                <input type="checkbox" checked={ensaio} onChange={(e) => setEnsaio(e.target.checked)} />
+                <FlaskConical className="h-3 w-3" /> ensaio
+              </label>
+              <Button
+                variant="outline"
+                onClick={() => void confirmar(true)}
+                disabled={enviando || !nome.trim() || !deviceId || !mensagem.trim() || quantidade === 0}
+              >
+                <Save className="h-4 w-4" /> Salvar rascunho
+              </Button>
+              <Button
+                onClick={() => void confirmar(false)}
+                disabled={enviando || !nome.trim() || !deviceId || !mensagem.trim() || quantidade === 0}
+              >
+                {enviando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                {ensaio ? 'Agendar ensaio' : 'Agendar disparo'}
+              </Button>
+            </div>
           </div>
         </div>
-      </DialogContent>
+      </GlassDialogContent>
     </Dialog>
   )
 }
 
-// ── Diálogo: acompanhar um disparo ──────────────────────────────────────────
+// ── O player: acompanhar um disparo em andamento ────────────────────────────
 
-function DialogoDoDisparo({ campanha, onFechar }: { campanha: Campanha; onFechar: () => void }) {
+/**
+ * Quanto falta, em texto curto, para um instante no futuro.
+ *
+ * Recalculado a cada segundo por quem chama. `null` quando já passou — o worker
+ * pode estar no meio da digitação, ou o relógio local estar alguns segundos à
+ * frente do servidor, e mostrar número negativo seria pior que mostrar nada.
+ */
+function faltam(previstoPara: string | null, agora: number): string | null {
+  if (!previstoPara) return null
+  const segundos = Math.round((new Date(previstoPara).getTime() - agora) / 1000)
+  if (segundos <= 0) return null
+  if (segundos < 60) return `${segundos}s`
+  const m = Math.floor(segundos / 60)
+  const s = segundos % 60
+  if (m < 60) return `${m}min ${String(s).padStart(2, '0')}s`
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}min`
+}
+
+/**
+ * O disparo em andamento, como um player.
+ *
+ * A contagem regressiva sai de `previsto_para`, que o WORKER grava antes de
+ * dormir — é o mesmo número que ele vai esperar, não uma estimativa da tela que
+ * erraria a cada jitter do intervalo.
+ */
+function DialogoDoDisparo({
+  campanha,
+  worker,
+  onFechar,
+  onMudou,
+}: {
+  campanha: Campanha & { progresso: ProgressoDaCampanha }
+  worker: { vivo: boolean; visto_em: string | null } | null
+  onFechar: () => void
+  onMudou: () => void
+}) {
+  const { toast } = useToast()
   const [alvos, setAlvos] = useState<AlvoDoDisparo[]>([])
   const [carregando, setCarregando] = useState(true)
+  const [ocupado, setOcupado] = useState(false)
+  /** Relógio próprio: sem ele a contagem congela até a próxima busca. */
+  const [agora, setAgora] = useState(() => Date.now())
 
-  useEffect(() => {
-    listarAlvos(campanha.id)
-      .then(setAlvos)
-      .finally(() => setCarregando(false))
+  const recarregar = useCallback(async () => {
+    try {
+      setAlvos(await listarAlvos(campanha.id))
+    } finally {
+      setCarregando(false)
+    }
   }, [campanha.id])
+
+  useEffect(() => { void recarregar() }, [recarregar])
+
+  // Dois relógios, propósitos diferentes: 1 s só move a contagem na tela e não
+  // toca a rede; 15 s rebusca os alvos para pegar a troca de "quem está agora".
+  useEffect(() => {
+    const tique = setInterval(() => setAgora(Date.now()), 1000)
+    const busca = setInterval(() => void recarregar(), 15_000)
+    return () => { clearInterval(tique); clearInterval(busca) }
+  }, [recarregar])
+
+  const emAndamento = campanha.status === 'enviando' || campanha.status === 'agendado'
+  const atual = alvos.find((a) => a.status === 'enviando') ?? null
+  const fila = alvos.filter((a) => a.status === 'pendente')
+  const concluidos = alvos.filter((a) => ['enviado', 'simulado', 'falhou', 'pulado'].includes(a.status))
+  const pct = alvos.length ? Math.round((concluidos.length / alvos.length) * 100) : 0
+
+  const contagem = atual ? faltam(atual.previsto_para, agora) : null
+  const restaSegundos = preverDuracaoSegundos(fila.length + (atual ? 1 : 0), campanha)
+
+  async function acao(a: 'pausar' | 'retomar' | 'cancelar') {
+    if (a === 'cancelar' && !confirm('Cancelar este disparo? Quem ainda não recebeu não recebe.')) return
+    setOcupado(true)
+    try {
+      await mudarStatusDoDisparo(campanha.id, a)
+      onMudou()
+      onFechar()
+    } catch (e: any) {
+      toast({ title: 'Não foi possível', description: e?.message, variant: 'destructive' })
+    } finally {
+      setOcupado(false)
+    }
+  }
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onFechar() }}>
-      <DialogContent className="max-w-2xl">
+      <GlassDialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{campanha.nome}</DialogTitle>
+          <DialogTitle className="flex flex-wrap items-center gap-2">
+            {campanha.nome}
+            <Badge variant="outline" className={COR_DO_STATUS[campanha.status]}>{campanha.status}</Badge>
+            {campanha.ensaio && (
+              <Badge variant="outline" className="bg-purple-500/15 text-purple-400 border-purple-500/30">
+                ensaio
+              </Badge>
+            )}
+          </DialogTitle>
           <DialogDescription className="whitespace-pre-wrap">{campanha.mensagem}</DialogDescription>
         </DialogHeader>
-        <div className="rounded-lg border border-border max-h-[420px] overflow-y-auto">
-          {carregando ? (
-            <p className="px-4 py-6 text-center text-sm text-muted-foreground">Carregando…</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Contato</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Enviado</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {alvos.map((a) => (
-                  <TableRow key={a.id}>
-                    <TableCell className="font-medium">
-                      {a.nome_exibicao || a.remote_sender}
-                      {a.avulso && <Badge variant="outline" className="ml-2 text-[10px]">avulso</Badge>}
-                    </TableCell>
-                    <TableCell>
-                      <span className={a.status === 'falhou' ? 'text-red-400' : ''}>{a.status}</span>
-                      {a.erro && <span className="block text-[11px] text-red-400">{a.erro}</span>}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground whitespace-nowrap">
-                      {a.enviado_em ? format(new Date(a.enviado_em), 'dd/MM HH:mm') : '—'}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+
+        <div className="space-y-4">
+          {emAndamento && (
+            <div className="rounded-xl border border-border bg-muted/30 p-4">
+              {atual ? (
+                <>
+                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-muted-foreground">
+                    <Radio className="h-3 w-3 animate-pulse text-green-400" />
+                    Enviando agora
+                  </div>
+                  <p className="mt-1.5 text-lg font-semibold text-foreground">
+                    {atual.nome_exibicao || atual.remote_sender}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {contagem ? (
+                      <>sai em <span className="font-mono text-foreground">{contagem}</span></>
+                    ) : (
+                      'saindo…'
+                    )}
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {worker && !worker.vivo
+                    ? 'O disparador está fora do ar — nada vai sair enquanto isso.'
+                    : 'Aguardando o disparador pegar o próximo.'}
+                </p>
+              )}
+            </div>
           )}
+
+          <div>
+            <Progress value={pct} className="h-2" />
+            <div className="mt-1.5 flex flex-wrap justify-between gap-2 text-[11px] text-muted-foreground">
+              <span>
+                {concluidos.length} de {alvos.length} · {pct}%
+                {campanha.progresso.falhas > 0 && (
+                  <span className="text-red-400"> · {campanha.progresso.falhas} falha(s)</span>
+                )}
+              </span>
+              {emAndamento && fila.length > 0 && <span>faltam ~{duracao(restaSegundos)}</span>}
+            </div>
+          </div>
+
+          {emAndamento && fila.length > 0 && (
+            <div>
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5">A seguir</p>
+              <div className="space-y-1">
+                {/* A MESMA ordem de `disparo_proximo_alvo` (`created_at` crescente),
+                    senão a tela prometeria uma sequência que o worker não segue. */}
+                {fila.slice(0, 3).map((a, i) => (
+                  <div key={a.id} className="flex items-center gap-2 text-sm">
+                    <span className="w-4 text-right text-[11px] text-muted-foreground">{i + 1}</span>
+                    <span className="text-foreground">{a.nome_exibicao || a.remote_sender}</span>
+                    {a.avulso && <Badge variant="outline" className="text-[10px]">avulso</Badge>}
+                  </div>
+                ))}
+                {fila.length > 3 && (
+                  <p className="text-[11px] text-muted-foreground pl-6">e mais {fila.length - 3}</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+            {(campanha.status === 'agendado' || campanha.status === 'enviando') && (
+              <Button size="sm" variant="outline" disabled={ocupado} onClick={() => void acao('pausar')}>
+                <Pause className="h-3.5 w-3.5" /> Pausar
+              </Button>
+            )}
+            {campanha.status === 'pausado' && (
+              <Button size="sm" disabled={ocupado} onClick={() => void acao('retomar')}>
+                <Play className="h-3.5 w-3.5" /> Retomar
+              </Button>
+            )}
+            {['agendado', 'enviando', 'pausado', 'rascunho'].includes(campanha.status) && (
+              <Button size="sm" variant="ghost" disabled={ocupado} onClick={() => void acao('cancelar')}>
+                <X className="h-3.5 w-3.5 text-red-400" /> Cancelar
+              </Button>
+            )}
+          </div>
+
+          <div className="rounded-lg border border-border max-h-[260px] overflow-y-auto">
+            {carregando ? (
+              <p className="px-4 py-6 text-center text-sm text-muted-foreground">Carregando…</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Contato</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Enviado</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {alvos.map((a) => (
+                    <TableRow key={a.id}>
+                      <TableCell className="font-medium">
+                        {a.nome_exibicao || a.remote_sender}
+                        {a.avulso && <Badge variant="outline" className="ml-2 text-[10px]">avulso</Badge>}
+                      </TableCell>
+                      <TableCell>
+                        <span className={a.status === 'falhou' ? 'text-red-400' : ''}>{a.status}</span>
+                        {a.erro && <span className="block text-[11px] text-red-400">{a.erro}</span>}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground whitespace-nowrap">
+                        {a.enviado_em ? format(new Date(a.enviado_em), 'dd/MM HH:mm') : '—'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </div>
         </div>
-      </DialogContent>
+      </GlassDialogContent>
     </Dialog>
   )
 }

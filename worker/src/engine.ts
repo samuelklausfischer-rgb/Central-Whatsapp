@@ -7,6 +7,7 @@ import {
   devolverAlvo,
   enviarMensagem,
   jaSaiu,
+  marcarPrevisao,
   mostrarDigitando,
   proximoAlvo,
   soltarLease,
@@ -91,22 +92,42 @@ export class Motor {
     }
     const texto = montarTexto(alvo.mensagem, alvo.nome_exibicao)
 
-    // 1. A espera entre contatos: janela de horário, pausa longa e o intervalo
-    //    aleatório de 3 a 13 min.
-    const pode = await this.humanizador.esperarAntesDoProximo(
-      alvo.campaign_id,
-      ritmo,
-      (m) => log(`${alvo.remote_sender}: ${m}`),
-    )
+    // Ensaio é POR CAMPANHA; `DRY_RUN` continua valendo como chave mestra do
+    // processo inteiro. Qualquer um dos dois liga a simulação.
+    const simular = seco || alvo.ensaio === true
 
-    if (!pode) {
+    // 1. Sorteia a espera SEM esperar — janela de horário, pausa longa e o
+    //    intervalo aleatório de 3 a 13 min.
+    const plano = this.humanizador.planejarEspera(alvo.campaign_id, ritmo)
+
+    if (!plano.pode) {
       // Fora da janela não é falha: o alvo volta para a fila intacto.
+      log(`${alvo.remote_sender}: fora da janela de envio`)
       await devolverAlvo(alvo.alvo_id)
       await dormir(60_000)
       return
     }
 
-    // 2. "digitando…" colado no envio, pela duração que o texto pediria.
+    // 2. PUBLICA o horário antes de dormir.
+    //
+    //    É isto que permite a tela contar regressivamente: o número é o que o
+    //    worker acabou de sortear, não uma estimativa paralela que erraria a cada
+    //    jitter. A digitação entra na conta porque ela também acontece antes do
+    //    envio.
+    //
+    //    Falhar aqui não impede o envio — no pior caso a tela mostra "calculando".
+    const digitacao = this.humanizador.atrasoDeDigitacao(texto)
+    const previstoPara = new Date(Date.now() + plano.totalMs + digitacao)
+    try {
+      await marcarPrevisao(alvo.alvo_id, previstoPara)
+    } catch (e) {
+      log(`${alvo.remote_sender}: não consegui publicar a previsão`, e instanceof Error ? e.message : e)
+    }
+
+    // 3. Cumpre a espera sorteada.
+    await this.humanizador.cumprirEspera(plano, (m) => log(`${alvo.remote_sender}: ${m}`))
+
+    // 4. "digitando…" colado no envio, pela duração que o texto pediria.
     //
     //    O original calcula esse tempo e o desperdiça como sleep local — quem vê
     //    "digitando" lá é um `delay: 1200` fixo. Aqui o cálculo vira a duração de
@@ -114,8 +135,7 @@ export class Motor {
     //
     //    Falhar aqui NÃO impede o envio. Mostrar "digitando" é enfeite; entregar a
     //    mensagem é o trabalho.
-    const digitacao = this.humanizador.atrasoDeDigitacao(texto)
-    if (!seco) {
+    if (!simular) {
       try {
         await mostrarDigitando(alvo)
       } catch (e) {
@@ -126,8 +146,8 @@ export class Motor {
 
     try {
       let messageId: string | null = null
-      if (seco) {
-        log(`[seco] enviaria para ${alvo.remote_sender}: ${texto.slice(0, 60)}`)
+      if (simular) {
+        log(`[ensaio] enviaria para ${alvo.remote_sender}: ${texto.slice(0, 60)}`)
       } else {
         const r = await enviarComRetentativa({
           enviar: () => enviarMensagem(alvo, texto),
@@ -138,12 +158,15 @@ export class Motor {
         messageId = r.messageId
         if (r.jaHaviaSaido) log(`${alvo.remote_sender}: envio duplicado evitado`)
       }
-      await concluirAlvo(alvo.alvo_id, true, messageId)
+      // `simular` vira o status `simulado`, e não `enviado`: campanha de ensaio
+      // não pode ficar indistinguível de uma real e virar lixo. Um botão na tela
+      // devolve os simulados para a fila.
+      await concluirAlvo(alvo.alvo_id, true, messageId, null, simular)
       this.enviados++
-      log(`enviado para ${alvo.remote_sender} (${this.enviados} no total)`)
+      log(`${simular ? 'simulado' : 'enviado'} para ${alvo.remote_sender} (${this.enviados} no total)`)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      await concluirAlvo(alvo.alvo_id, false, null, msg)
+      await concluirAlvo(alvo.alvo_id, false, null, msg, false)
       this.falhas++
       log(`FALHOU para ${alvo.remote_sender}: ${msg}`)
     }

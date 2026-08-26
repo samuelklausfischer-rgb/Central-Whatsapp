@@ -33,6 +33,15 @@ const DIGITACAO_MAX_MS = 8000
 
 export const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/** O que o worker vai esperar antes deste envio — sorteado, ainda não cumprido. */
+export interface PlanoDeEspera {
+  /** `false` = fora da janela de horário; o alvo volta para a fila. */
+  pode: boolean
+  pausaLongaMs: number
+  intervaloMs: number
+  totalMs: number
+}
+
 export class Humanizador {
   /**
    * Contador por CAMPANHA, e não global.
@@ -96,9 +105,20 @@ export class Humanizador {
   }
 
   /**
-   * A espera ENTRE contatos. Devolve `false` quando o envio deve ser adiado (fora
-   * da janela) — nesse caso o alvo volta para a fila em vez de ser marcado como
-   * falha, porque não falhou nada.
+   * SORTEIA a espera entre contatos, sem esperar.
+   *
+   * ── POR QUE SORTEAR E ESPERAR SÃO DUAS COISAS ───────────────────────────────
+   * Antes isto era um método só, que sorteava e dormia. O número ficava preso na
+   * memória do worker: a tela sabia QUE um disparo estava correndo, mas não tinha
+   * como dizer quanto faltava para o próximo.
+   *
+   * Separando, o motor recebe o plano, GRAVA no banco quando o envio vai
+   * acontecer (`disparo_alvos.previsto_para`) e só então dorme. A contagem
+   * regressiva da tela passa a ser o número que o worker sorteou, não uma
+   * estimativa paralela que erraria a cada jitter.
+   *
+   * `pode = false` quando está fora da janela de horário — aí o alvo volta para a
+   * fila em vez de ser marcado como falha, porque não falhou nada.
    *
    * ── POR QUE A DIGITAÇÃO NÃO ESTÁ AQUI ───────────────────────────────────────
    * No original, `applyPreSendDelay` dorme o tempo de digitação e SÓ DEPOIS dorme
@@ -111,27 +131,23 @@ export class Humanizador {
    * depois — o contato veria alguém começar a escrever e sumir. Por isso a
    * digitação saiu daqui e virou o último passo antes do envio, no motor.
    */
-  async esperarAntesDoProximo(
-    campanhaId: string,
-    r: RitmoDaCampanha,
-    logar: (m: string) => void,
-  ): Promise<boolean> {
+  planejarEspera(campanhaId: string, r: RitmoDaCampanha): PlanoDeEspera {
     const janela = this.dentroDaJanela(r)
-    if (!janela.pode) {
-      logar(`fora da janela de envio; próxima em ${Math.round(janela.esperarMs / 60000)} min`)
-      return false
+    if (!janela.pode) return { pode: false, pausaLongaMs: 0, intervaloMs: 0, totalMs: 0 }
+
+    const pausaLongaMs = this.ehHoraDePausar(campanhaId, r.pausa_a_cada) ? r.pausa_longa_ms : 0
+    const intervaloMs = this.intervaloEntreMensagens(r)
+    return { pode: true, pausaLongaMs, intervaloMs, totalMs: pausaLongaMs + intervaloMs }
+  }
+
+  /** Cumpre o plano. Separado do sorteio para o motor poder publicar antes de dormir. */
+  async cumprirEspera(plano: PlanoDeEspera, logar: (m: string) => void): Promise<void> {
+    if (plano.pausaLongaMs > 0) {
+      logar(`pausa de segurança: ${Math.round(plano.pausaLongaMs / 1000)}s`)
+      await dormir(plano.pausaLongaMs)
     }
-
-    if (this.ehHoraDePausar(campanhaId, r.pausa_a_cada)) {
-      logar(`pausa de segurança: ${Math.round(r.pausa_longa_ms / 1000)}s`)
-      await dormir(r.pausa_longa_ms)
-    }
-
-    const intervalo = this.intervaloEntreMensagens(r)
-    logar(`intervalo anti-ban: ${Math.round(intervalo / 1000)}s`)
-    await dormir(intervalo)
-
-    return true
+    logar(`intervalo anti-ban: ${Math.round(plano.intervaloMs / 1000)}s`)
+    await dormir(plano.intervaloMs)
   }
 
   /** Chamado quando a campanha some da fila, para o contador não vazar. */

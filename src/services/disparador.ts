@@ -93,6 +93,10 @@ export type NomeDoPerfil = keyof typeof PERFIS_DE_RITMO
 export interface Campanha extends RitmoDoDisparo {
   id: string
   nome: string
+  /** Campanha de ensaio: percorre a fila sem chamar a Evolution. */
+  ensaio: boolean
+  /** De qual campanha esta foi duplicada, se foi. */
+  origem_id: string | null
   device_id: string
   list_id: string | null
   mensagem: string
@@ -120,11 +124,36 @@ export interface AlvoDoDisparo {
   remote_sender: string
   nome_exibicao: string | null
   avulso: boolean
-  status: 'pendente' | 'enviando' | 'enviado' | 'falhou' | 'pulado'
+  status: 'pendente' | 'enviando' | 'enviado' | 'falhou' | 'pulado' | 'simulado'
   tentativas: number
   enviado_em: string | null
   erro: string | null
+  /**
+   * Quando o worker planeja enviar este alvo.
+   *
+   * Gravado por ELE, logo após travar o alvo e antes de dormir — é o mesmo número
+   * que ele vai esperar. A tela conta regressivamente a partir daqui em vez de
+   * estimar por conta própria, o que erraria a cada jitter.
+   */
+  previsto_para: string | null
 }
+
+export interface ModeloDeMensagem {
+  id: string
+  nome: string
+  texto: string
+  created_by: string | null
+  created_at: string
+}
+
+/**
+ * Acima disto o banco RECUSA a criação sem `confirmado`.
+ *
+ * A tela usa o mesmo número para saber quando mostrar o diálogo de confirmação. O
+ * valor de verdade mora em `disparo_criar` — aqui é só o espelho, porque a tela
+ * não é o único caminho até a tabela.
+ */
+export const TETO_CONFIRMACAO = 300
 
 // ── Listas ──────────────────────────────────────────────────────────────────
 
@@ -344,6 +373,12 @@ export async function criarDisparo(entrada: {
   avulsos?: string[]
   anexos?: unknown[] | null
   ritmo?: RitmoDoDisparo
+  /** Nasce como rascunho: salvo, mas o worker não pega. */
+  rascunho?: boolean
+  /** Ensaio: percorre a fila sem enviar, e dá para converter em real depois. */
+  ensaio?: boolean
+  /** Obrigatório acima de `TETO_CONFIRMACAO`; sem ele o banco recusa. */
+  confirmado?: boolean
 }): Promise<string> {
   const { data, error } = await supabase.rpc('disparo_criar', {
     p_nome: entrada.nome,
@@ -354,9 +389,88 @@ export async function criarDisparo(entrada: {
     p_avulsos: entrada.avulsos ?? null,
     p_anexos: entrada.anexos ?? null,
     p_ritmo: entrada.ritmo ?? null,
+    p_rascunho: entrada.rascunho ?? false,
+    p_ensaio: entrada.ensaio ?? false,
+    p_confirmado: entrada.confirmado ?? false,
   })
   if (error) throw new Error(error.message)
   return data as string
+}
+
+/** Copia um disparo. `apenasFalhas` faz o reenvio de quem não recebeu. */
+export async function duplicarDisparo(
+  campaignId: string,
+  apenasFalhas = false,
+  nome?: string,
+): Promise<string> {
+  const { data, error } = await supabase.rpc('disparo_duplicar', {
+    p_campaign_id: campaignId,
+    p_apenas_falhas: apenasFalhas,
+    p_nome: nome ?? null,
+  })
+  if (error) throw new Error(error.message)
+  return data as string
+}
+
+/** Só aceita `rascunho` e `agendado` — depois do primeiro envio o banco recusa. */
+export async function editarDisparo(entrada: {
+  id: string
+  nome: string
+  mensagem: string
+  iniciarEm: string
+  listId?: string | null
+  ritmo?: RitmoDoDisparo
+  trocarLista?: boolean
+}): Promise<void> {
+  const { error } = await supabase.rpc('disparo_editar', {
+    p_campaign_id: entrada.id,
+    p_nome: entrada.nome,
+    p_mensagem: entrada.mensagem,
+    p_iniciar_em: entrada.iniciarEm,
+    p_list_id: entrada.listId ?? null,
+    p_ritmo: entrada.ritmo ?? null,
+    p_trocar_lista: entrada.trocarLista ?? false,
+  })
+  if (error) throw new Error(error.message)
+}
+
+/** Devolve os `simulado` para a fila e tira o ensaio: a MESMA campanha vai valer. */
+export async function prepararParaReal(campaignId: string): Promise<number> {
+  const { data, error } = await supabase.rpc('disparo_preparar_para_real', {
+    p_campaign_id: campaignId,
+  })
+  if (error) throw new Error(error.message)
+  return (data as number) ?? 0
+}
+
+// ── Modelos de mensagem ─────────────────────────────────────────────────────
+
+export async function listarModelos(): Promise<ModeloDeMensagem[]> {
+  const { data, error } = await supabase
+    .from('disparo_modelos')
+    .select('*')
+    .order('nome', { ascending: true })
+  if (error) throw new Error(error.message)
+  return (data ?? []) as ModeloDeMensagem[]
+}
+
+export async function salvarModelo(nome: string, texto: string): Promise<void> {
+  const userId = (await supabase.auth.getSession()).data.session?.user?.id
+  const { error } = await supabase
+    .from('disparo_modelos')
+    .insert({ nome, texto, created_by: userId } as any)
+  if (error) throw new Error(error.message)
+}
+
+/** Mesma checagem de linhas afetadas de `apagarLista` — DELETE barrado por RLS
+ *  devolve sucesso com zero linhas, e diria "removido" com o modelo ainda lá. */
+export async function apagarModelo(id: string): Promise<void> {
+  const { error, count } = await supabase
+    .from('disparo_modelos')
+    .delete({ count: 'exact' })
+    .eq('id', id)
+  if (error) throw new Error(error.message)
+  if (!count) throw new Error('Este modelo é de outra pessoa: só quem criou (ou um admin) pode apagar.')
 }
 
 export async function listarDisparos(): Promise<(Campanha & { progresso: ProgressoDaCampanha })[]> {

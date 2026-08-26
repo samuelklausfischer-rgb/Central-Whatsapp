@@ -34,6 +34,8 @@ export interface AlvoParaEnviar {
   pausa_a_cada: number
   pausa_longa_ms: number
   created_by: string | null
+  /** Campanha de ensaio: percorre a fila sem chamar a Evolution. */
+  ensaio: boolean
 }
 
 /**
@@ -57,14 +59,31 @@ export async function concluirAlvo(
   sucesso: boolean,
   messageId?: string | null,
   erro?: string | null,
+  simulado = false,
 ): Promise<void> {
   const { error } = await supabase.rpc('disparo_concluir_alvo', {
     p_alvo_id: alvoId,
     p_sucesso: sucesso,
     p_message_id: messageId ?? null,
     p_erro: erro ?? null,
+    p_simulado: simulado,
   })
   if (error) throw new Error(`disparo_concluir_alvo: ${error.message}`)
+}
+
+/**
+ * Publica QUANDO este alvo vai ser enviado.
+ *
+ * O worker sorteia o intervalo e, antes de dormir, grava aqui o horário que ele
+ * mesmo vai esperar. Sem isso o número fica preso na memória do processo e a tela
+ * não tem como contar — era essa a lacuna que o player veio resolver.
+ */
+export async function marcarPrevisao(alvoId: string, previstoPara: Date): Promise<void> {
+  const { error } = await supabase.rpc('disparo_marcar_previsao', {
+    p_alvo_id: alvoId,
+    p_previsto_para: previstoPara.toISOString(),
+  })
+  if (error) throw new Error(`disparo_marcar_previsao: ${error.message}`)
 }
 
 /** Devolve o alvo para a fila sem contar como falha (ex.: fora da janela). */
