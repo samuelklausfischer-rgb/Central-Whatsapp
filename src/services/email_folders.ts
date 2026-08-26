@@ -45,23 +45,15 @@ export async function deleteFolder(id: string): Promise<void> {
   if (error) throw error
 }
 
-// Cria as pastas padrão para uma conta recém-criada
-export async function createSystemFolders(account_id: string): Promise<void> {
-  const systemFolders: Omit<EmailFolder, 'id' | 'created_at'>[] = [
-    { account_id, name: 'INBOX',        display_name: 'Entrada',  imap_path: 'INBOX',        is_smart: false, smart_filter: null, color: null, icon: 'Inbox',  sort_order: 0, is_system: true },
-    { account_id, name: 'SENT',         display_name: 'Enviados', imap_path: 'Sent',         is_smart: false, smart_filter: null, color: null, icon: 'Send',   sort_order: 1, is_system: true },
-    { account_id, name: 'DRAFTS',       display_name: 'Rascunhos',imap_path: 'Drafts',       is_smart: false, smart_filter: null, color: null, icon: 'FileEdit',sort_order: 2, is_system: true },
-    { account_id, name: 'ARCHIVE',      display_name: 'Arquivo',  imap_path: 'Archive',      is_smart: false, smart_filter: null, color: null, icon: 'Archive',sort_order: 3, is_system: true },
-    { account_id, name: 'SPAM',         display_name: 'Spam',     imap_path: 'Spam',         is_smart: false, smart_filter: null, color: null, icon: 'ShieldX',sort_order: 4, is_system: true },
-    // Pastas inteligentes
-    { account_id, name: 'WAITING',      display_name: 'Aguardando',imap_path: null,           is_smart: true,  smart_filter: { status: 'waiting' }, color: '#F59E0B', icon: 'Clock',      sort_order: 10, is_system: true },
-    { account_id, name: 'PRIORITY',     display_name: 'Prioritários',imap_path: null,          is_smart: true,  smart_filter: { ai_sentiment: 'urgente' }, color: '#EF4444', icon: 'Zap',       sort_order: 11, is_system: true },
-    { account_id, name: 'ASSIGNED_ME',  display_name: 'Atribuídos a mim',imap_path: null,     is_smart: true,  smart_filter: { assigned_to: 'me' }, color: '#8B5CF6', icon: 'UserCheck', sort_order: 12, is_system: true },
-    { account_id, name: 'SCHEDULED',    display_name: 'Agendados',imap_path: null,            is_smart: true,  smart_filter: { scheduled: true }, color: '#3B82F6', icon: 'CalendarClock',sort_order: 13, is_system: true },
-  ]
+/*
+  Aqui existia `createSystemFolders`, que semeava pastas fixas da época do IMAP
+  ("Entrada", "Enviados", "Spam"...). Removida em 26/08/2026.
 
-  const { error } = await supabase
-    .from('email_folders')
-    .insert(systemFolders)
-  if (error) throw error
-}
+  Nunca foi chamada por lugar nenhum — e, depois que a sincronização com o
+  Microsoft Graph passou a espelhar as pastas de verdade, ela virou uma
+  armadilha: rodar criaria pastas inventadas ao lado das reais, com nome
+  parecido e sem `graph_id`, e ninguém saberia qual das duas vale.
+
+  Quem cria pasta agora é `sincronizarPastas`, na edge function
+  `email-microsoft`, a partir do que o Outlook realmente tem.
+*/

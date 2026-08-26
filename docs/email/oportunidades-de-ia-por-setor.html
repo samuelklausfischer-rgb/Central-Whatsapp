@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Onde a IA ajuda cada setor no e-mail — Central Whats</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f5f5f2; color: #2c2c2a; line-height: 1.7;
+    padding: 32px 20px 64px; -webkit-text-size-adjust: 100%;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; }
+
+  header { text-align: center; margin-bottom: 34px; }
+  header h1 { font-size: 30px; font-weight: 600; margin-bottom: 8px; line-height: 1.3; }
+  header p { color: #5f5e5a; font-size: 17px; }
+  .data { display: inline-block; margin-top: 14px; font-size: 13px; color: #888780;
+          background: #fff; border: 1px solid #d3d1c7; border-radius: 20px; padding: 4px 14px; }
+
+  .card { background: #fff; border: 1px solid #d3d1c7; border-radius: 14px;
+          padding: 28px; margin-bottom: 22px; }
+  .card h2 { font-size: 21px; font-weight: 600; margin-bottom: 6px; }
+  .card .sub { color: #5f5e5a; font-size: 15px; margin-bottom: 22px; }
+  .card h3 { font-size: 17px; font-weight: 600; margin: 26px 0 10px; }
+  .card h3:first-of-type { margin-top: 6px; }
+
+  /* manchete */
+  .manchete { background: #2c2c2a; color: #f5f5f2; border-radius: 14px;
+              padding: 32px 28px; margin-bottom: 22px; text-align: center; }
+  .manchete .numerao { font-size: 54px; font-weight: 700; color: #fff; line-height: 1.1; }
+  .manchete .legenda { font-size: 17px; color: #e8e6df; margin-top: 8px; }
+  .manchete .detalhe { font-size: 14px; color: #b4b2a9; margin-top: 14px; line-height: 1.6; }
+
+  /* barras */
+  .barra-linha { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; font-size: 14.5px; }
+  .barra-nome { width: 210px; flex-shrink: 0; }
+  .barra-trilho { flex: 1; height: 22px; background: #f0eee8; border-radius: 5px; overflow: hidden; min-width: 60px; }
+  .barra-preenche { height: 100%; background: #b4b2a9; }
+  .barra-preenche.forte { background: #2c2c2a; }
+  .barra-preenche.gente { background: #0f6e56; }
+  .barra-valor { width: 74px; flex-shrink: 0; text-align: right;
+                 font-variant-numeric: tabular-nums; color: #5f5e5a; font-size: 13.5px; }
+  @media (max-width: 620px) { .barra-nome { width: 120px; font-size: 13px; } }
+
+  /* itens do ranking */
+  .item { border: 1px solid #e3e1d8; border-radius: 12px; padding: 18px 20px; margin-bottom: 14px;
+          background: #fdfdfc; }
+  .item-topo { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 8px; }
+  .medalha { flex-shrink: 0; width: 30px; height: 30px; border-radius: 50%;
+             background: #2c2c2a; color: #fff; display: flex; align-items: center;
+             justify-content: center; font-size: 14px; font-weight: 600; }
+  .medalha.ouro { background: #b8860b; }
+  .medalha.prata { background: #8a8a86; }
+  .medalha.bronze { background: #a0642a; }
+  .item-titulo { font-size: 16.5px; font-weight: 600; flex: 1; min-width: 0; padding-top: 3px; }
+  .item p { font-size: 15px; line-height: 1.65; margin-bottom: 8px; }
+  .prova { background: #f0eee8; border-left: 3px solid #b4b2a9; padding: 8px 12px;
+           border-radius: 0 6px 6px 0; font-size: 14px; color: #4a4842; margin: 10px 0; }
+  .prova b { color: #2c2c2a; }
+
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .tag { font-size: 12px; padding: 3px 10px; border-radius: 20px; border: 1px solid #d3d1c7;
+         background: #fff; color: #5f5e5a; }
+  .tag.pronto { background: #e1f5ee; border-color: #5dcaa5; color: #085041; }
+  .tag.leve   { background: #e1f5ee; border-color: #5dcaa5; color: #085041; }
+  .tag.medio  { background: #faeeda; border-color: #fac775; color: #633806; }
+  .tag.pesado { background: #fcebeb; border-color: #f09595; color: #791f1f; }
+  .tag.trava  { background: #fcebeb; border-color: #f09595; color: #791f1f; }
+
+  .aviso { margin-top: 16px; background: #faeeda; border: 1px solid #fac775;
+           border-radius: 10px; padding: 14px 16px; font-size: 14.5px; color: #633806;
+           display: flex; gap: 11px; line-height: 1.55; }
+  .aviso.bom { background: #e1f5ee; border-color: #5dcaa5; color: #085041; }
+  .aviso.grave { background: #fcebeb; border-color: #f09595; color: #791f1f; }
+  .aviso span:first-child { flex-shrink: 0; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+  th, td { text-align: left; padding: 11px 8px; border-bottom: 1px solid #eceae3; vertical-align: top; }
+  th { font-weight: 600; color: #5f5e5a; font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
+  td:first-child { padding-left: 0; }
+  tr:last-child td { border-bottom: none; }
+  td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .tw { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  .setor-cabeca { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+  .setor-cabeca h2 { margin-bottom: 0; }
+  .setor-meta { font-size: 13px; color: #888780; }
+
+  code, .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13.5px; }
+  code { background: #f0eee8; border-radius: 5px; padding: 2px 7px; }
+
+  .passos { counter-reset: p; }
+  .passo { display: flex; gap: 16px; align-items: flex-start; padding: 16px 0;
+           border-bottom: 1px solid #eceae3; }
+  .passo:last-child { border-bottom: none; padding-bottom: 0; }
+  .num { flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%; background: #2c2c2a;
+         color: #fff; display: flex; align-items: center; justify-content: center;
+         font-size: 14px; font-weight: 600; }
+  .passo .t { font-size: 16px; font-weight: 600; }
+  .passo .d { font-size: 14.5px; color: #4a4842; margin-top: 3px; }
+
+  footer { text-align: center; color: #888780; font-size: 13px; margin-top: 36px; line-height: 1.7; }
+
+  @media print {
+    body { background: #fff; padding: 0; }
+    .card, .item, .manchete { break-inside: avoid; page-break-inside: avoid; }
+    .manchete { background: #fff; color: #2c2c2a; border: 2px solid #2c2c2a; }
+    .manchete .numerao, .manchete .legenda { color: #2c2c2a; }
+    .manchete .detalhe { color: #5f5e5a; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Onde a IA ajuda cada setor no e-mail</h1>
+    <p>Análise da caixa real da PRN — não de teoria</p>
+    <div class="data">26 de agosto de 2026 · sobre 360 mensagens importadas e 14.341 itens em pastas</div>
+  </header>
+
+  <!-- ───────────────────────── MANCHETE ───────────────────────── -->
+  <div class="manchete">
+    <div class="numerao">4 de 300</div>
+    <div class="legenda">Só isso. De 300 e-mails não lidos, <strong>quatro</strong> vieram de uma pessoa de verdade.</div>
+    <div class="detalhe">
+      Todo o resto é robô: 186 do Omie, 102 de ferramentas de TI, 8 do robô de licitação.<br>
+      O problema da caixa não é volume de trabalho — é <strong>ruído escondendo o trabalho</strong>.
+    </div>
+  </div>
+
+  <!-- ───────────────────────── EVIDÊNCIAS ───────────────────────── -->
+  <div class="card">
+    <h2>O que os números mostram</h2>
+    <p class="sub">Tudo aqui saiu de consulta ao banco em 26/08/2026. Nada é estimativa.</p>
+
+    <h3>De onde vêm os 300 não lidos</h3>
+    <div class="barra-linha">
+      <span class="barra-nome">Omie (financeiro)</span>
+      <span class="barra-trilho"><span class="barra-preenche forte" style="width:62%"></span></span>
+      <span class="barra-valor">186 · 62%</span>
+    </div>
+    <div class="barra-linha">
+      <span class="barra-nome">Ferramentas de TI</span>
+      <span class="barra-trilho"><span class="barra-preenche" style="width:34%"></span></span>
+      <span class="barra-valor">102 · 34%</span>
+    </div>
+    <div class="barra-linha">
+      <span class="barra-nome">Robô de licitação</span>
+      <span class="barra-trilho"><span class="barra-preenche" style="width:3%"></span></span>
+      <span class="barra-valor">8 · 3%</span>
+    </div>
+    <div class="barra-linha">
+      <span class="barra-nome">Gente de fora</span>
+      <span class="barra-trilho"><span class="barra-preenche gente" style="width:1.3%"></span></span>
+      <span class="barra-valor">4 · 1%</span>
+    </div>
+
+    <h3>A caixa pessoal, em 90 dias</h3>
+    <div class="tw">
+      <table>
+        <tbody>
+          <tr><td>Mensagens no período</td><td class="n">360</td><td>4 por dia</td></tr>
+          <tr><td><strong>Vindas do Omie</strong></td><td class="n"><strong>199</strong></td><td>55% da caixa, de 3 remetentes</td></tr>
+          <tr><td><strong>Só o aviso "Existem N pagamentos que precisam da sua aprovação"</strong></td><td class="n"><strong>163</strong></td><td>45% da caixa — o mesmo texto, repetido</td></tr>
+          <tr><td>Não lidas</td><td class="n">300</td><td>83% nunca foram abertas</td></tr>
+          <tr><td>Remetentes diferentes</td><td class="n">51</td><td>e 3 deles respondem por metade</td></tr>
+          <tr><td>Com anexo</td><td class="n">7</td><td>2% — anexo é raro nesta caixa</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="aviso">
+      <span>💡</span>
+      <span><strong>163 e-mails para dizer a mesma coisa.</strong> "Tem pagamento esperando aprovação"
+      não precisa de um e-mail por vez — precisa de um número numa tela. Esse é o maior ganho
+      isolado desta análise, e nem depende de IA.</span>
+    </div>
+
+    <h3>A caixa do Administrativo (<span class="mono">suportelaudos@</span>)</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Pasta</th><th>Itens</th><th>O que isso conta</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">1. Licitações</td><td class="n">5.004</td><td>o assunto que domina o setor</td></tr>
+          <tr><td class="mono">Licitações Filtradas</td><td class="n">296</td><td>o que a triagem aprovou</td></tr>
+          <tr><td class="mono">Licitações não compatíveis</td><td class="n">132</td><td>o que a triagem descartou</td></tr>
+          <tr><td class="mono"><strong>Revisão manual</strong></td><td class="n"><strong>72</strong></td><td><strong>o que a máquina não soube decidir</strong></td></tr>
+          <tr><td class="mono">Currículos</td><td class="n">9</td><td>outro assunto, misturado na mesma caixa</td></tr>
+          <tr><td colspan="2"><strong>Total em todas as pastas</strong></td><td class="n"><strong>14.341</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="aviso bom">
+      <span>✅</span>
+      <span><strong>Já existe uma triagem de licitação funcionando</strong> — o workflow
+      <span class="mono">Email AI Analyzer</span> no n8n, que lê essa caixa pelo Outlook. Ela
+      separa aprovado, descartado e "não sei". A oportunidade não é criar do zero: é trazer para
+      dentro do app e atacar os 72 que ela devolve para humano.</span>
+    </div>
+  </div>
+
+  <!-- ───────────────────────── RANKING GERAL ───────────────────────── -->
+  <div class="card">
+    <h2>Ranking geral</h2>
+    <p class="sub">Ordenado por impacto dividido por esforço. As três primeiras valem mais que as sete seguintes somadas.</p>
+
+    <div class="item">
+      <div class="item-topo">
+        <div class="medalha ouro">1</div>
+        <div class="item-titulo">Matar o ruído do Omie</div>
+      </div>
+      <p>Agrupar os avisos repetidos num contador só ("12 pagamentos aguardando") e arquivar
+      automaticamente os anteriores. Não precisa de IA — precisa de uma regra e de uma tela.</p>
+      <div class="prova"><b>Prova:</b> 163 dos 360 e-mails (45%) e 157 dos 300 não lidos (52%) são
+      esse único aviso. Sozinho, isso derruba a caixa pela metade.</div>
+      <div class="tags"><span class="tag leve">esforço baixo</span><span class="tag">impacto altíssimo</span><span class="tag">não depende de IA</span></div>
+    </div>
+
+    <div class="item">
+      <div class="item-topo">
+        <div class="medalha prata">2</div>
+        <div class="item-titulo">Classificar e resumir tudo que chega</div>
+      </div>
+      <p>Tipo, urgência de 0 a 3, resumo de uma linha — e gravar também como <strong>categoria
+      colorida no próprio Outlook</strong>. Aí a inteligência aparece no celular de todo mundo,
+      sem ninguém abrir o Central Whats.</p>
+      <div class="prova"><b>Já está meio pronto:</b> as colunas <span class="mono">ai_category</span>,
+      <span class="mono">ai_sentiment</span> e <span class="mono">ai_summary</span> existem na
+      tabela e estão <b>vazias</b>; a IA (Groq) já está ligada e funcionando em outra tela do app.</div>
+      <div class="tags"><span class="tag pronto">base pronta</span><span class="tag medio">esforço médio</span><span class="tag">impacto alto</span></div>
+    </div>
+
+    <div class="item">
+      <div class="item-topo">
+        <div class="medalha bronze">3</div>
+        <div class="item-titulo">Separar "robô" de "gente"</div>
+      </div>
+      <p>Uma pasta inteligente só com o que veio de uma pessoa de verdade. É a tela que o time
+      abriria de manhã.</p>
+      <div class="prova"><b>Prova:</b> 296 dos 300 não lidos são automáticos. A caixa de "gente"
+      teria 4 itens em vez de 300 — e nenhum deles se perderia.</div>
+      <div class="tags"><span class="tag pronto">base pronta</span><span class="tag leve">esforço baixo</span><span class="tag">impacto alto</span></div>
+    </div>
+
+    <div class="item">
+      <div class="item-topo"><div class="medalha">4</div><div class="item-titulo">Fila do que responder hoje</div></div>
+      <p>Prazo por tipo de e-mail, responsável e alerta de esquecido. Resolve o
+      "todo mundo vê, ninguém responde" das caixas de setor.</p>
+      <div class="prova"><b>Já está meio pronto:</b> a tabela <span class="mono">email_states</span>
+      tem responsável, status, prazo e alerta — e está com <b>zero linhas</b>.</div>
+      <div class="tags"><span class="tag pronto">base pronta</span><span class="tag medio">esforço médio</span><span class="tag">depende do item 2</span></div>
+    </div>
+
+    <div class="item">
+      <div class="item-topo"><div class="medalha">5</div><div class="item-titulo">Espelhar pasta e movimentação no Outlook</div></div>
+      <p>Criar pasta, mover e-mail e marcar lido no app faz acontecer no Outlook também. Hoje o
+      app é uma ilha: marcar lido aqui não marca lá.</p>
+      <div class="tags"><span class="tag pronto">permissão já concedida</span><span class="tag medio">esforço médio</span><span class="tag">impacto médio</span></div>
+    </div>
+
+    <div class="item">
+      <div class="item-topo"><div class="medalha">6</div><div class="item-titulo">A IA escreve as regras do Outlook</div></div>
+      <p>A IA percebe o padrão ("todo aviso do Omie você arquiva") e <strong>propõe uma regra de
+      verdade</strong>. Regra do Outlook roda na Microsoft 24 horas por dia, mesmo com o nosso app
+      desligado, e vale no celular.</p>
+      <div class="tags"><span class="tag trava">falta permissão no portal</span><span class="tag medio">esforço médio</span><span class="tag">impacto alto</span></div>
+    </div>
+
+    <div class="item">
+      <div class="item-topo"><div class="medalha">7</div><div class="item-titulo">Detector de golpe e risco</div></div>
+      <p>Sinaliza pedido de troca de dados bancários, cobrança fora do padrão e remetente que
+      imita fornecedor conhecido. Não bloqueia nada — avisa e pede dupla conferência.</p>
+      <div class="tags"><span class="tag medio">esforço médio</span><span class="tag">impacto: evita prejuízo direto</span></div>
+    </div>
+
+    <div class="item">
+      <div class="item-topo"><div class="medalha">8</div><div class="item-titulo">Detector de oportunidade comercial</div></div>
+      <p>Marca quem está pedindo orçamento ou querendo contratar, para não se perder entre boleto
+      e propaganda.</p>
+      <div class="prova"><b>Ressalva honesta:</b> nesta amostra só 2 mensagens seriam comerciais.
+      O valor não está no volume — está em não perder <i>a</i> que aparecer.</div>
+      <div class="tags"><span class="tag leve">esforço baixo</span><span class="tag">impacto imprevisível</span></div>
+    </div>
+
+    <div class="item">
+      <div class="item-topo"><div class="medalha">9</div><div class="item-titulo">Aviso no WhatsApp quando algo urgente fica parado</div></div>
+      <p>E-mail urgente do setor sem resposta em X horas manda WhatsApp para o gerente daquele
+      setor. O app já é de WhatsApp — é o cruzamento que nenhum concorrente tem.</p>
+      <div class="prova"><b>Já está meio pronto:</b> a tabela <span class="mono">sector_alert_targets</span>
+      já tem 2 gerentes por setor cadastrados. Falta só o número de WhatsApp de cada um.</div>
+      <div class="tags"><span class="tag pronto">base pronta</span><span class="tag leve">esforço baixo</span><span class="tag">depende do item 4</span></div>
+    </div>
+
+    <div class="item">
+      <div class="item-topo"><div class="medalha">10</div><div class="item-titulo">Extrair dados de boleto e nota fiscal</div></div>
+      <p>Vencimento, valor, fornecedor e CNPJ saem do anexo e viram campo. Pode alimentar o
+      módulo Financeiro que a empresa já tem.</p>
+      <div class="prova"><b>Ressalva:</b> só 7 das 360 mensagens têm anexo nesta caixa. O volume
+      de verdade deve estar em <span class="mono">financeiro@</span>, que ainda não foi importada
+      — vale medir antes de investir.</div>
+      <div class="tags"><span class="tag pesado">esforço alto</span><span class="tag">medir antes</span></div>
+    </div>
+  </div>
+
+  <!-- ───────────────────────── FINANCEIRO ───────────────────────── -->
+  <div class="card">
+    <div class="setor-cabeca">
+      <h2>💰 Financeiro</h2>
+      <span class="setor-meta">6 pessoas · caixas <span class="mono">financeiro@prndiagnosticos.com.br</span> e <span class="mono">financeiro@clinicamedimagem.com</span></span>
+    </div>
+    <p class="sub">É onde o volume está — e onde o ruído está. Quase metade de tudo que chega é assunto financeiro.</p>
+
+    <div class="item">
+      <div class="item-topo"><div class="medalha ouro">1</div><div class="item-titulo">Um contador no lugar de 163 e-mails</div></div>
+      <p>O Omie manda um e-mail por vez avisando que há pagamento esperando aprovação. Trocar isso
+      por uma faixa no topo da tela — "12 pagamentos aguardando, o mais antigo há 3 dias" — e
+      arquivar os avisos anteriores automaticamente.</p>
+      <div class="prova"><b>Prova:</b> "PRN DIAGNOSTICOS — Existem N pagamentos…" aparece 93 vezes
+      e "MEDIMAGEM — Existem N pagamentos…" 70 vezes. São <b>163 e-mails com o mesmo conteúdo</b>.</div>
+    </div>
+
+    <div class="item">
+      <div class="item-topo"><div class="medalha prata">2</div><div class="item-titulo">Detector de troca de dados bancários</div></div>
+      <p>O golpe clássico contra clínica: alguém se passa por fornecedor conhecido e pede para
+      atualizar a conta de depósito. A IA sinaliza em vermelho e o app exige confirmação por outro
+      canal antes de qualquer pagamento.</p>
+      <div class="prova"><b>Por que aqui:</b> o Financeiro tem 6 pessoas com acesso à mesma caixa.
+      Basta uma acreditar. E o prejuízo é imediato e não volta.</div>
+    </div>
+
+    <div class="item">
+      <div class="item-topo"><div class="medalha bronze">3</div><div class="item-titulo">Fila por vencimento, não por data de chegada</div></div>
+      <p>Ordenar por <i>quando vence</i>, e não por <i>quando chegou</i>. Boleto que vence amanhã
+      sobe; newsletter não entra na fila.</p>
+    </div>
+
+    <div class="item">
+      <div class="item-topo"><div class="medalha">4</div><div class="item-titulo">Quem cuida de qual cobrança</div></div>
+      <p>Com 6 pessoas na mesma caixa, o risco não é ninguém ver — é todo mundo achar que outro
+      já respondeu. Atribuir responsável e mostrar isso na lista resolve.</p>
+    </div>
+  </div>
+
+  <!-- ───────────────────────── ADMINISTRATIVO ───────────────────────── -->
+  <div class="card">
+    <div class="setor-cabeca">
+      <h2>📋 Administrativo</h2>
+      <span class="setor-meta">8 pessoas · caixa <span class="mono">suportelaudos@prndiagnosticos.com.br</span> · 14.341 itens</span>
+    </div>
+    <p class="sub">O setor de maior volume — e o único que já tem IA rodando, só que fora do app.</p>
+
+    <div class="item">
+      <div class="item-topo"><div class="medalha ouro">1</div><div class="item-titulo">Atacar a fila de "Revisão manual"</div></div>
+      <p>A triagem atual joga na pasta <span class="mono">Revisão manual</span> o que não soube
+      decidir — e ali fica. O ganho está em a IA <strong>dizer por que não decidiu</strong>
+      ("faltou o valor estimado", "objeto ambíguo") e aprender com a escolha que a pessoa fizer.</p>
+      <div class="prova"><b>Prova:</b> 72 licitações paradas nessa pasta. Cada uma é uma decisão
+      que ninguém tomou, num assunto onde perder prazo significa perder o negócio.</div>
+    </div>
+
+    <div class="item">
+      <div class="item-topo"><div class="medalha prata">2</div><div class="item-titulo">Trazer a triagem de licitação para dentro</div></div>
+      <p>Hoje o <span class="mono">Email AI Analyzer</span> roda no n8n, separado. Trazer para o
+      Central Whats põe o motivo da decisão ao lado do e-mail, deixa qualquer pessoa do setor ver
+      o critério, e acaba com o "por que isso foi descartado?" que ninguém consegue responder.</p>
+      <div class="prova"><b>Prova:</b> 5.004 na pasta principal, 296 aprovadas, 132 descartadas.
+      A máquina já está decidindo muita coisa — sem ninguém conseguir auditar.</div>
+    </div>
+
+    <div class="item">
+      <div class="item-topo"><div class="medalha bronze">3</div><div class="item-titulo">Currículo não é licitação</div></div>
+      <p>Há currículos chegando na mesma caixa. A IA separa, extrai nome, cargo pretendido e
+      formação, e junta o anexo — vira uma lista de candidatos em vez de e-mail perdido.</p>
+      <div class="prova"><b>Prova:</b> 9 na pasta <span class="mono">Currículos</span>, alguém
+      moveu à mão.</div>
+    </div>
+
+    <div class="item">
+      <div class="item-topo"><div class="medalha">4</div><div class="item-titulo">Faxina nas pastas</div></div>
+      <p>A caixa tem <span class="mono">*Licitações</span> e <span class="mono">LICITAÇÕES</span>,
+      ambas vazias, além de <span class="mono">1. Licitações</span> que é a de verdade. Resíduo de
+      tentativas anteriores. Depois que o app puder mexer em pastas no Outlook, some numa tarde.</p>
+    </div>
+  </div>
+
+  <!-- ───────────────────────── COMERCIAL ───────────────────────── -->
+  <div class="card">
+    <div class="setor-cabeca">
+      <h2>🤝 Comercial</h2>
+      <span class="setor-meta">ainda não existe como setor no sistema</span>
+    </div>
+    <p class="sub">Não tem caixa própria nem gente cadastrada. Por isso entra como detector, e não como setor.</p>
+
+    <div class="item">
+      <div class="item-topo"><div class="medalha ouro">1</div><div class="item-titulo">Marcar oportunidade onde ela cair</div></div>
+      <p>Pedido de orçamento, interesse em convênio, proposta de parceria — a IA marca em qualquer
+      caixa, e o item aparece numa lista única de oportunidades.</p>
+      <div class="prova"><b>Ressalva honesta:</b> na amostra de 360 mensagens, só 2 se
+      encaixariam. O argumento não é volume — é que uma oportunidade perdida no meio de 300
+      avisos de robô custa muito mais que o esforço de detectá-la.</div>
+    </div>
+
+    <div class="item">
+      <div class="item-topo"><div class="medalha prata">2</div><div class="item-titulo">Aviso imediato no WhatsApp</div></div>
+      <p>Oportunidade detectada dispara mensagem no WhatsApp para quem cuida — pelo aparelho do
+      próprio setor, que o app já controla.</p>
+    </div>
+  </div>
+
+  <!-- ───────────────────────── DIREÇÃO ───────────────────────── -->
+  <div class="card">
+    <div class="setor-cabeca">
+      <h2>📊 Direção</h2>
+      <span class="setor-meta">visão de quem precisa enxergar os setores por cima</span>
+    </div>
+
+    <div class="item">
+      <div class="item-topo"><div class="medalha ouro">1</div><div class="item-titulo">Painel de saúde das caixas</div></div>
+      <p>Quanto entra por dia, quanto está sem resposta, há quanto tempo, e em qual setor. É o
+      número que hoje ninguém tem.</p>
+      <div class="prova"><b>O que já daria para mostrar hoje:</b> 4 e-mails/dia na caixa pessoal,
+      83% nunca abertos, 3 remetentes respondendo por metade do volume.</div>
+    </div>
+
+    <div class="item">
+      <div class="item-topo"><div class="medalha prata">2</div><div class="item-titulo">Tempo de resposta por setor</div></div>
+      <p>Quanto o Financeiro demora para responder um fornecedor, quanto o Administrativo demora
+      numa licitação. Serve para cobrar com dado, não com impressão.</p>
+    </div>
+
+    <div class="item">
+      <div class="item-topo"><div class="medalha bronze">3</div><div class="item-titulo">O que a IA está decidindo sozinha</div></div>
+      <p>Uma tela dizendo quantos e-mails foram classificados, quantos foram arquivados por regra
+      e quantos precisaram de humano. Automação sem essa tela vira caixa-preta — e caixa-preta
+      perde a confiança do time na primeira vez que erra.</p>
+    </div>
+  </div>
+
+  <!-- ───────────────────────── AS 4 CLASSIFICAÇÕES ───────────────────────── -->
+  <div class="card">
+    <h2>As quatro coisas que a IA vai identificar</h2>
+    <p class="sub">Escolhidas por você. Todas saem da mesma leitura — a IA lê o e-mail uma vez e devolve as quatro.</p>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th style="width:150px;">Classificação</th><th>O que devolve</th><th>Onde fica</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>Tipo e urgência</strong></td>
+            <td>Categoria (cobrança · laudo · licitação · fornecedor · paciente · propaganda) e urgência de 0 a 3, com o motivo escrito</td>
+            <td><span class="mono">ai_category</span> · <span class="mono">ai_sentiment</span> · <strong>categoria colorida no Outlook</strong></td>
+          </tr>
+          <tr>
+            <td><strong>Oportunidade comercial</strong></td>
+            <td>Sim/não e o que a pessoa quer, em uma frase</td>
+            <td>etiqueta própria + lista de oportunidades</td>
+          </tr>
+          <tr>
+            <td><strong>Resumo de uma linha</strong></td>
+            <td>Uma frase dizendo do que se trata</td>
+            <td><span class="mono">ai_summary</span>, mostrado na lista</td>
+          </tr>
+          <tr>
+            <td><strong>Risco e golpe</strong></td>
+            <td>Sinal vermelho + qual indício disparou</td>
+            <td>faixa de aviso no topo do e-mail</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="aviso bom">
+      <span>🎨</span>
+      <span><strong>A categoria colorida no Outlook é o pulo do gato.</strong> Ela faz a
+      classificação aparecer no Outlook do celular de cada pessoa, sem ninguém abrir o Central
+      Whats. A inteligência sai do nosso app e vira parte da ferramenta que o time já usa.</span>
+    </div>
+  </div>
+
+  <!-- ───────────────────────── CUSTO E RISCO ───────────────────────── -->
+  <div class="card">
+    <h2>Custo e risco, sem maquiagem</h2>
+
+    <h3>Quanto custa</h3>
+    <p style="font-size:15px;">A IA já está contratada e ligada — é a mesma que reescreve texto na
+    tela de conversas (Groq). Classificar 360 e-mails é conta de centavos, e o fluxo em regime é
+    de <strong>4 mensagens por dia</strong> nesta caixa. Custo não é o fator de decisão aqui;
+    esforço de construção é.</p>
+
+    <h3>Quando a IA erra</h3>
+    <p style="font-size:15px;">Ela vai errar. Por isso todas as propostas acima seguem três
+    regras:</p>
+    <div class="passos">
+      <div class="passo">
+        <div class="num">1</div>
+        <div><div class="t">Nada é apagado automaticamente</div>
+        <div class="d">O pior que uma classificação errada faz é mandar um e-mail para a pasta
+        errada — de onde ele volta com um clique. Nenhuma proposta exclui mensagem.</div></div>
+      </div>
+      <div class="passo">
+        <div class="num">2</div>
+        <div><div class="t">A IA sempre mostra por quê</div>
+        <div class="d">Urgência 3 sem motivo escrito é palpite. Com motivo, a pessoa discorda em
+        dois segundos e segue a vida.</div></div>
+      </div>
+      <div class="passo">
+        <div class="num">3</div>
+        <div><div class="t">Sempre dá para ver o que ela fez</div>
+        <div class="d">Uma tela com o que foi classificado e arquivado. Automação sem prestação de
+        contas perde a confiança do time na primeira vez que erra — e não recupera.</div></div>
+      </div>
+    </div>
+
+    <div class="aviso grave">
+      <span>⚠️</span>
+      <span><strong>O que NÃO vamos fazer:</strong> deixar a IA responder e-mail sozinha. Ela pode
+      redigir um rascunho — quem envia é uma pessoa. Numa clínica, um e-mail errado para paciente
+      ou fornecedor custa mais que todo o tempo economizado.</span>
+    </div>
+  </div>
+
+  <!-- ───────────────────────── SEQUÊNCIA ───────────────────────── -->
+  <div class="card">
+    <h2>Sequência sugerida</h2>
+    <p class="sub">Cada etapa entrega valor sozinha. Dá para parar em qualquer uma.</p>
+
+    <div class="passos">
+      <div class="passo">
+        <div class="num">1</div>
+        <div><div class="t">Matar o ruído do Omie e separar robô de gente</div>
+        <div class="d">Esforço baixo, e derruba a caixa de 300 não lidos para algo humano.
+        Não depende de IA nem de permissão nova. <strong>É por aqui que eu começaria.</strong></div></div>
+      </div>
+      <div class="passo">
+        <div class="num">2</div>
+        <div><div class="t">Classificar e resumir tudo que chega</div>
+        <div class="d">Com categoria colorida no Outlook, para valer também no celular. Preenche
+        as colunas que já existem vazias.</div></div>
+      </div>
+      <div class="passo">
+        <div class="num">3</div>
+        <div><div class="t">Fila do que responder hoje, com responsável e prazo</div>
+        <div class="d">Precisa da etapa 2 para saber o que é urgente. Ativa a tabela de estado que
+        já está pronta e vazia.</div></div>
+      </div>
+      <div class="passo">
+        <div class="num">4</div>
+        <div><div class="t">Espelhar pasta e movimentação no Outlook</div>
+        <div class="d">O app deixa de ser uma ilha. Permissão já concedida.</div></div>
+      </div>
+      <div class="passo">
+        <div class="num">5</div>
+        <div><div class="t">Regras escritas pela IA</div>
+        <div class="d">Só depois de liberar <span class="mono">MailboxSettings.ReadWrite</span> no
+        portal — 2 minutos. A partir daí a automação roda 24h por dia na Microsoft, mesmo com o
+        Central Whats desligado.</div></div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    Central Whats — Email Hub · documento interno da PRN Diagnósticos<br>
+    Todos os números vieram de consulta ao banco em 26/08/2026, sobre a caixa
+    <span class="mono">samuel.klaus@</span> (90 dias) e as pastas de <span class="mono">suportelaudos@</span>.
+  </footer>
+
+</div>
+</body>
+</html>

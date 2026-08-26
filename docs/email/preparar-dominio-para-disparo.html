@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Preparar o domínio antes do primeiro disparo — Central Whats</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         background: #f5f5f2; color: #2c2c2a; line-height: 1.7; padding: 32px 20px 64px;
+         -webkit-text-size-adjust: 100%; }
+  .wrap { max-width: 880px; margin: 0 auto; }
+
+  header { text-align: center; margin-bottom: 34px; }
+  header h1 { font-size: 30px; font-weight: 600; margin-bottom: 8px; line-height: 1.3; }
+  header p { color: #5f5e5a; font-size: 17px; }
+  .data { display: inline-block; margin-top: 14px; font-size: 13px; color: #888780;
+          background: #fff; border: 1px solid #d3d1c7; border-radius: 20px; padding: 4px 14px; }
+
+  .card { background: #fff; border: 1px solid #d3d1c7; border-radius: 14px; padding: 28px;
+          margin-bottom: 22px; }
+  .card h2 { font-size: 21px; font-weight: 600; margin-bottom: 6px; }
+  .card .sub { color: #5f5e5a; font-size: 15px; margin-bottom: 22px; }
+  .card h3 { font-size: 17px; font-weight: 600; margin: 26px 0 10px; }
+  .card h3:first-of-type { margin-top: 4px; }
+
+  .passos { counter-reset: p; }
+  .passo { display: flex; gap: 16px; align-items: flex-start; padding: 20px 0;
+           border-bottom: 1px solid #eceae3; }
+  .passo:last-child { border-bottom: none; padding-bottom: 0; }
+  .num { flex-shrink: 0; width: 34px; height: 34px; border-radius: 50%; background: #2c2c2a;
+         color: #fff; display: flex; align-items: center; justify-content: center;
+         font-size: 15px; font-weight: 600; }
+  .passo .corpo { flex: 1; min-width: 0; }
+  .passo .t { font-size: 16px; font-weight: 600; }
+  .passo .d { font-size: 15px; color: #4a4842; margin-top: 4px; }
+
+  .campo { margin-top: 12px; background: #f5f5f2; border: 1px solid #e3e1d8; border-radius: 9px;
+           padding: 12px 14px; }
+  .campo .rot { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: #888780;
+                font-weight: 600; margin-bottom: 4px; }
+  .campo .val { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13.5px;
+                word-break: break-all; line-height: 1.6; }
+
+  .aviso { margin-top: 16px; background: #faeeda; border: 1px solid #fac775; border-radius: 10px;
+           padding: 14px 16px; font-size: 14.5px; color: #633806; display: flex; gap: 11px;
+           line-height: 1.55; }
+  .aviso.grave { background: #fcebeb; border-color: #f09595; color: #791f1f; }
+  .aviso.bom { background: #e1f5ee; border-color: #5dcaa5; color: #085041; }
+  .aviso span:first-child { flex-shrink: 0; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+  th, td { text-align: left; padding: 11px 8px; border-bottom: 1px solid #eceae3; vertical-align: top; }
+  th { font-weight: 600; color: #5f5e5a; font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
+  td:first-child { padding-left: 0; }
+  tr:last-child td { border-bottom: none; }
+  .tw { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .ok   { color: #0f6e56; font-weight: 600; }
+  .ruim { color: #b91c1c; font-weight: 600; }
+  .meio { color: #b45309; font-weight: 600; }
+
+  code, .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13.5px; }
+  code { background: #f0eee8; border-radius: 5px; padding: 2px 7px; }
+
+  .check { list-style: none; }
+  .check li { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid #eceae3;
+              font-size: 15px; line-height: 1.55; }
+  .check li:last-child { border-bottom: none; padding-bottom: 0; }
+  .check .cx { flex-shrink: 0; width: 20px; height: 20px; border: 2px solid #b4b2a9;
+               border-radius: 5px; margin-top: 3px; }
+
+  footer { text-align: center; color: #888780; font-size: 13px; margin-top: 36px; line-height: 1.7; }
+
+  @media print { body { background: #fff; padding: 0; } .card { break-inside: avoid; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Preparar o domínio antes do primeiro disparo</h1>
+    <p>Três ajustes de DNS que decidem se o e-mail chega na caixa de entrada ou no spam</p>
+    <div class="data">26 de agosto de 2026 · leva ~20 minutos, feito uma única vez</div>
+  </header>
+
+  <!-- ───────── POR QUE ───────── -->
+  <div class="card">
+    <h2>Por que isto vem antes</h2>
+    <p class="sub">Não é melhoria. É o que separa "campanha entregue" de "campanha na lixeira".</p>
+
+    <p style="font-size:15.5px; line-height:1.75;">
+      Quando você manda e-mail para 200 pessoas, o servidor de cada uma faz três perguntas antes
+      de decidir onde colocar a mensagem:
+    </p>
+
+    <div class="tw" style="margin-top:14px;">
+      <table>
+        <thead><tr><th style="width:90px;">Pergunta</th><th>O que ela quer saber</th><th>Quem responde</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">SPF</td><td>"Esse servidor tem permissão para enviar em nome desse domínio?"</td><td>um registro no DNS</td></tr>
+          <tr><td class="mono">DKIM</td><td>"A mensagem chegou intacta e assinada?"</td><td>a Microsoft assina; o DNS confirma</td></tr>
+          <tr><td class="mono">DMARC</td><td>"E se as duas respostas anteriores falharem, o que eu faço?"</td><td>um registro no DNS</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="aviso grave">
+      <span>⚠️</span>
+      <span>Desde 2024, <strong>Gmail e Yahoo exigem DMARC</strong> de quem envia para muita
+      gente. Sem esse registro, a campanha vai para spam <strong>mesmo com o texto perfeito</strong> —
+      e o texto não tem nada a ver com isso.</span>
+    </div>
+  </div>
+
+  <!-- ───────── COMO ESTÁ HOJE ───────── -->
+  <div class="card">
+    <h2>Como está hoje</h2>
+    <p class="sub">Conferido no DNS público em 26 de agosto de 2026.</p>
+
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>&nbsp;</th><th>prndiagnosticos.com.br</th><th>clinicamedimagem.com</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>DKIM</strong></td><td class="ok">publicado ✓</td><td class="ok">publicado ✓</td></tr>
+          <tr><td><strong>DMARC</strong></td><td class="ruim">NÃO EXISTE ✗</td><td class="ok">existe ✓</td></tr>
+          <tr><td><strong>SPF</strong></td><td class="meio">existe, mas frouxo</td><td class="ok">limpo ✓</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="aviso">
+      <span>🎯</span>
+      <span>O domínio <strong>principal</strong> é justamente o desprotegido. A
+      <span class="mono">clinicamedimagem.com</span> está bem configurada e serve de modelo —
+      é literalmente copiar o que já foi feito lá.</span>
+    </div>
+  </div>
+
+  <!-- ───────── PASSO A PASSO ───────── -->
+  <div class="card">
+    <h2>O que fazer</h2>
+    <p class="sub">Tudo no painel de DNS de <span class="mono">prndiagnosticos.com.br</span> — onde o domínio foi registrado.</p>
+
+    <div class="passos">
+
+      <div class="passo">
+        <div class="num">1</div>
+        <div class="corpo">
+          <div class="t">Criar o DMARC — o mais importante</div>
+          <div class="d">Adicione um registro <strong>TXT</strong> novo, assim:</div>
+          <div class="campo">
+            <div class="rot">Nome / Host</div>
+            <div class="val">_dmarc</div>
+          </div>
+          <div class="campo">
+            <div class="rot">Valor</div>
+            <div class="val">v=DMARC1; p=none; rua=mailto:dmarc@prndiagnosticos.com.br; pct=100</div>
+          </div>
+          <div class="aviso bom">
+            <span>👀</span>
+            <span><strong>Repare no <span class="mono">p=none</span>.</strong> Significa
+            "observe e me mande relatório, mas não bloqueie nada ainda". É de propósito: publicar
+            direto em modo bloqueio, sem antes ver os relatórios, <strong>derruba e-mail
+            legítimo</strong> que você nem sabia que existia — sistema antigo, formulário do site,
+            disparo de outro fornecedor. Primeiro observa, depois endurece.</span>
+          </div>
+          <div class="d" style="margin-top:12px;">O endereço em <span class="mono">rua=</span> vai
+          receber os relatórios diários. Pode ser uma caixa existente; eles chegam em formato de
+          arquivo, e depois a gente lê juntos.</div>
+        </div>
+      </div>
+
+      <div class="passo">
+        <div class="num">2</div>
+        <div class="corpo">
+          <div class="t">Limpar o SPF</div>
+          <div class="d">Já existe um registro SPF. Ele está assim hoje:</div>
+          <div class="campo">
+            <div class="rot">Como está</div>
+            <div class="val">v=spf1 +a +mx +ip4:177.154.191.132 include:_spf.mail.hostinger.com include:spf.protection.outlook.com ~all</div>
+          </div>
+          <div class="d" style="margin-top:12px;">Três coisas atrapalham aí:</div>
+          <div class="tw" style="margin-top:8px;">
+            <table>
+              <tbody>
+                <tr><td class="mono" style="width:180px;">+a +mx</td><td>autoriza qualquer servidor que apareça nos registros do site a mandar e-mail em nome do domínio. É largo demais.</td></tr>
+                <tr><td class="mono">include:...hostinger...</td><td>a Hostinger ainda pode enviar como vocês. <strong>Só remova se confirmar que nada é enviado de lá</strong> — site, formulário de contato, sistema antigo.</td></tr>
+                <tr><td class="mono">~all</td><td>"se não bater, aceite mesmo assim, só marque". O ideal é <span class="mono">-all</span> — mas só depois de confirmar que nada legítimo ficou de fora.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="campo">
+            <div class="rot">Alvo, quando confirmar que só a Microsoft envia</div>
+            <div class="val">v=spf1 include:spf.protection.outlook.com -all</div>
+          </div>
+          <div class="aviso">
+            <span>🐢</span>
+            <span><strong>Não mexa no SPF no mesmo dia do DMARC.</strong> Faça o DMARC primeiro,
+            espere uma semana de relatórios, veja quem realmente envia em nome do domínio, e só
+            então aperte o SPF. Assim, se algo parar, você sabe o que foi.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="passo">
+        <div class="num">3</div>
+        <div class="corpo">
+          <div class="t">Confirmar que o DKIM está ligado de verdade</div>
+          <div class="d">Os registros do DKIM já estão publicados no DNS — mas publicar apenas
+          <em>habilita</em>. Assinar de fato é um botão no painel da Microsoft.</div>
+          <div class="d" style="margin-top:8px;">
+            Vá em <strong>security.microsoft.com</strong> → <strong>Políticas e regras</strong> →
+            <strong>Políticas de ameaça</strong> → <strong>DKIM</strong>. Escolha
+            <span class="mono">prndiagnosticos.com.br</span> e confirme que está
+            <strong>Habilitado</strong>. Se estiver desligado, ligue.
+          </div>
+          <div class="d" style="margin-top:8px;">Aproveite e confira o mesmo para
+          <span class="mono">clinicamedimagem.com</span>.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ───────── COMO SABER QUE DEU CERTO ───────── -->
+  <div class="card">
+    <h2>Como saber que deu certo</h2>
+    <p class="sub">O DNS demora de alguns minutos a algumas horas para se espalhar. Confira no dia seguinte.</p>
+
+    <ul class="check">
+      <li><span class="cx"></span><span>Mande um e-mail qualquer da sua conta da PRN para um
+      <strong>Gmail</strong> seu.</span></li>
+      <li><span class="cx"></span><span>No Gmail, abra a mensagem, clique nos três pontinhos e
+      escolha <strong>"Mostrar original"</strong>.</span></li>
+      <li><span class="cx"></span><span>No topo tem que aparecer <strong>SPF: PASS</strong>,
+      <strong>DKIM: PASS</strong> e <strong>DMARC: PASS</strong>. Os três.</span></li>
+      <li><span class="cx"></span><span>Se algum aparecer como <span class="mono">FAIL</span> ou
+      <span class="mono">NONE</span>, me mande o print dessa tela — dali dá para ver exatamente o
+      que falta.</span></li>
+    </ul>
+
+    <div class="aviso bom">
+      <span>✅</span>
+      <span>Com os três <strong>PASS</strong>, o domínio está pronto. A partir daí o que decide a
+      entrega é o conteúdo e o comportamento do envio — e disso cuida a ferramenta que estou
+      construindo: uma mensagem por pessoa, ritmo controlado, link de descadastro e lista de
+      quem pediu para não receber mais.</span>
+    </div>
+  </div>
+
+  <!-- ───────── O QUE NÃO FAZER ───────── -->
+  <div class="card">
+    <h2>O que não fazer, nunca</h2>
+    <p class="sub">Cada item aqui já derrubou a reputação de algum domínio.</p>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th style="width:220px;">Tentação</th><th>Por que não</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Pôr as 200 pessoas em cópia oculta</td>
+            <td>É o padrão que todo filtro de spam reconhece de primeira. E ninguém confia num e-mail que não foi endereçado a ele.</td>
+          </tr>
+          <tr>
+            <td>Comprar lista de e-mails</td>
+            <td>Lista comprada tem endereço morto e armadilha de spam. Basta acertar uma armadilha para o domínio inteiro ir para a lista negra — e voltar de lá leva meses.</td>
+          </tr>
+          <tr>
+            <td>Mandar tudo de uma vez</td>
+            <td>O Exchange aceita 30 por minuto. Acima disso ele mesmo segura — e o pico repentino é sinal clássico de conta invadida.</td>
+          </tr>
+          <tr>
+            <td>Tirar o link de descadastro</td>
+            <td>Sem ele, quem não quer receber marca como spam. Descadastro não custa nada; marcação de spam destrói reputação.</td>
+          </tr>
+          <tr>
+            <td>Continuar mandando para quem deu erro</td>
+            <td>Insistir em endereço que não existe é o sinal mais forte de "lista comprada". A ferramenta vai remover sozinha.</td>
+          </tr>
+          <tr>
+            <td>Disparar de madrugada</td>
+            <td>Nenhum humano manda 200 e-mails às 3h. O horário entra na conta de quem avalia o remetente.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <footer>
+    Central Whats — Email Hub · documento interno da PRN Diagnósticos<br>
+    Estado do DNS conferido em 26/08/2026. Refaça a conferência depois de qualquer mudança.
+  </footer>
+
+</div>
+</body>
+</html>

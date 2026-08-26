@@ -11,10 +11,14 @@ export interface EmailAccount {
   smtp_host: string | null
   smtp_port: number
   smtp_use_tls: boolean
-  imap_password_enc: string | null
-  oauth_access_token: string | null
-  oauth_refresh_token: string | null
-  oauth_expires_at: string | null
+  /*
+    Aqui havia `imap_password_enc` e os três campos `oauth_*`. Saíram do banco na
+    migration 20260826124852: o serviço lê esta tabela com `select('*')`, então
+    qualquer credencial guardada aqui viajaria inteira para o navegador de quem
+    tem permissão de ver a conta. Os tokens agora vivem em `email_account_tokens`,
+    que tem RLS sem policy nenhuma — só o service_role alcança, e apenas as edge
+    functions leem de lá.
+  */
   last_sync_at: string | null
   sync_interval: number
   is_active: boolean
@@ -37,6 +41,21 @@ export interface EmailFolder {
   sort_order: number
   is_system: boolean
   created_at: string
+  /* Vindos do Microsoft Graph (migration 20260826140000). */
+  graph_id: string | null
+  /** Aninhamento: é o que faz a árvore ter nível, como no Outlook. */
+  parent_id: string | null
+  /** `inbox` | `drafts` | `sentitems` | `deleteditems` | `junkemail` | `archive` | `outbox` */
+  well_known_name: string | null
+  total_count: number
+  /**
+   * Não lidas SEGUNDO O OUTLOOK, não segundo o que importamos. Como só trazemos
+   * 90 dias, contar as nossas linhas mostraria um número menor que o do Outlook
+   * e pareceria erro.
+   */
+  unread_count: number
+  delta_link: string | null
+  last_sync_at: string | null
 }
 
 export interface EmailAttachment {
@@ -77,6 +96,34 @@ export interface Email {
   contact_id: string | null
   received_at: string
   created_at: string
+  /* Vindos do Microsoft Graph (migration 20260826140000). */
+  graph_id: string | null
+  internet_message_id: string | null
+  /** Como o Outlook agrupa a conversa. */
+  conversation_id: string | null
+  has_attachments: boolean
+  /** `low` | `normal` | `high` */
+  importance: string | null
+  is_draft: boolean
+  /** Abre a mensagem no Outlook web. */
+  web_link: string | null
+  /** Primeira linha do corpo, que a lista mostra em cinza. Vem pronto do Graph. */
+  body_preview: string | null
+}
+
+/** Uma linha de `email_attachments`: a ficha do anexo, sem o conteúdo. */
+export interface EmailAttachmentRow {
+  id: string
+  email_id: string
+  graph_attachment_id: string
+  name: string
+  mime_type: string | null
+  size: number | null
+  is_inline: boolean
+  content_id: string | null
+  /** Nulo = ainda mora na Microsoft; preenchido = guardado no nosso bucket. */
+  storage_path: string | null
+  guardado_em: string | null
 }
 
 export interface EmailState {

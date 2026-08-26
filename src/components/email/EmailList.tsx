@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Paperclip, Clock, Star, Search, X } from 'lucide-react'
+import { Paperclip, Star, Search, X, Users } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -40,9 +40,19 @@ interface Props {
   onSelect: (id: string) => void
   onSearch: (query: string) => void
   isLoading?: boolean
+  /**
+   * O que a equipe registrou sobre cada e-mail, para a lista mostrar sem abrir.
+   *
+   * Chave é o id do e-mail; `cor` é a da classificação e `pessoas` quantas
+   * foram marcadas. Se essa informação só existisse dentro do e-mail aberto,
+   * ninguém a veria ao varrer a caixa — e organizar não teria serventia.
+   */
+  marcadores?: Record<string, { cor: string | null; pessoas: number }>
 }
 
-export function EmailList({ emails, selectedEmailId, onSelect, onSearch, isLoading }: Props) {
+export function EmailList({
+  emails, selectedEmailId, onSelect, onSearch, isLoading, marcadores = {},
+}: Props) {
   const [searchValue, setSearchValue] = useState('')
 
   function handleSearchChange(value: string) {
@@ -132,20 +142,50 @@ export function EmailList({ emails, selectedEmailId, onSelect, onSearch, isLoadi
                         {email.subject || '(sem assunto)'}
                       </p>
 
-                      {email.ai_summary ? (
+                      {/*
+                        `body_preview` vem pronto do Graph e existe para TODA
+                        mensagem. Antes a prévia saía de `body_text`, que só é
+                        preenchido quando o e-mail é texto puro — ou seja, a
+                        maioria ficava sem prévia nenhuma.
+                      */}
+                      {email.ai_summary || email.body_preview || email.body_text ? (
                         <p className="text-xs text-muted-foreground truncate mt-0.5">
-                          {email.ai_summary}
-                        </p>
-                      ) : email.body_text ? (
-                        <p className="text-xs text-muted-foreground truncate mt-0.5">
-                          {email.body_text.slice(0, 80)}
+                          {email.ai_summary ?? email.body_preview ?? email.body_text?.slice(0, 120)}
                         </p>
                       ) : null}
 
                       {/* Footer: ícones */}
                       <div className="flex items-center gap-2 mt-1">
-                        {email.attachments && email.attachments.length > 0 && (
+                        {/* `has_attachments` vem do Graph; o jsonb `attachments`
+                            ficou sem uso desde a migration 20260826140000. */}
+                        {email.has_attachments && (
                           <Paperclip className="h-3 w-3 text-muted-foreground" />
+                        )}
+                        {email.importance === 'high' && (
+                          <span
+                            className="text-[11px] font-bold leading-none text-red-500"
+                            title="Alta importância"
+                          >
+                            !
+                          </span>
+                        )}
+                        {/* O que a equipe registrou: cor da classificação e
+                            quantas pessoas estão cuidando. */}
+                        {marcadores[email.id]?.cor && (
+                          <span
+                            className="h-2 w-2 shrink-0 rounded-full"
+                            style={{ backgroundColor: marcadores[email.id].cor! }}
+                            title="Classificado pela equipe"
+                          />
+                        )}
+                        {(marcadores[email.id]?.pessoas ?? 0) > 0 && (
+                          <span
+                            className="flex items-center gap-0.5 text-[10px] text-muted-foreground"
+                            title="Pessoas cuidando deste e-mail"
+                          >
+                            <Users className="h-3 w-3" />
+                            {marcadores[email.id].pessoas}
+                          </span>
                         )}
                         {email.is_starred && (
                           <Star className="h-3 w-3 text-yellow-500 fill-yellow-500" />

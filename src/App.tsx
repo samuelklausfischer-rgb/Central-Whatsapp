@@ -40,6 +40,7 @@ import { canAccessFinanceiroTools, canAccessGestaoMedica } from './lib/permissio
 const Index = lazy(() => import('./pages/Index'))
 const ChatHub = lazy(() => import('./pages/ChatHub'))
 const EmailHub = lazy(() => import('./pages/EmailHub'))
+const EmailCampanhas = lazy(() => import('./pages/EmailCampanhas'))
 const EmailAccountSettings = lazy(() => import('./pages/settings/EmailAccountSettings'))
 const CRM = lazy(() => import('./pages/CRM'))
 const Agenda = lazy(() => import('./pages/Agenda'))
@@ -156,6 +157,11 @@ const App = () => {
                 <Route path="/dashboard" element={<Index />} />
                 <Route path="/chat" element={<ChatHub />} />
                 <Route path="/email" element={<EmailHub />} />
+                {/* Disparo para listas. Rota irmã de `/email`, e não uma aba
+                    dentro dele: o Hub é uma tela de três painéis com rolagem
+                    própria, e a de campanhas é um formulário longo — as duas não
+                    cabem no mesmo esqueleto. */}
+                <Route path="/email/campanhas" element={<EmailCampanhas />} />
                 <Route path="/crm" element={<CRM />} />
                 <Route path="/agenda" element={<Agenda />} />
                 <Route path="/notes" element={<Notes />} />

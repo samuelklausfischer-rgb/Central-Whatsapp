@@ -13,6 +13,7 @@ Serve para retomar contexto em outra janela ou sessão sem perder o histórico.
 | `decisoes.md` | Decisões técnicas importantes |
 | `problemas-conhecidos.md` | Bugs, riscos e como reproduzir |
 | `proximos-passos.md` | Ordem para continuar sem perder contexto |
+| `email-hub-estado.md` | Email Hub: o que existe, o que bloqueia e em que ordem atacar |
 
 ## Como usar
 

@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Como conectar os e-mails da empresa ao Central Whats</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f5f5f2;
+    color: #2c2c2a;
+    line-height: 1.7;
+    padding: 32px 20px 64px;
+    -webkit-text-size-adjust: 100%;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+
+  header { text-align: center; margin-bottom: 34px; }
+  header h1 { font-size: 30px; font-weight: 600; margin-bottom: 8px; line-height: 1.3; }
+  header p { color: #5f5e5a; font-size: 17px; }
+  .data { display: inline-block; margin-top: 14px; font-size: 13px; color: #888780;
+          background: #fff; border: 1px solid #d3d1c7; border-radius: 20px; padding: 4px 14px; }
+
+  .card { background: #fff; border: 1px solid #d3d1c7; border-radius: 14px;
+          padding: 28px; margin-bottom: 22px; }
+  .card h2 { font-size: 21px; font-weight: 600; margin-bottom: 6px; }
+  .card .sub { color: #5f5e5a; font-size: 15px; margin-bottom: 22px; }
+  .card h3 { font-size: 17px; font-weight: 600; margin: 26px 0 10px; }
+
+  /* etiqueta de fase */
+  .fase { display: inline-flex; align-items: center; gap: 7px; font-size: 12px;
+          font-weight: 600; text-transform: uppercase; letter-spacing: .5px;
+          border-radius: 20px; padding: 4px 12px; margin-bottom: 12px; }
+  .fase.agora  { background: #e1f5ee; color: #085041; border: 1px solid #5dcaa5; }
+  .fase.depois { background: #f0eee8; color: #6b6862; border: 1px solid #d3d1c7; }
+
+  /* aviso do topo */
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 720px) { .duo { grid-template-columns: 1fr; } }
+
+  .box { border-radius: 12px; padding: 22px; }
+  .box h3 { font-size: 17px; font-weight: 600; margin: 0 0 8px;
+            display: flex; align-items: center; gap: 9px; }
+  .box p { font-size: 15px; line-height: 1.6; }
+  .box ul { list-style: none; margin-top: 10px; }
+  .box li { display: flex; gap: 9px; margin-bottom: 8px; font-size: 15px; line-height: 1.55; }
+  .box li span:first-child { flex-shrink: 0; }
+  .bom  { background: #e1f5ee; border: 1px solid #5dcaa5; color: #085041; }
+  .neutro { background: #f0eee8; border: 1px solid #d3d1c7; color: #4a4842; }
+
+  /* checklist */
+  .check { list-style: none; }
+  .check li { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid #eceae3;
+              font-size: 15px; line-height: 1.55; }
+  .check li:last-child { border-bottom: none; padding-bottom: 0; }
+  .check .cx { flex-shrink: 0; width: 20px; height: 20px; border: 2px solid #b4b2a9;
+               border-radius: 5px; margin-top: 3px; }
+
+  /* índice */
+  .indice { list-style: none; counter-reset: ix; }
+  .indice li { display: flex; gap: 14px; align-items: baseline; padding: 11px 0;
+               border-bottom: 1px solid #eceae3; font-size: 15px; }
+  .indice li:last-child { border-bottom: none; padding-bottom: 0; }
+  .indice a { color: #2c2c2a; text-decoration: none; font-weight: 500; }
+  .indice a:hover { text-decoration: underline; }
+  .indice .tag { margin-left: auto; font-size: 12px; color: #888780; white-space: nowrap;
+                 padding-left: 12px; }
+  .indice .pn { flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%;
+                background: #2c2c2a; color: #fff; font-size: 13px; font-weight: 600;
+                display: flex; align-items: center; justify-content: center; }
+  .indice .pn.cinza { background: #b4b2a9; }
+
+  /* passos */
+  .passos { counter-reset: p; margin-top: 4px; }
+  .passo { display: flex; gap: 16px; align-items: flex-start; padding: 20px 0;
+           border-bottom: 1px solid #eceae3; }
+  .passo:last-child { border-bottom: none; padding-bottom: 0; }
+  .num { flex-shrink: 0; width: 34px; height: 34px; border-radius: 50%;
+         background: #2c2c2a; color: #fff; display: flex; align-items: center;
+         justify-content: center; font-size: 15px; font-weight: 600; }
+  .passo .corpo { min-width: 0; flex: 1; }
+  .passo .t { font-size: 16px; font-weight: 600; }
+  .passo .d { font-size: 15px; color: #4a4842; margin-top: 4px; }
+  .passo .en { font-size: 13px; color: #888780; margin-top: 5px; }
+  .passo .en b { font-weight: 600; color: #6b6862; }
+
+  code, .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13.5px; }
+  code { background: #f0eee8; border-radius: 5px; padding: 2px 7px; }
+
+  .campo { margin-top: 10px; background: #f5f5f2; border: 1px solid #e3e1d8;
+           border-radius: 9px; padding: 12px 14px; }
+  .campo .rot { font-size: 12px; text-transform: uppercase; letter-spacing: .5px;
+                color: #888780; font-weight: 600; margin-bottom: 4px; }
+  .campo .val { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13.5px;
+                word-break: break-all; line-height: 1.5; }
+  .campo .val.grande { font-size: 15px; }
+
+  .aviso { margin-top: 16px; background: #faeeda; border: 1px solid #fac775;
+           border-radius: 10px; padding: 14px 16px; font-size: 14.5px; color: #633806;
+           display: flex; gap: 11px; line-height: 1.55; }
+  .aviso.grave { background: #fcebeb; border-color: #f09595; color: #791f1f; }
+  .aviso span:first-child { flex-shrink: 0; }
+
+  /* cofre */
+  .cofre { background: #2c2c2a; border-radius: 14px; padding: 28px; margin-bottom: 22px;
+           color: #f5f5f2; }
+  .cofre h2 { font-size: 21px; font-weight: 600; margin-bottom: 6px; color: #fff; }
+  .cofre .sub { color: #b4b2a9; font-size: 15px; margin-bottom: 20px; }
+  .cofre .item { background: #3a3a37; border: 1px solid #4d4c48; border-radius: 10px;
+                 padding: 14px 16px; margin-bottom: 12px; }
+  .cofre .item:last-of-type { margin-bottom: 0; }
+  .cofre .rot { font-size: 12px; text-transform: uppercase; letter-spacing: .5px;
+                color: #b4b2a9; font-weight: 600; }
+  .cofre .val { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px;
+                margin-top: 5px; word-break: break-all; color: #fff; }
+  .cofre .obs { font-size: 13px; color: #b4b2a9; margin-top: 6px; line-height: 1.5; }
+  .cofre .linha { border: none; border-top: 1px solid #4d4c48; margin: 20px 0 16px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+  th, td { text-align: left; padding: 12px 8px; border-bottom: 1px solid #eceae3;
+           vertical-align: top; }
+  th { font-weight: 600; color: #5f5e5a; font-size: 12px; text-transform: uppercase;
+       letter-spacing: .4px; }
+  td:first-child { padding-left: 0; }
+  tr:last-child td { border-bottom: none; }
+  .tw { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .erro-cod { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px;
+              white-space: nowrap; font-weight: 600; }
+
+  /* dicionário */
+  .dic { list-style: none; }
+  .dic li { padding: 11px 0; border-bottom: 1px solid #eceae3; font-size: 15px; line-height: 1.6; }
+  .dic li:last-child { border-bottom: none; padding-bottom: 0; }
+  .dic b { font-weight: 600; }
+
+  footer { text-align: center; color: #888780; font-size: 13px; margin-top: 36px; line-height: 1.7; }
+
+  @media print {
+    body { background: #fff; padding: 0; }
+    .card, .cofre { break-inside: avoid; page-break-inside: avoid; }
+    .cofre { background: #fff; color: #2c2c2a; border: 2px solid #2c2c2a; }
+    .cofre h2, .cofre .val { color: #2c2c2a; }
+    .cofre .sub, .cofre .rot, .cofre .obs { color: #5f5e5a; }
+    .cofre .item { background: #f5f5f2; border-color: #d3d1c7; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Como conectar os e-mails da empresa ao Central Whats</h1>
+    <p>Passo a passo completo — não é preciso entender de programação</p>
+    <div class="data">Escrito em 26 de agosto de 2026</div>
+  </header>
+
+  <!-- ───────────────────────── LEIA PRIMEIRO ───────────────────────── -->
+  <div class="card">
+    <h2>Leia isto antes de começar</h2>
+    <p class="sub">São quatro partes. Duas você já pode fazer hoje; duas dependem de uma tela que ainda estamos construindo.</p>
+
+    <div class="duo">
+      <div class="box bom">
+        <h3><span>✅</span> Partes 1 e 2 — pode fazer agora</h3>
+        <p>Tudo acontece <strong>no site da Microsoft</strong>. Não depende de nada do nosso lado. Ao terminar, você terá três códigos guardados, e é isso que destrava o resto do projeto.</p>
+      </div>
+      <div class="box neutro">
+        <h3><span>🕐</span> Partes 3 e 4 — ainda não</h3>
+        <p>Descrevem como será conectar cada caixa <strong>dentro do Central Whats</strong>. A tela ainda não existe. Estão aqui para você saber onde isso vai dar — <strong>não procure esses botões hoje</strong>, você não vai encontrar.</p>
+      </div>
+    </div>
+
+    <div class="aviso">
+      <span>💡</span>
+      <span>Se você só quer destravar o projeto e não tem tempo agora, faça a <strong>Parte 1</strong>. São cerca de 10 minutos e é o único trecho que ninguém além de você consegue fazer.</span>
+    </div>
+  </div>
+
+  <!-- ───────────────────────── O QUE VAI ACONTECER ───────────────────────── -->
+  <div class="card">
+    <h2>O que estamos fazendo, em uma frase</h2>
+    <p class="sub">Dando ao Central Whats permissão para ler e responder as caixas de e-mail da empresa.</p>
+
+    <p style="font-size:15.5px; line-height:1.75;">
+      Hoje os e-mails da PRN ficam na Microsoft (Outlook / Microsoft 365). Para o Central Whats
+      mostrar esses e-mails, a Microsoft precisa saber que ele existe e que tem autorização.
+      É como <strong>cadastrar um funcionário novo na portaria</strong>: primeiro você registra
+      quem ele é (Parte 1), depois entrega o crachá para quem vai usar (Parte 2), e só então ele
+      consegue abrir cada porta (Partes 3 e 4).
+    </p>
+
+    <div class="aviso">
+      <span>🔐</span>
+      <span><strong>Nenhuma senha de e-mail fica guardada no nosso sistema.</strong> A pessoa digita a senha na tela da própria Microsoft, e o que volta para nós é uma autorização revogável — que você pode cancelar a qualquer momento no painel da Microsoft, sem trocar senha nenhuma.</span>
+    </div>
+  </div>
+
+  <!-- ───────────────────────── ANTES DE COMEÇAR ───────────────────────── -->
+  <div class="card">
+    <h2>Antes de começar</h2>
+    <p class="sub">Confira se tem tudo em mãos. Faltando um item, você trava no meio.</p>
+
+    <ul class="check">
+      <li>
+        <span class="cx"></span>
+        <span><strong>Acesso de Administrador Global do Microsoft 365</strong> da PRN. Sem isso o
+        botão do passo 10 fica cinza e não há como continuar.</span>
+      </li>
+      <li>
+        <span class="cx"></span>
+        <span><strong>Cerca de 15 minutos sem interrupção.</strong> Um dos códigos aparece uma
+        única vez na tela — se você sair no meio, tem que refazer aquele trecho.</span>
+      </li>
+      <li>
+        <span class="cx"></span>
+        <span><strong>Um lugar seguro para anotar três códigos.</strong> Gerenciador de senhas ou
+        cofre da empresa. Não serve bloco de notas, WhatsApp ou e-mail para si mesmo.</span>
+      </li>
+      <li>
+        <span class="cx"></span>
+        <span><strong>Um computador</strong>, não o celular. O painel da Microsoft é apertado
+        demais em tela pequena.</span>
+      </li>
+    </ul>
+
+    <h3>Confirme que você está no lugar certo</h3>
+    <p style="font-size:15px; color:#4a4842;">A PRN tem <strong>duas marcas de e-mail no mesmo
+    ambiente</strong> da Microsoft. Já verificamos: <code>prndiagnosticos.com.br</code> e
+    <code>clinicamedimagem.com</code> vivem no mesmo lugar, então <strong>um cadastro só atende
+    os dois</strong>. Ao entrar no painel, confira se o código abaixo bate com o que aparece na
+    tela — se não bater, você entrou com a conta errada.</p>
+
+    <div class="campo">
+      <div class="rot">ID do Diretório (locatário) — esperado</div>
+      <div class="val grande">ec5a76d5-4773-4c5f-ae34-e667576941ae</div>
+    </div>
+  </div>
+
+  <!-- ───────────────────────── ÍNDICE ───────────────────────── -->
+  <div class="card">
+    <h2>As quatro partes</h2>
+    <p class="sub">Nesta ordem. Cada uma depende da anterior.</p>
+    <ul class="indice">
+      <li><span class="pn">1</span><a href="#parte1">Registrar o Central Whats na Microsoft</a><span class="tag">hoje · ~10 min · só você</span></li>
+      <li><span class="pn">2</span><a href="#parte2">Entregar os três códigos</a><span class="tag">hoje · ~2 min</span></li>
+      <li><span class="pn cinza">3</span><a href="#parte3">Conectar as caixas dos setores</a><span class="tag">depois · ~3 min por caixa</span></li>
+      <li><span class="pn cinza">4</span><a href="#parte4">Cada pessoa conecta a própria conta</a><span class="tag">depois · ~1 min</span></li>
+    </ul>
+  </div>
+
+  <!-- ───────────────────────── PARTE 1 ───────────────────────── -->
+  <div class="card" id="parte1">
+    <span class="fase agora">● Pode fazer hoje</span>
+    <h2>Parte 1 — Registrar o Central Whats na Microsoft</h2>
+    <p class="sub">Uma vez só, para a empresa inteira. Você nunca mais vai precisar repetir isso.</p>
+
+    <div class="aviso">
+      <span>🌐</span>
+      <span>O painel da Microsoft alterna entre português e inglês sem avisar. Em cada passo, o
+      texto pequeno em cinza traz <b>o nome do botão em inglês</b>, caso a sua tela esteja assim.</span>
+    </div>
+
+    <div class="passos">
+
+      <div class="passo">
+        <div class="num">1</div>
+        <div class="corpo">
+          <div class="t">Abra o painel da Microsoft</div>
+          <div class="d">Vá para <code>entra.microsoft.com</code> e entre com a sua conta de
+          administrador. Se já estiver logado com outra conta, use uma janela anônima — é o erro
+          mais comum deste passo.</div>
+        </div>
+      </div>
+
+      <div class="passo">
+        <div class="num">2</div>
+        <div class="corpo">
+          <div class="t">Encontre a lista de aplicativos</div>
+          <div class="d">No menu da esquerda, procure <strong>Registros de aplicativo</strong>.
+          Dependendo da versão do painel, ele fica solto no menu ou dentro de
+          <strong>Aplicativos</strong> / <strong>Entra ID</strong>. Se não achar, use a busca do
+          topo da página e digite <em>registros de aplicativo</em>.</div>
+          <div class="en">Em inglês: <b>App registrations</b>, às vezes dentro de
+          <b>Applications</b></div>
+        </div>
+      </div>
+
+      <div class="passo">
+        <div class="num">3</div>
+        <div class="corpo">
+          <div class="t">Clique em “Novo registro”</div>
+          <div class="d">Fica no topo da tela, com um sinal de <strong>+</strong> na frente.</div>
+          <div class="en">Em inglês: <b>New registration</b></div>
+        </div>
+      </div>
+
+      <div class="passo">
+        <div class="num">4</div>
+        <div class="corpo">
+          <div class="t">Dê o nome</div>
+          <div class="d">No campo <strong>Nome</strong>, escreva exatamente:</div>
+          <div class="campo">
+            <div class="rot">Nome do aplicativo</div>
+            <div class="val grande">Central Whats — Email Hub</div>
+          </div>
+          <div class="en">Esse nome é só para você reconhecer depois na lista. Não afeta nada.</div>
+        </div>
+      </div>
+
+      <div class="passo">
+        <div class="num">5</div>
+        <div class="corpo">
+          <div class="t">Escolha quem pode usar</div>
+          <div class="d">Em <strong>Tipos de conta com suporte</strong>, abra a lista suspensa e
+          escolha a opção que menciona <strong>um locatário só</strong> — hoje ela aparece como
+          <strong>“Somente um locatário – PRN”</strong>. É a que limita o acesso à empresa;
+          as outras três abririam para qualquer organização do mundo.</div>
+          <div class="en">Em inglês: <b>Single tenant only – …</b>. Se a sua tela ainda mostrar o
+          nome antigo, é a mesma coisa: <b>Contas somente neste diretório organizacional</b> /
+          <b>Accounts in this organizational directory only</b>. Na dúvida, é sempre a
+          <b>primeira</b> da lista.</div>
+        </div>
+      </div>
+
+      <div class="passo">
+        <div class="num">6</div>
+        <div class="corpo">
+          <div class="t">Preencha o endereço de retorno</div>
+          <div class="d">Ainda na mesma tela, em <strong>URI de Redirecionamento</strong>: na
+          listinha da esquerda escolha <strong>Web</strong>, e no campo ao lado cole o endereço
+          abaixo. <strong>Copie exatamente</strong> — uma letra diferente e a conexão falha
+          depois com um erro que não explica nada.</div>
+          <div class="campo">
+            <div class="rot">URI de redirecionamento (tipo: Web)</div>
+            <div class="val">https://apps-supabase.srofjl.easypanel.host/functions/v1/email-oauth-callback</div>
+          </div>
+          <div class="en">Em inglês: <b>Redirect URI</b> → <b>Web</b>. É para onde a Microsoft
+          devolve a pessoa depois que ela autoriza.</div>
+        </div>
+      </div>
+
+      <div class="passo">
+        <div class="num">7</div>
+        <div class="corpo">
+          <div class="t">Clique em “Registrar” e anote os dois primeiros códigos</div>
+          <div class="d">A tela que abre em seguida é a <strong>Visão geral</strong>. Nela estão
+          dois códigos longos. Copie os dois para o seu cofre:</div>
+          <div class="campo">
+            <div class="rot">1º código — ID do aplicativo (cliente)</div>
+            <div class="val">algo parecido com 3f9a1c02-… — copie o valor da sua tela</div>
+          </div>
+          <div class="campo">
+            <div class="rot">2º código — ID do Diretório (locatário)</div>
+            <div class="val">ec5a76d5-4773-4c5f-ae34-e667576941ae</div>
+          </div>
+          <div class="en">Em inglês: <b>Application (client) ID</b> e <b>Directory (tenant) ID</b>.
+          O segundo já sabemos qual é — se aparecer diferente, pare e me avise.</div>
+        </div>
+      </div>
+
+      <div class="passo">
+        <div class="num">8</div>
+        <div class="corpo">
+          <div class="t">Crie o terceiro código — a senha do aplicativo</div>
+          <div class="d">No menu da esquerda: <strong>Certificados e segredos</strong> → aba
+          <strong>Segredos do cliente</strong> → <strong>Novo segredo do cliente</strong>.
+          Em <strong>Descrição</strong> escreva <code>Central Whats</code>, escolha a validade
+          (veja abaixo) e clique em <strong>Adicionar</strong>.</div>
+          <div class="en">Em inglês: <b>Certificates &amp; secrets</b> → <b>Client secrets</b> →
+          <b>New client secret</b></div>
+          <div class="en" style="margin-top:10px;">
+            <b>Qual validade escolher?</b> O máximo permitido é <b>24 meses</b>. A Microsoft
+            recomenda menos de 12 meses, por segurança — mas quanto mais curto, mais vezes alguém
+            precisa lembrar de renovar, e quando vence os e-mails param sem aviso.
+            <b>Sugestão: 24 meses + lembrete no calendário.</b> Se a política de segurança da
+            empresa exigir menos, use 12 — só não deixe sem lembrete.
+          </div>
+          <div class="aviso grave">
+            <span>⚠️</span>
+            <span>Agora aparecem duas colunas: <strong>Valor</strong> e <strong>ID do Segredo</strong>.
+            Copie a coluna <strong>Valor</strong> — é a de cima, mais comprida.
+            <strong>Ela some assim que você sair ou recarregar a página</strong>, e não há como
+            recuperar: só criar outra. Copie agora, antes de clicar em qualquer coisa.</span>
+          </div>
+          <div class="en" style="margin-top:12px;">Anote também <b>a data de vencimento</b> e crie
+          um lembrete no calendário para uns 30 dias antes. No dia em que esse código vencer, os
+          e-mails param de chegar no Central Whats sem nenhum aviso.</div>
+        </div>
+      </div>
+
+      <div class="passo">
+        <div class="num">9</div>
+        <div class="corpo">
+          <div class="t">Diga o que o Central Whats pode fazer</div>
+          <div class="d">No menu da esquerda: <strong>Permissões de API</strong> →
+          <strong>Adicionar uma permissão</strong> → <strong>Microsoft Graph</strong> →
+          <strong>Permissões delegadas</strong>. Use a caixa de busca e marque estas cinco,
+          uma de cada vez:</div>
+          <div class="campo">
+            <div class="rot">As cinco permissões</div>
+            <div class="val" style="line-height:1.9;">
+              offline_access<br>
+              User.Read<br>
+              Mail.Read<br>
+              Mail.ReadWrite<br>
+              Mail.Send
+            </div>
+          </div>
+          <div class="en">Em inglês: <b>API permissions</b> → <b>Add a permission</b> →
+          <b>Microsoft Graph</b> → <b>Delegated permissions</b>. Ao terminar, clique em
+          <b>Adicionar permissões</b> (<b>Add permissions</b>). O <code>User.Read</code> pode já
+          estar na lista — se estiver, ótimo, não precisa marcar de novo.</div>
+        </div>
+      </div>
+
+      <div class="passo">
+        <div class="num">10</div>
+        <div class="corpo">
+          <div class="t">Aprove tudo de uma vez</div>
+          <div class="d">Ainda na tela de permissões, clique no botão
+          <strong>“Conceder consentimento do administrador para…”</strong> e confirme com
+          <strong>Sim</strong>. É aqui que o seu acesso de administrador é usado — e é o passo
+          que ninguém além de você consegue fazer.</div>
+          <div class="en">Em inglês: <b>Grant admin consent for…</b></div>
+          <div class="aviso">
+            <span>✅</span>
+            <span><strong>Como saber que deu certo:</strong> clique em <strong>Atualizar</strong>
+            (<span class="mono">Refresh</span>) e olhe a coluna <strong>Status</strong>: as cinco
+            linhas precisam mostrar <strong>“Concedido para PRN”</strong> com um ✓ verde.
+            Se alguma continuar com um triângulo laranja de aviso, o consentimento não passou —
+            clique no botão de novo.</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ───────────────────────── COFRE ───────────────────────── -->
+  <div class="cofre">
+    <h2>🔐 O cofre — os três códigos</h2>
+    <p class="sub">Ao terminar a Parte 1, você tem estes três valores. São eles que fazem tudo funcionar.</p>
+
+    <div class="item">
+      <div class="rot">1 · ID do aplicativo (cliente)</div>
+      <div class="val">_______________________________________</div>
+      <div class="obs">Não é segredo. Pode circular por e-mail sem problema.</div>
+    </div>
+
+    <div class="item">
+      <div class="rot">2 · ID do Diretório (locatário)</div>
+      <div class="val">ec5a76d5-4773-4c5f-ae34-e667576941ae</div>
+      <div class="obs">Este já sabemos. Serve para conferir que você registrou no lugar certo.</div>
+    </div>
+
+    <div class="item">
+      <div class="rot">3 · Segredo do cliente — o VALOR</div>
+      <div class="val">_______________________________________</div>
+      <div class="obs">Este é a senha. Quem tiver esse código consegue ler o e-mail da empresa inteira. Vence em: ____ / ____ / ________</div>
+    </div>
+
+    <hr class="linha">
+    <p style="font-size:14.5px; color:#e8e6df; line-height:1.65;">
+      <strong style="color:#fff;">Se o terceiro código vazar</strong>, a correção é rápida e não
+      afeta ninguém: volte em <em>Certificados e segredos</em>, apague o segredo comprometido e
+      crie outro. As senhas dos e-mails não mudam e ninguém precisa fazer nada.
+    </p>
+  </div>
+
+  <!-- ───────────────────────── PARTE 2 ───────────────────────── -->
+  <div class="card" id="parte2">
+    <span class="fase agora">● Pode fazer hoje</span>
+    <h2>Parte 2 — Guardar os três códigos</h2>
+    <p class="sub">Por enquanto é só guardar bem. Instalar no servidor é um passo separado, e delicado.</p>
+
+    <div class="aviso grave">
+      <span>🛑</span>
+      <span><strong>Não instale os códigos no servidor agora.</strong> O servidor do Central Whats
+      tem um problema conhecido e ainda não resolvido: mexer nas configurações dele obriga a
+      reiniciar peças do sistema, e hoje isso <strong>derruba o serviço</strong> (já aconteceu, e
+      ficou 1 hora fora do ar). Além disso não adiantaria nada agora — a parte do programa que vai
+      usar esses códigos ainda não existe.</span>
+    </div>
+
+    <h3>O que fazer agora</h3>
+    <ul class="check">
+      <li>
+        <span class="cx"></span>
+        <span>Salvar os <strong>três códigos</strong> no gerenciador de senhas ou no cofre da
+        empresa.</span>
+      </li>
+      <li>
+        <span class="cx"></span>
+        <span>Anotar junto a <strong>data de vencimento</strong> do terceiro código e criar o
+        lembrete no calendário.</span>
+      </li>
+      <li>
+        <span class="cx"></span>
+        <span>Avisar que a Parte 1 terminou. A instalação no servidor será feita junto com a
+        construção da tela, com cuidado e num momento combinado.</span>
+      </li>
+    </ul>
+
+    <h3>Quando chegar a hora</h3>
+    <p style="font-size:15px; line-height:1.7;">Os códigos vão para o servidor, num lugar próprio
+    para segredos — nunca no programa, nunca no repositório de código, nunca dentro do aplicativo
+    instalado no computador das pessoas. Lá eles terão estes nomes:</p>
+
+    <div class="campo">
+      <div class="rot">Onde cada código vai (no futuro)</div>
+      <div class="val" style="line-height:2;">
+        MS_CLIENT_ID &nbsp;→ &nbsp;1º código (ID do aplicativo)<br>
+        MS_TENANT_ID &nbsp;→ &nbsp;2º código (ID do diretório)<br>
+        MS_CLIENT_SECRET &nbsp;→ &nbsp;3º código (o Valor do segredo)
+      </div>
+    </div>
+
+    <div class="aviso grave">
+      <span>🚫</span>
+      <span><strong>Nunca mande o terceiro código por WhatsApp, e-mail ou mensagem</strong> —
+      nem para mim, nem para ninguém. Essas conversas ficam gravadas para sempre e são copiadas
+      para vários aparelhos. Ele é digitado direto no painel do servidor, na hora da instalação.</span>
+    </div>
+  </div>
+
+  <!-- ───────────────────────── PARTE 3 ───────────────────────── -->
+  <div class="card" id="parte3">
+    <span class="fase depois">○ Depois — a tela ainda será construída</span>
+    <h2>Parte 3 — Conectar as caixas dos setores</h2>
+    <p class="sub">Uma vez por caixa. Quem faz é um administrador do Central Whats.</p>
+
+    <p style="font-size:15px; line-height:1.7;">“Caixa de setor” é um e-mail que
+    <strong>pertence ao time, não a uma pessoa</strong>. Ao conectar uma, todo mundo daquele setor
+    passa a ver e responder aqueles e-mails de dentro do Central Whats. É o que faz o financeiro
+    parar de depender de uma pessoa só ter a caixa aberta.</p>
+
+    <h3>O que será conectado</h3>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>Caixa</th><th>Setor</th><th>Quem passa a ver</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono">financeiro@prndiagnosticos.com.br</td>
+            <td>Financeiro</td>
+            <td>as 6 pessoas do Financeiro</td>
+          </tr>
+          <tr>
+            <td class="mono">financeiro@clinicamedimagem.com</td>
+            <td>Financeiro</td>
+            <td>as 6 pessoas do Financeiro</td>
+          </tr>
+          <tr>
+            <td class="mono">suportelaudos@prndiagnosticos.com.br</td>
+            <td>Administrativo</td>
+            <td>as 8 pessoas do Administrativo</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="aviso">
+      <span>👥</span>
+      <span>O setor é o que decide quem enxerga a caixa — <strong>quem entra no setor depois passa
+      a ver os e-mails antigos também</strong>. Vale conferir a lista de pessoas de cada setor
+      antes de conectar, principalmente no Administrativo, que tem 8.</span>
+    </div>
+
+    <h3>Como será, passo a passo</h3>
+    <div class="passos">
+      <div class="passo">
+        <div class="num">1</div>
+        <div class="corpo">
+          <div class="t">No Central Whats: Configurações → Contas de E-mail</div>
+          <div class="d">Clique em <strong>Conectar caixa do setor</strong>.</div>
+        </div>
+      </div>
+      <div class="passo">
+        <div class="num">2</div>
+        <div class="corpo">
+          <div class="t">Preencha o apelido e escolha o setor</div>
+          <div class="d">Apelido é o que aparece na lista para as pessoas — por exemplo
+          “Financeiro PRN”. O setor vem da tabela acima.</div>
+        </div>
+      </div>
+      <div class="passo">
+        <div class="num">3</div>
+        <div class="corpo">
+          <div class="t">Clique em “Entrar com a Microsoft”</div>
+          <div class="d">Abre a tela de login da própria Microsoft — a mesma de sempre.</div>
+          <div class="aviso grave">
+            <span>⚠️</span>
+            <span><strong>Entre com o e-mail e a senha DA CAIXA</strong> — por exemplo
+            <span class="mono">financeiro@prndiagnosticos.com.br</span> — e
+            <strong>não com a sua conta pessoal</strong>. Se você entrar com a sua, quem vai ser
+            conectada é a <em>sua</em> caixa, e o setor inteiro passa a ver o seu e-mail.
+            Se estiver logado com a sua conta, clique em “Usar outra conta”.</span>
+          </div>
+        </div>
+      </div>
+      <div class="passo">
+        <div class="num">4</div>
+        <div class="corpo">
+          <div class="t">Confirme a autorização</div>
+          <div class="d">A Microsoft mostra o que o Central Whats vai poder fazer. Clique em
+          <strong>Aceitar</strong>. A janela fecha sozinha e a caixa aparece na lista.</div>
+        </div>
+      </div>
+      <div class="passo">
+        <div class="num">5</div>
+        <div class="corpo">
+          <div class="t">Repita para as outras caixas</div>
+          <div class="d">Três caixas, três vezes. Entre uma e outra, confirme que saiu da conta
+          anterior — é aqui que quase todo mundo conecta a caixa errada.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ───────────────────────── PARTE 4 ───────────────────────── -->
+  <div class="card" id="parte4">
+    <span class="fase depois">○ Depois — a tela ainda será construída</span>
+    <h2>Parte 4 — Cada pessoa conecta a própria conta</h2>
+    <p class="sub">Cada funcionário faz o seu, sozinho, em menos de um minuto.</p>
+
+    <div class="duo">
+      <div class="box neutro">
+        <h3><span>👥</span> Caixa de setor</h3>
+        <p><strong>O time inteiro vê.</strong> Quem conecta é um administrador. Serve para
+        endereços como <span class="mono">financeiro@</span>, que são da empresa e não de
+        ninguém.</p>
+      </div>
+      <div class="box bom">
+        <h3><span>👤</span> Conta pessoal</h3>
+        <p><strong>Só você vê.</strong> Você mesmo conecta. É o seu
+        <span class="mono">seunome@prndiagnosticos.com.br</span> — ninguém mais tem acesso, nem o
+        administrador.</p>
+      </div>
+    </div>
+
+    <h3 style="margin-top:26px;">Como será, passo a passo</h3>
+    <div class="passos">
+      <div class="passo">
+        <div class="num">1</div>
+        <div class="corpo">
+          <div class="t">No Central Whats: Configurações → Contas de E-mail</div>
+          <div class="d">Clique em <strong>Conectar minha conta</strong>.</div>
+        </div>
+      </div>
+      <div class="passo">
+        <div class="num">2</div>
+        <div class="corpo">
+          <div class="t">Entre com a sua conta da empresa</div>
+          <div class="d">O seu e-mail e a sua senha de sempre. Se a empresa pedir aprovação no
+          celular, aprove normalmente.</div>
+        </div>
+      </div>
+      <div class="passo">
+        <div class="num">3</div>
+        <div class="corpo">
+          <div class="t">Aceite e pronto</div>
+          <div class="d">A sua caixa aparece na lista, marcada como pessoal. Para desconectar
+          depois, é um clique no mesmo lugar.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ───────────────────────── ERROS ───────────────────────── -->
+  <div class="card">
+    <h2>Se der errado</h2>
+    <p class="sub">A Microsoft mostra códigos que não explicam nada. Aqui está a tradução.</p>
+
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th style="width:150px;">O que aparece</th><th>O que significa</th><th>O que fazer</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="erro-cod">AADSTS50011</td>
+            <td>O endereço de retorno não bate com o que foi cadastrado.</td>
+            <td>Volte no registro do aplicativo, em <strong>Autenticação</strong>, e confira o URI
+            do passo 6 caractere por caractere. Erro clássico: uma barra <code>/</code> sobrando
+            no final.</td>
+          </tr>
+          <tr>
+            <td class="erro-cod">AADSTS65001</td>
+            <td>Ninguém aprovou as permissões ainda.</td>
+            <td>Faltou o passo 10. Volte em <strong>Permissões de API</strong> e clique em
+            “Conceder consentimento do administrador”.</td>
+          </tr>
+          <tr>
+            <td class="erro-cod">AADSTS7000215</td>
+            <td>O terceiro código está errado ou já venceu.</td>
+            <td>Quase sempre é ter copiado a coluna <strong>ID do Segredo</strong> em vez de
+            <strong>Valor</strong>. Como o Valor não pode ser visto de novo, crie um segredo novo
+            e refaça a Parte 2.</td>
+          </tr>
+          <tr>
+            <td class="erro-cod">AADSTS700016</td>
+            <td>A Microsoft não encontrou o aplicativo.</td>
+            <td>O 1º ou o 2º código está trocado, ou o registro foi criado em outro ambiente.
+            Confira o ID do diretório contra o que está no cofre.</td>
+          </tr>
+          <tr>
+            <td class="erro-cod">AADSTS50076</td>
+            <td>Está pedindo a segunda verificação (aprovação no celular).</td>
+            <td>Não é erro. Aprove na notificação do celular ou no aplicativo Authenticator e
+            continue.</td>
+          </tr>
+          <tr>
+            <td class="erro-cod">Mailbox not enabled</td>
+            <td>Essa conta não tem caixa de e-mail ativa.</td>
+            <td>A conta existe mas não tem licença de e-mail no Microsoft 365. Ative a licença
+            antes de tentar conectar.</td>
+          </tr>
+          <tr>
+            <td>Conectou<br>a caixa errada</td>
+            <td>Entrou com a conta pessoal no lugar da caixa do setor.</td>
+            <td>Remova a conta na lista do Central Whats e conecte de novo, clicando em
+            <strong>“Usar outra conta”</strong> na tela da Microsoft.</td>
+          </tr>
+          <tr>
+            <td>O botão de<br>aprovar está cinza</td>
+            <td>A sua conta não é Administrador Global.</td>
+            <td>Só um Administrador Global consegue aprovar. Peça para quem tem esse acesso fazer
+            o passo 10 — os passos 1 a 9 já podem estar prontos.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ───────────────────────── DICIONÁRIO ───────────────────────── -->
+  <div class="card">
+    <h2>Dicionário</h2>
+    <p class="sub">As palavras estranhas que aparecem no caminho, em uma frase cada.</p>
+
+    <ul class="dic">
+      <li><b>Locatário (ou <span class="mono">tenant</span>)</b> — o “condomínio” da PRN dentro da
+      Microsoft. Todos os e-mails das duas marcas moram nele.</li>
+      <li><b>Registro de aplicativo</b> — a ficha do Central Whats na portaria da Microsoft.
+      É o que criamos na Parte 1.</li>
+      <li><b>ID do aplicativo (cliente)</b> — o número da ficha. Não é segredo, é só um
+      identificador.</li>
+      <li><b>Segredo do cliente</b> — a senha dessa ficha. É o único dos três códigos que precisa
+      ser guardado a sete chaves.</li>
+      <li><b>URI de redirecionamento</b> — o endereço para onde a Microsoft manda a pessoa de
+      volta depois que ela autoriza. Precisa estar cadastrado antes, senão ela se recusa a
+      devolver.</li>
+      <li><b>Permissão delegada</b> — a autorização vale <em>em nome da pessoa que entrou</em>.
+      Se ela não tem acesso a uma caixa, o Central Whats também não terá.</li>
+      <li><b>Consentimento do administrador</b> — a aprovação única que vale para a empresa toda,
+      para que cada funcionário não precise aprovar nada sozinho.</li>
+      <li><b>Token</b> — o crachá temporário que o Central Whats recebe depois da autorização.
+      Vence sozinho e se renova sozinho. Não é a senha do e-mail.</li>
+    </ul>
+  </div>
+
+  <footer>
+    Central Whats — Email Hub · documento interno da PRN Diagnósticos<br>
+    Dúvida em qualquer passo: pare e pergunte antes de continuar. Refazer é mais caro que perguntar.
+  </footer>
+
+</div>
+</body>
+</html>
