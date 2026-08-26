@@ -210,7 +210,13 @@ export interface AcessoFerramentasExternas {
   licitacoes: boolean
   propostaComercial: boolean
   prnHub: boolean
-  disparador: boolean
+  /**
+   * Entrou em 26/08/2026 no lugar do `disparador`, que saiu. As duas
+   * ferramentas trocaram de lado: o Disparador em massa perdeu o porteiro e
+   * virou de todo mundo; o Controle de Mensagens saiu de super-admin e passou a
+   * ser liberado pessoa a pessoa.
+   */
+  controleMensagens: boolean
 }
 
 export interface GrupoDeFerramentas {
@@ -244,8 +250,16 @@ export function gruposDeFerramentas(
     ...(externas?.relatorios ? [RELATORIOS] : []),
     ...(externas?.licitacoes ? [LICITACOES] : []),
     ...(externas?.prnHub ? [PRN_HUB] : []),
-    ...(externas?.disparador ? [DISPARADOR_EM_MASSA] : []),
-    ...(user?.is_super_admin ? [RELATORIO_APP, CONTROLE_MENSAGENS] : []),
+    // SEM PORTEIRO desde 26/08/2026: o Disparador em massa é de todo mundo. Não
+    // é "liberado para os 19" — é sem gate mesmo, para que quem entrar na equipe
+    // amanhã já tenha, sem ninguém precisar lembrar de liberar.
+    DISPARADOR_EM_MASSA,
+    ...(externas?.controleMensagens ? [CONTROLE_MENSAGENS] : []),
+    // O RELATÓRIO APP CONTINUA SÓ SUPER-ADMIN, e agora sozinho nesta linha.
+    // Ele dividia a linha com o Controle de Mensagens, que saiu para liberação
+    // pessoa a pessoa; o Relatório App fica onde estava porque lê a atividade da
+    // equipe inteira — a razão está no comentário do `SuperAdminRoute`.
+    ...(user?.is_super_admin ? [RELATORIO_APP] : []),
   ]
 
   return [

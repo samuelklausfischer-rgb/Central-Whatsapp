@@ -8,7 +8,21 @@ import supabase from '@/lib/supabase/client'
  * `use-tool-access.tsx` (para o app saber consultar) e na Gestão de Equipe
  * (para alguém conseguir liberar).
  */
-export type ToolName = 'licitacoes' | 'proposta-comercial' | 'prn-hub' | 'disparador-em-massa'
+/**
+ * `disparador-em-massa` SAIU desta união em 26/08/2026: a ferramenta passou a
+ * ser de todo mundo, então não há o que liberar. A linha que sobrou no banco
+ * para o Samuel é inofensiva — ninguém mais a consulta.
+ *
+ * `controle-mensagens` ENTROU no mesmo dia. Ela era de super-admin (só o
+ * Samuel), e o conjunto pedido — Raphaela, Renata, Kezia e Samuel — não é nenhum
+ * setor nem "todo admin": deixa de fora dois dos seis admins. Só liberação
+ * pessoa a pessoa descreve isso.
+ */
+export type ToolName =
+  | 'licitacoes'
+  | 'proposta-comercial'
+  | 'prn-hub'
+  | 'controle-mensagens'
 
 /**
  * Ferramentas liberadas para o usuário logado.

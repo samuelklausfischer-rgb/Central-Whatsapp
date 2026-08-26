@@ -11,8 +11,14 @@ interface ToolAccessValue {
   propostaComercial: boolean
   /** PRN Hub (ITEM 2) — liberado pela chave em public.tool_access. */
   prnHub: boolean
-  /** Disparador em massa — liberado pela chave em public.tool_access. */
-  disparador: boolean
+  /**
+   * Controle de Mensagens — liberado pela chave em public.tool_access.
+   *
+   * Substituiu o `disparador` aqui em 26/08/2026: o Disparador em massa passou a
+   * ser de todo mundo e deixou de ter porteiro, e o Controle de Mensagens fez o
+   * caminho inverso — era de super-admin e virou liberação pessoa a pessoa.
+   */
+  controleMensagens: boolean
   loading: boolean
 }
 
@@ -21,7 +27,7 @@ const ToolAccessContext = createContext<ToolAccessValue>({
   licitacoes: false,
   propostaComercial: false,
   prnHub: false,
-  disparador: false,
+  controleMensagens: false,
   loading: true,
 })
 
@@ -39,7 +45,7 @@ export function ToolAccessProvider({ children }: { children: ReactNode }) {
   const [licitacoes, setLicitacoes] = useState(false)
   const [propostaComercial, setPropostaComercial] = useState(false)
   const [prnHub, setPrnHub] = useState(false)
-  const [disparador, setDisparador] = useState(false)
+  const [controleMensagens, setControleMensagens] = useState(false)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -48,7 +54,7 @@ export function ToolAccessProvider({ children }: { children: ReactNode }) {
       setLicitacoes(false)
       setPropostaComercial(false)
       setPrnHub(false)
-      setDisparador(false)
+      setControleMensagens(false)
       setLoading(false)
       return
     }
@@ -85,7 +91,7 @@ export function ToolAccessProvider({ children }: { children: ReactNode }) {
       setLicitacoes(tudo || liberadas.includes('licitacoes'))
       setPropostaComercial(tudo || liberadas.includes('proposta-comercial'))
       setPrnHub(tudo || liberadas.includes('prn-hub'))
-      setDisparador(tudo || liberadas.includes('disparador-em-massa'))
+      setControleMensagens(tudo || liberadas.includes('controle-mensagens'))
       setLoading(false)
     })
 
@@ -98,8 +104,8 @@ export function ToolAccessProvider({ children }: { children: ReactNode }) {
   }, [userId, user?.is_super_admin])
 
   const value = useMemo(
-    () => ({ relatorios, licitacoes, propostaComercial, prnHub, disparador, loading }),
-    [relatorios, licitacoes, propostaComercial, prnHub, disparador, loading],
+    () => ({ relatorios, licitacoes, propostaComercial, prnHub, controleMensagens, loading }),
+    [relatorios, licitacoes, propostaComercial, prnHub, controleMensagens, loading],
   )
 
   return <ToolAccessContext.Provider value={value}>{children}</ToolAccessContext.Provider>

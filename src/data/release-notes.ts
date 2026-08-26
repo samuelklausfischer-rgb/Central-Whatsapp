@@ -34,6 +34,18 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.217',
+    date: '2026-08-26 17:20',
+    title: 'Quem enxerga o quê: três ferramentas mudaram de porta',
+    details: [
+      '📣 Disparador em massa agora é de todo mundo — não precisa mais de liberação. Quem entrar na equipe amanhã já encontra a ferramenta lá',
+      '⏱️ Controle de Mensagens saiu de "só o Samuel" e passou a ser liberado pessoa a pessoa. Agora abrem também Raphaela, Renata e Kezia',
+      '🩺 Gestão Médica ficou restrito ao setor Administrativo. Antes, qualquer administrador via a ferramenta mesmo sendo de outro setor — e cuidar de cadastro médico não é a mesma coisa que administrar o app',
+    ],
+    usabilidade:
+      'Se uma ferramenta sumiu do seu menu, é por causa disto e não é defeito: o Gestão Médica passou a seguir o seu setor. Quem precisar de acesso fala com um administrador.',
+  },
+  {
     version: '0.0.216',
     date: '2026-08-26 17:00',
     title: 'Gestão Médica no menu, disparo em massa, e o contato fica de quem responde',

@@ -112,7 +112,7 @@ const AdministrativoToolRoute = () => {
 const ExternalToolRoute = ({
   tool,
 }: {
-  tool: 'relatorios' | 'licitacoes' | 'propostaComercial' | 'prnHub' | 'disparador'
+  tool: 'relatorios' | 'licitacoes' | 'propostaComercial' | 'prnHub' | 'controleMensagens'
 }) => {
   const access = useToolAccess()
   if (access.loading)
@@ -186,12 +186,19 @@ const App = () => {
                 </Route>
                 <Route element={<SuperAdminRoute />}>
                   <Route path="/ferramentas/relatorio-app" element={<FerramentaHospedada slug="relatorio-app" />} />
-                  {/*
-                    Controle de Mensagens: tempo de resposta do time. Aqui dentro
-                    do mesmo gate porque hoje só uma pessoa deve ver — e usar a
-                    flag `is_super_admin`, em vez de fixar um e-mail no código,
-                    faz liberar mais alguém virar um clique no cadastro.
-                  */}
+                </Route>
+                {/*
+                  O CONTROLE DE MENSAGENS SAIU DAQUI em 26/08/2026.
+                  Ele morava dentro do `SuperAdminRoute`, junto do Relatório App,
+                  quando só uma pessoa devia vê-lo. Agora são quatro — Raphaela,
+                  Renata, Kezia e Samuel —, e esse conjunto não é nenhum setor nem
+                  "todo admin": deixa de fora dois dos seis admins. Só liberação
+                  pessoa a pessoa descreve isso.
+                  O Relatório App ficou para trás de propósito: ele lê a atividade
+                  da equipe inteira, e o motivo está no comentário do próprio
+                  `SuperAdminRoute`.
+                */}
+                <Route element={<ExternalToolRoute tool="controleMensagens" />}>
                   <Route path="/ferramentas/controle-mensagens" element={<FerramentaHospedada slug="controle-mensagens" />} />
                 </Route>
                 <Route element={<ExternalToolRoute tool="relatorios" />}>
@@ -209,12 +216,18 @@ const App = () => {
                 <Route element={<ExternalToolRoute tool="prnHub" />}>
                   <Route path="/ferramentas/prn-hub" element={<FerramentaHospedada slug="prn-hub" />} />
                 </Route>
-                <Route element={<ExternalToolRoute tool="disparador" />}>
-                  <Route
-                    path="/ferramentas/disparador-em-massa"
-                    element={<FerramentaHospedada slug="disparador-em-massa" />}
-                  />
-                </Route>
+                {/*
+                  SEM PORTEIRO desde 26/08/2026: o Disparador em massa é de todo
+                  mundo, como Tarefas e Anotações. Fica direto sob o
+                  `ProtectedRoute` — basta estar logado.
+                  Quem decide o que cada um PODE DISPARAR continua sendo o banco:
+                  a `pode_disparar()` e a RLS das tabelas `disparo_*`. Isto aqui
+                  só abre a porta da tela.
+                */}
+                <Route
+                  path="/ferramentas/disparador-em-massa"
+                  element={<FerramentaHospedada slug="disparador-em-massa" />}
+                />
                 <Route element={<AdministrativoToolRoute />}>
                   <Route
                     path="/ferramentas/gestao-medica"
