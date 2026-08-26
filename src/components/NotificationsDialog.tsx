@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Bell, Volume2, VolumeX, BellOff, Smartphone, Wifi, WifiOff, ShieldAlert } from 'lucide-react'
+import { Bell, Volume2, VolumeX, BellOff, Smartphone, Wifi, WifiOff, ShieldAlert, CalendarDays } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Switch } from '@/components/ui/switch'
 import { useAuth } from '@/hooks/use-auth'
 import { useNotificationPrefs } from '@/hooks/use-notification-prefs'
 import { getDevices } from '@/services/devices'
+import { PREF_AGENDA } from '@/hooks/use-notificacoes'
 
 interface Props {
   open: boolean
@@ -291,6 +292,64 @@ export function NotificationsDialog({ open, onOpenChange }: Props) {
               </div>
             )
           })}
+
+          {/*
+            A Agenda entra na MESMA lista dos aparelhos, e não numa aba à parte:
+            para quem usa, "o que me avisa e como" é uma pergunta só.
+
+            A chave `app:agenda` não é id de aparelho — o prefixo `app:` deixa
+            isso explícito, e os ids de device são UUID, então não há colisão.
+            Reusa toda a persistência que já existe (perfil + espelho local).
+          */}
+          {!loading && (
+            <div className="rounded-xl border border-border/60 bg-accent/20 p-3">
+              <div className="mb-2 flex items-center gap-2">
+                <CalendarDays className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-medium">Agenda</span>
+                <span className="text-xs text-muted-foreground">
+                  compromisso de grupo, setor ou designado a você
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => toggleSound(PREF_AGENDA)}
+                  className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2"
+                >
+                  <div className="flex items-center gap-2">
+                    {getPrefs(PREF_AGENDA).sound ? (
+                      <Volume2 className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                    ) : (
+                      <VolumeX className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                    <span className="text-xs font-medium">Som</span>
+                  </div>
+                  <Switch
+                    checked={getPrefs(PREF_AGENDA).sound}
+                    className="scale-75 pointer-events-none"
+                  />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggleBackground(PREF_AGENDA)}
+                  className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2"
+                >
+                  <div className="flex items-center gap-2">
+                    {getPrefs(PREF_AGENDA).background && podeNotificar ? (
+                      <Bell className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                    ) : (
+                      <BellOff className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                    <span className="text-xs font-medium">2° plano</span>
+                  </div>
+                  <Switch
+                    checked={getPrefs(PREF_AGENDA).background && podeNotificar}
+                    className="scale-75 pointer-events-none"
+                  />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Footer hint */}

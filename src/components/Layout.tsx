@@ -12,6 +12,7 @@ import { AvisoDeVersaoNova } from '@/components/AvisoDeVersaoNova'
 import { ToolHost } from '@/components/tools/ToolHost'
 import { useAppHeartbeat } from '@/hooks/use-app-heartbeat'
 import { useNotificacoesDeMensagem } from '@/hooks/use-notificacoes-de-mensagem'
+import { useNotificacoes } from '@/hooks/use-notificacoes'
 import { useAndroidBack } from '@/hooks/use-android-back'
 import { useAndroidShell } from '@/hooks/use-android-shell'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -33,8 +34,14 @@ export default function Layout() {
   // de rolagem. Sem isso a rolagem seria a do `<main>`, compartilhada, e voltar
   // de outra tela cairia sempre no topo. O respiro e a largura máxima que o
   // Layout dava passam a ser aplicados dentro do host, por ferramenta.
+  // `/email` entrou em 26/08/2026: o Email Hub tem três painéis com rolagem
+  // própria, exatamente como o chat. Sem estar aqui ele recebia o respiro do
+  // `<main>` e sobrava fundo em volta do painel — e a raiz dele tentava
+  // compensar com uma altura chutada (`calc(100vh-4rem)`), que erra sempre que
+  // o cabeçalho muda de tamanho.
   const isFullBleed =
     location.pathname.startsWith('/chat') ||
+    location.pathname.startsWith('/email') ||
     location.pathname.startsWith('/ferramentas/')
 
   /**
@@ -62,6 +69,12 @@ export default function Layout() {
    * `BroadcastListener` logo abaixo.
    */
   useNotificacoesDeMensagem()
+  /*
+    A caixa de notificações do app (agenda por ora). Mora AQUI pelo mesmo motivo
+    da linha acima: precisa valer em qualquer tela, e os dois cabeçalhos —
+    `Header` e `MobileHeader` — apenas leem a store que este hook alimenta.
+  */
+  useNotificacoes()
   // Botão voltar do Android. Fora do APK, não faz nada.
   useAndroidBack()
   // Barra de status e teclado. Idem.

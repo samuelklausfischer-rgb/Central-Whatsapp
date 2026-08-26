@@ -32,6 +32,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { ReleaseNotesDialog } from '@/components/ReleaseNotesDialog'
 import { ReportarProblemaDialog } from '@/components/ReportarProblemaDialog'
 import { NotificationsDialog } from '@/components/NotificationsDialog'
+import { SinoDeNotificacoes } from '@/components/notificacoes/SinoDeNotificacoes'
 import { useUpdater } from '@/hooks/use-updater'
 import { BrandLogo } from '@/components/BrandLogo'
 
@@ -258,6 +259,8 @@ export function Header() {
           >
             {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
           </Button>
+
+          <SinoDeNotificacoes className="rounded-full text-muted-foreground hover:bg-accent hover:text-foreground" />
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

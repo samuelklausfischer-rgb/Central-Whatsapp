@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { SinoDeNotificacoes } from '@/components/notificacoes/SinoDeNotificacoes'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useAuth } from '@/hooks/use-auth'
 import { BrandLogo } from '@/components/BrandLogo'
@@ -25,7 +26,8 @@ export function MobileHeader({ onAbrirMais }: { onAbrirMais: () => void }) {
         <BrandLogo className="h-7 w-auto object-contain" />
       </Link>
 
-      <div className="ml-auto">
+      <div className="ml-auto flex items-center gap-1">
+        <SinoDeNotificacoes />
         <button
           type="button"
           onClick={onAbrirMais}
