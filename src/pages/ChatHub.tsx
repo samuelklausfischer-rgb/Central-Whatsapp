@@ -759,6 +759,31 @@ export default function ChatHub() {
     })
   }, [])
 
+  /**
+   * Some com o balão otimista SEM marcá-lo como falho.
+   *
+   * Usado quando a falha ficou GRAVADA em `tentativas_de_envio` (o erro vem
+   * carimbado com o id — ver o `catch` de `sendMessage`). Nesse caso o balão
+   * persistido, que sobrevive a recarregar e traz o botão de reenviar, é a
+   * representação boa; manter também o de memória mostraria a mesma falha duas
+   * vezes, uma delas sem saída.
+   *
+   * `markOptimisticFailed` continua existindo para o caso em que nem o registro
+   * deu certo, e para a rede de 60s.
+   */
+  const discardOptimisticMessage = useCallback((tempId: string) => {
+    const chaveDeOrigem = pendingTempsRef.current.find((p) => p.tempId === tempId)?.chave ?? null
+    pendingTempsRef.current = pendingTempsRef.current.filter((p) => p.tempId !== tempId)
+    setConversationMessages((prev) => {
+      const proximas = prev.filter((m) => m.id !== tempId)
+      if (chaveDeOrigem && selectedDeviceIdRef.current && selectedContactRef.current
+        && chaveDeOrigem === chaveDaConversa(selectedDeviceIdRef.current, selectedContactRef.current)) {
+        definirMensagensSePresente(chaveDeOrigem, proximas)
+      }
+      return proximas
+    })
+  }, [])
+
   useRealtime('conversation_user_states', (e) => {
     if (e.record.user_id !== user?.id) return
     if (e.action === 'create' || e.action === 'update') {
@@ -1452,6 +1477,7 @@ export default function ChatHub() {
           onOptimisticSend={addOptimisticMessage}
           onOptimisticConfirm={confirmOptimisticMessage}
           onOptimisticFail={markOptimisticFailed}
+          onOptimisticDiscard={discardOptimisticMessage}
           estadoConversa={estadoConversa}
           onRetryMessages={handleRetryMessages}
           conversas={conversations}

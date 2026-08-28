@@ -129,6 +129,7 @@ import { getContactTags, toggleContactTag } from '@/services/contact_tags'
 import { useRealtime } from '@/hooks/use-realtime'
 import { useAuth } from '@/hooks/use-auth'
 import { sendMessage, reactToMessage, deleteMessage, editMessage } from '@/services/messages'
+import { listarTentativasAbertas, descartarTentativa, marcarReenvio, type TentativaDeEnvio } from '@/services/tentativas-de-envio'
 import { updateContactByJid } from '@/services/contacts'
 import { createNote, getNotesByContact, deleteNote } from '@/services/notes'
 import { createTask, getTaskAssignees, type TaskAssignee } from '@/services/tasks'
@@ -1083,7 +1084,7 @@ const LINHAS_MAXIMAS_DO_COMPOSITOR = 5
  */
 const JANELA_DE_EDICAO_MS = 15 * 60 * 1000
 
-export function ChatWindow({ device, contact, conversation, assignment: assignmentProp, onAssignmentChange, contacts, onBack, sheetOpen, onSheetOpenChange, onStartConversation, onOpenConversationByJid, onOptimisticSend, onOptimisticConfirm, onOptimisticFail, estadoConversa = 'pronto', onRetryMessages, conversas = [], onForwardMessage }: any) {
+export function ChatWindow({ device, contact, conversation, assignment: assignmentProp, onAssignmentChange, contacts, onBack, sheetOpen, onSheetOpenChange, onStartConversation, onOpenConversationByJid, onOptimisticSend, onOptimisticConfirm, onOptimisticFail, onOptimisticDiscard, estadoConversa = 'pronto', onRetryMessages, conversas = [], onForwardMessage }: any) {
   const { user } = useAuth()
   const { toast } = useToast()
 
@@ -1494,6 +1495,135 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     if (colagemAmbigua) setColagemAmbigua(null)
     if (isGroupActionsOpen) setIsGroupActionsOpen(false)
   }
+
+  // ─────────────── Tentativas de envio em aberto (falhou/pendente) ───────────────
+  // Vêm do BANCO (`public.tentativas_de_envio`), não do array `messages`: são a
+  // prova de um envio que falhou e sobrevivem a trocar de conversa ou recarregar a
+  // página — ao contrário do balão otimista (`onOptimisticFail`, em ChatHub.tsx),
+  // que é só estado em memória e some no reload. `sendMessage` (services/messages)
+  // é quem grava/apaga essas linhas sozinho; aqui só se lê e se reage aos botões.
+  const [tentativasAbertas, setTentativasAbertas] = useState<TentativaDeEnvio[]>([])
+  const [reenviandoId, setReenviandoId] = useState<string | null>(null)
+  const [descartandoId, setDescartandoId] = useState<string | null>(null)
+
+  // Mesmo padrão de `convKeyDaColagem` acima, e pelo mesmo motivo: o ChatWindow
+  // NÃO desmonta ao trocar de conversa, então sem este reset SÍNCRONO (durante o
+  // render, não só no efeito abaixo) a tentativa falhada da conversa ANTERIOR
+  // chegaria a pintar por um frame na conversa nova, antes da busca terminar —
+  // exatamente a classe de bug que este arquivo já cometeu três vezes.
+  const [tentativasConvKey, setTentativasConvKey] = useState(convKey)
+  if (convKey !== tentativasConvKey) {
+    setTentativasConvKey(convKey)
+    setTentativasAbertas([])
+  }
+
+  // Busca ao abrir a conversa (não há assinatura de realtime nova para esta
+  // tabela — fora de escopo). `cancelado` evita que a resposta de uma busca
+  // antiga (conversa A) sobrescreva a lista depois que já se trocou para a
+  // conversa B e a busca dela já respondeu.
+  useEffect(() => {
+    if (!device?.id || !contact) return
+    let cancelado = false
+    listarTentativasAbertas(device.id, contact)
+      .then((linhas) => {
+        if (!cancelado) setTentativasAbertas(linhas)
+      })
+      .catch(() => {
+        // Falhar ao listar não pode quebrar a conversa — só some o aviso de
+        // envio pendurado até a próxima abertura.
+      })
+    return () => {
+      cancelado = true
+    }
+  }, [device?.id, contact])
+
+  /**
+   * Reenvia uma tentativa falhada com o mesmo `sendMessage` do resto do
+   * arquivo, usando `conteudo`/`anexos`/`reply_to_id` GRAVADOS na tentativa —
+   * não o que estiver no compositor agora, que pode já ser outra coisa.
+   */
+  const reenviarTentativa = useCallback(
+    async (t: TentativaDeEnvio) => {
+      if (!device?.id || !user?.id || !contact) return
+      setReenviandoId(t.id)
+      try {
+        await marcarReenvio(t.id)
+        await sendMessage({
+          content: t.conteudo,
+          device_id: device.id,
+          sender_id: user.id,
+          is_read: true,
+          remote_sender: contact,
+          mediaUrl: t.anexos?.mediaUrl,
+          mediaType: t.anexos?.mediaType,
+          mediaName: t.anexos?.mediaName,
+          reply_to_id: t.reply_to_id ?? undefined,
+        })
+        // Sucesso: ESTE `sendMessage` já apagou a linha NOVA que ele mesmo
+        // gravou antes de chamar a Evolution (contrato do serviço de
+        // tentativas). A que está na tela é a ANTIGA — apagá-la é
+        // responsabilidade de quem chama, e é o que a linha abaixo faz.
+        await descartarTentativa(t.id)
+        setTentativasAbertas((prev) => prev.filter((x) => x.id !== t.id))
+      } catch (err) {
+        console.error('[tentativa] reenvio falhou', err)
+        toast({ title: traduzErro(err, 'Não foi possível reenviar'), variant: 'destructive' })
+        // O banco pode ter mudado (contador de tentativas, uma segunda linha
+        // falha da tentativa nova) — resincroniza em vez de arriscar um
+        // estado local desencontrado do que ficou gravado de fato.
+        listarTentativasAbertas(device.id, contact).then(setTentativasAbertas).catch(() => {})
+      } finally {
+        setReenviandoId(null)
+      }
+    },
+    [device?.id, user?.id, contact, toast],
+  )
+
+  /**
+   * O que fazer quando um envio falha — em UM lugar só, porque são seis
+   * caminhos de envio neste arquivo e antes cada um tratava do seu jeito
+   * (quatro deles só davam um toast, e a falha sumia).
+   *
+   * Se o erro vem CARIMBADO com `idTentativa`, a falha ficou gravada no banco:
+   * o balão persistido, com botão de reenviar, é a representação boa. Então o
+   * balão otimista em memória é DESCARTADO (não marcado como falho) para a
+   * mesma falha não aparecer duas vezes, e a lista é relida na hora — sem isso
+   * o botão de reenviar só apareceria na próxima vez que a conversa fosse
+   * aberta, que não é o que foi pedido.
+   *
+   * Sem carimbo, nem o registro deu certo (tipicamente offline, em que as duas
+   * requisições morrem juntas). Aí cai no comportamento de antes: balão em
+   * memória marcado como falho, que é melhor que nada.
+   */
+  const tratarFalhaDeEnvio = useCallback(
+    (err: unknown, tempId?: string) => {
+      const idTentativa = (err as { idTentativa?: string } | null)?.idTentativa
+      if (idTentativa) {
+        if (tempId) onOptimisticDiscard?.(tempId)
+        if (device?.id && contact) {
+          listarTentativasAbertas(device.id, contact).then(setTentativasAbertas).catch(() => {})
+        }
+      } else if (tempId) {
+        onOptimisticFail?.(tempId)
+      }
+    },
+    [device?.id, contact, onOptimisticDiscard, onOptimisticFail],
+  )
+
+  const descartarTentativaUi = useCallback(
+    async (id: string) => {
+      setDescartandoId(id)
+      try {
+        await descartarTentativa(id)
+        setTentativasAbertas((prev) => prev.filter((x) => x.id !== id))
+      } catch (err) {
+        toast({ title: traduzErro(err, 'Não foi possível descartar'), variant: 'destructive' })
+      } finally {
+        setDescartandoId(null)
+      }
+    },
+    [toast],
+  )
 
   const convKeyRef = useRef<string | null>(convKey)
   const draftKeyRef = useRef<string | null>(convKey)
@@ -2248,7 +2378,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       })
       onOptimisticConfirm?.(tempId, res?.message)
     } catch (err) {
-      onOptimisticFail?.(tempId)
+      tratarFalhaDeEnvio(err, tempId)
       toast({
         title: err instanceof Error ? err.message : 'Erro ao enviar mensagem',
         variant: 'destructive',
@@ -2336,12 +2466,10 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         reply_to_snapshot: replySnapshot,
         attachments: [],
       }
-      // Caminho otimista limpa de forma síncrona, antes de qualquer await — aqui
-      // não há janela para trocar de conversa no meio.
-      setMsgText('')
-      setReplyingTo(null)
-      setMencaoAtiva(null)
-      setMencionarTodos(false)
+      // Conversa em que o envio começou — mesmo padrão dos ramos de áudio/anexo
+      // mais abaixo, necessário agora que a limpeza do compositor deixou de ser
+      // síncrona (ver comentário no sucesso, logo abaixo).
+      const chaveEnvio = convKey
       onOptimisticSend?.(tempMsg)
       try {
         // Envia o texto CRU — o servidor adiciona a assinatura. A RPC retorna a
@@ -2358,8 +2486,21 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           noSignature: semAssinatura,
         })
         onOptimisticConfirm?.(tempId, res?.message)
+        // Limpa só DEPOIS do sucesso — como o ramo de áudio já fazia. Antes
+        // limpava de forma SÍNCRONA logo aqui em cima, antes do `await`: se o
+        // envio falhasse bem no início (antes até de `sendMessage` gravar a
+        // tentativa), a pessoa perdia o que escreveu sem deixar rastro nenhum.
+        // Agora o texto some do compositor só quando de fato sai; se falhar,
+        // `tentativas_de_envio` guarda o conteúdo e o balão vermelho (mais
+        // abaixo, na lista de mensagens) mostra de onde reenviar.
+        limparCompositorAposEnvio(chaveEnvio, () => {
+          setMsgText('')
+          setReplyingTo(null)
+          setMencaoAtiva(null)
+          setMencionarTodos(false)
+        })
       } catch (err) {
-        onOptimisticFail?.(tempId)
+        tratarFalhaDeEnvio(err, tempId)
         console.error('[envio] falhou', err)
         toast({
           title: traduzErro(err, 'Erro ao enviar mensagem'),
@@ -2490,6 +2631,10 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         setMencionarTodos(false)
       })
     } catch (err) {
+      // Este é o caminho de áudio, anexo e edição. Até agora ele só dava um
+      // toast: a falha sumia e não havia o que reenviar. Sem balão otimista
+      // para descartar, aqui o helper só traz a tentativa gravada para a tela.
+      tratarFalhaDeEnvio(err)
       console.error('[envio] falhou', err)
       toast({
         title: traduzErro(err, 'Erro ao enviar mensagem'),
@@ -2718,6 +2863,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     } catch (err) {
       // Não descarta o áudio no erro: a pessoa precisa poder tentar de novo
       // (ou usar o botão de enviar manual, que ainda funciona) sem regravar.
+      tratarFalhaDeEnvio(err)
       console.error('[envio] áudio falhou', err)
       toast({
         title: traduzErro(err, 'Erro ao enviar áudio'),
@@ -4871,6 +5017,105 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           </React.Fragment>
           )
         }))}
+        {/* Tentativas de envio em aberto — DEPOIS das mensagens reais de propósito
+            (são as mais recentes por definição). `tipo === 'edicao'` fica de fora:
+            editar não é mensagem nova, e um balão vermelho aqui para uma edição que
+            falhou confundiria mais do que ajudaria (o toast do próprio fluxo de
+            edição já avisa). Ver reset por conversa e a busca logo acima. */}
+        {tentativasAbertas
+          .filter((t) => t.tipo !== 'edicao')
+          .map((t) => {
+            const falhou = t.status === 'falhou'
+            // Mídia sem `anexos` gravado não tem o que reenviar (o arquivo já
+            // se foi) — só dá para descartar.
+            const podeReenviar = !(t.tipo === 'midia' && !t.anexos)
+            return (
+              <div key={`tentativa-${t.id}`} className="flex flex-col items-end gap-1">
+                <div className="flex gap-2.5 items-end w-full justify-end">
+                  <div
+                    className={cn(
+                      'max-w-[88%] sm:max-w-[78%] rounded-2xl rounded-br-sm px-3.5 py-2 shadow-chat-bubble border text-chat-text',
+                      falhou
+                        ? 'bg-red-500/10 border-red-500/40'
+                        : 'bg-chat-bubble-out border-chat-bubble-outline',
+                    )}
+                  >
+                    {t.conteudo?.trim() && (
+                      <div className="text-[15px] leading-relaxed break-words whitespace-pre-wrap">
+                        {t.conteudo}
+                      </div>
+                    )}
+                    {t.anexos?.mediaName && (
+                      <div className="mt-1 flex items-center gap-1.5 text-[12px] text-chat-muted/80">
+                        <Paperclip className="h-3 w-3 shrink-0" />
+                        <span className="truncate">{t.anexos.mediaName}</span>
+                      </div>
+                    )}
+                    {/* O motivo importa, e não é só diagnóstico: quando o
+                        verificador não CONSEGUE confirmar com a Evolution, ele
+                        grava aqui um aviso pedindo para conferir no WhatsApp
+                        antes de reenviar. Esconder isso deixaria a pessoa
+                        clicar em "tentar de novo" achando que a mensagem
+                        certamente não saiu — e a paciente receberia duas
+                        vezes. Quando o texto é o erro cru da Evolution, ele
+                        também ajuda: o projeto já decidiu mostrá-lo nos toasts
+                        de envio, porque "número inválido" e "arquivo recusado"
+                        pedem reações diferentes. */}
+                    {falhou && t.erro && (
+                      <div className="mt-1 text-[11px] leading-snug text-red-400/90 break-words">
+                        {t.erro.length > 160 ? `${t.erro.slice(0, 160)}…` : t.erro}
+                      </div>
+                    )}
+                    <div className="mt-1 flex items-center justify-end gap-1">
+                      {falhou ? (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-red-400">
+                          <AlertCircle className="h-3 w-3" /> não saiu
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] text-chat-muted/70">
+                          <Clock className="h-3 w-3" /> enviando…
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                {falhou && (
+                  <div className="flex items-center gap-2 mr-1">
+                    {podeReenviar && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 text-[12px]"
+                        disabled={reenviandoId === t.id}
+                        onClick={() => reenviarTentativa(t)}
+                      >
+                        {reenviandoId === t.id ? (
+                          <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                        ) : (
+                          <Send className="h-3 w-3 mr-1" />
+                        )}
+                        Tentar de novo
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-[12px] text-chat-muted"
+                      disabled={descartandoId === t.id}
+                      onClick={() => descartarTentativaUi(t.id)}
+                    >
+                      {descartandoId === t.id ? (
+                        <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                      ) : (
+                        <Trash2 className="h-3 w-3 mr-1" />
+                      )}
+                      Descartar
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
         </div>
       </div>
