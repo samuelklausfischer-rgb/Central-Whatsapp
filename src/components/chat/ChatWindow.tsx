@@ -1,4 +1,5 @@
 ﻿import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, useDeferredValue, Fragment } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   conversationDraftKey,
   saveDraft,
@@ -1087,6 +1088,7 @@ const JANELA_DE_EDICAO_MS = 15 * 60 * 1000
 export function ChatWindow({ device, contact, conversation, assignment: assignmentProp, onAssignmentChange, contacts, onBack, sheetOpen, onSheetOpenChange, onStartConversation, onOpenConversationByJid, onOptimisticSend, onOptimisticConfirm, onOptimisticFail, onOptimisticDiscard, estadoConversa = 'pronto', onRetryMessages, conversas = [], onForwardMessage }: any) {
   const { user } = useAuth()
   const { toast } = useToast()
+  const navigate = useNavigate()
 
   const [msgText, setMsgText] = useState('')
   const [isEmojiOpen, setIsEmojiOpen] = useState(false)
@@ -1120,6 +1122,21 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const [triggers, setTriggers] = useState<any[]>([])
   const [searchTrigger, setSearchTrigger] = useState('')
   const [isPlusOpen, setIsPlusOpen] = useState(false)
+  /**
+   * Popup de atalhos de mensagem ativado por `/` no início do compositor —
+   * "no WhatsApp digita-se `/`" era exatamente o gesto que faltava para achar
+   * os Gatilhos Rápidos, que já existiam escondidos no popover "+".
+   *
+   * Diferente de `mencaoAtiva` (que guarda `{ termo, inicio }` porque a menção
+   * pode nascer no meio do texto, depois de um espaço), aqui o início é SEMPRE
+   * a posição 0 — o `/` só conta na largada da mensagem, como no WhatsApp
+   * Business. Por isso um booleano basta: o termo de busca é lido direto de
+   * `msgText` (ver `termoAtalhoBarra` abaixo), sem duplicar em outro estado
+   * que poderia dessincronizar.
+   */
+  const [atalhosAbertos, setAtalhosAbertos] = useState(false)
+  /** Índice destacado por teclado (↑/↓) na lista filtrada de atalhos. */
+  const [atalhoDestacado, setAtalhoDestacado] = useState(0)
 
   const [labels, setLabels] = useState<any[]>([])
   const [contactTags, setContactTags] = useState<any[]>([])
@@ -1679,6 +1696,11 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     // notificar o grupo, sem nenhum sinal na tela.
     setMencionarTodos(d.mentionEveryone)
     setMencaoAtiva(null)
+    // Mesmo motivo do `setMencaoAtiva(null)` acima: o ChatWindow não desmonta
+    // ao trocar de conversa, então sem fechar aqui o popup de atalhos "/"
+    // ficaria pintado sobre o texto restaurado da conversa nova.
+    setAtalhosAbertos(false)
+    setAtalhoDestacado(0)
     setNoteTitle(d.noteTitle)
     setNoteContent(d.noteContent)
     setNoteCategory(d.noteCategory)
@@ -2497,6 +2519,9 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           setMsgText('')
           setReplyingTo(null)
           setMencaoAtiva(null)
+          // Sem isto o popup de atalhos "/" ficava pintado sobre o compositor
+          // vazio depois de enviar (msgText não passa pelo `onChange` aqui).
+          setAtalhosAbertos(false)
           setMencionarTodos(false)
         })
       } catch (err) {
@@ -2540,6 +2565,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           setMsgText('')
           setReplyingTo(null)
           setMencaoAtiva(null)
+          setAtalhosAbertos(false)
           setMencionarTodos(false)
         })
         toast({ title: 'Mensagem editada' })
@@ -2563,6 +2589,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         limparCompositorAposEnvio(chaveEnvio, () => {
           discardAudio()
           setMencaoAtiva(null)
+          setAtalhosAbertos(false)
           setMencionarTodos(false)
         })
       } else if (attachments.length > 0) {
@@ -2628,6 +2655,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         setAttachments([])
         setReplyingTo(null)
         setMencaoAtiva(null)
+        setAtalhosAbertos(false)
         setMencionarTodos(false)
       })
     } catch (err) {
@@ -2858,6 +2886,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       limparCompositorAposEnvio(chaveEnvio, () => {
         discardAudio()
         setMencaoAtiva(null)
+        setAtalhosAbertos(false)
         setMencionarTodos(false)
       })
     } catch (err) {
@@ -3250,10 +3279,31 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     }
   }
 
-  const handleSelectTrigger = (content: string) => {
-    setMsgText((prev) => (prev ? prev + '\n\n' + content : content))
+  /**
+   * Insere o conteúdo de um atalho no compositor. Dois chamadores, dois
+   * comportamentos: o popover "+" ANEXA ao que já estava escrito (útil para
+   * colar um atalho no meio de uma mensagem em andamento); o atalho "/"
+   * (`substituir: true`) TROCA a mensagem inteira, porque ali o que está
+   * escrito é só o "/termo" que serviu para filtrar — deixá-lo ali sobraria
+   * na frente do texto pronto, e a pessoa teria que apagar à mão.
+   */
+  const handleSelectTrigger = (content: string, opts?: { substituir?: boolean }) => {
+    setMsgText((prev) => (opts?.substituir ? content : prev ? prev + '\n\n' + content : content))
     setIsPlusOpen(false)
     setSearchTrigger('')
+    setAtalhosAbertos(false)
+    if (opts?.substituir) {
+      // Devolve o foco e o cursor pro fim do texto recém-inserido — sem isto
+      // a pessoa teria que clicar de volta no campo pra continuar digitando.
+      requestAnimationFrame(() => {
+        const el = msgTextareaRef.current
+        if (el) {
+          el.focus()
+          const posicao = el.value.length
+          el.setSelectionRange(posicao, posicao)
+        }
+      })
+    }
   }
 
   const handleToggleLabel = async (labelId: string) => {
@@ -3586,6 +3636,15 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
 
   const filteredTriggers = triggers.filter((t) =>
     t.title.toLowerCase().includes(searchTrigger.toLowerCase()),
+  )
+
+  // O que vem depois do "/" filtra os atalhos, igual `searchTrigger` filtra
+  // `filteredTriggers` acima — só que aqui o termo é o próprio `msgText`, e
+  // não um campo de busca à parte (ver o comentário de `atalhosAbertos`).
+  const termoAtalhoBarra = msgText.startsWith('/') ? msgText.slice(1) : ''
+  const atalhosFiltrados = useMemo(
+    () => triggers.filter((t) => t.title.toLowerCase().includes(termoAtalhoBarra.toLowerCase())),
+    [triggers, termoAtalhoBarra],
   )
 
   if (!device || !contact) {
@@ -5440,13 +5499,21 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                   Contato
                 </button>
                 <div className="border-t border-chat-border my-2" />
-                <div className="text-[11px] font-semibold text-chat-muted uppercase tracking-wider px-2 pb-1.5 pt-0.5">
-                  Gatilhos Rápidos
+                <div className="px-2 pb-1.5 pt-0.5 flex items-baseline justify-between gap-2">
+                  <span className="text-[11px] font-semibold text-chat-muted uppercase tracking-wider">
+                    Atalhos de mensagem
+                  </span>
+                  {/* Descoberta era o problema real (Ketlin não achava a
+                      função escondida aqui): a dica aparece bem onde ela já
+                      está olhando, no gesto mais rápido que o clique. */}
+                  <span className="text-[10px] text-chat-muted normal-case font-normal">
+                    dica: digite / na mensagem
+                  </span>
                 </div>
                 <div className="px-2 pb-1.5">
                   <input
                     className="w-full bg-chat-panel border border-chat-border rounded-md px-2.5 py-1.5 text-sm text-chat-text placeholder:text-chat-muted focus:outline-none focus:ring-1 focus:ring-blue-500/50"
-                    placeholder="Buscar gatilho..."
+                    placeholder="Buscar atalho..."
                     value={searchTrigger}
                     onChange={(e) => setSearchTrigger(e.target.value)}
                   />
@@ -5454,7 +5521,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                 <div className="max-h-40 overflow-y-auto space-y-0.5 px-1 pb-1">
                   {filteredTriggers.length === 0 ? (
                     <div className="p-2 text-center text-xs text-chat-muted">
-                      Nenhum gatilho encontrado.
+                      Nenhum atalho encontrado.
                     </div>
                   ) : (
                     filteredTriggers.map((t) => (
@@ -5662,6 +5729,58 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                     onFechar={() => setMencaoAtiva(null)}
                   />
                 )}
+                {/*
+                  Popup de atalhos "/" — mesmo molde ancorado do
+                  `MentionAutocomplete` acima (`absolute bottom-full`), mas
+                  inline aqui em vez de componente à parte: diferente da
+                  menção (que despacha um `keydown` global em fase de
+                  captura para chegar antes do textarea), aqui quem já
+                  intercepta o teclado é o próprio `onKeyDown` do textarea
+                  logo abaixo — não existe segundo listener para coordenar.
+                */}
+                {atalhosAbertos && (
+                  <div
+                    className="absolute bottom-full left-0 mb-2 w-80 max-h-64 overflow-y-auto rounded-lg border border-chat-border bg-chat-panel shadow-chat z-50"
+                    // `mousedown` (não `click`) é quando o navegador tiraria o
+                    // foco do textarea — e o `onBlur` acima fecharia o popup
+                    // ANTES do `onClick` do botão disparar, matando a escolha.
+                    // `preventDefault` aqui mantém o foco no textarea e deixa
+                    // o clique completar normalmente.
+                    onMouseDown={(e) => e.preventDefault()}
+                  >
+                    {atalhosFiltrados.length === 0 ? (
+                      <div className="p-3 text-center text-sm text-chat-muted space-y-2">
+                        <p>Você ainda não tem atalhos de mensagem.</p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAtalhosAbertos(false)
+                            navigate('/triggers')
+                          }}
+                          className="text-xs text-blue-400 hover:underline"
+                        >
+                          Criar atalho de mensagem
+                        </button>
+                      </div>
+                    ) : (
+                      atalhosFiltrados.map((t, i) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onMouseEnter={() => setAtalhoDestacado(i)}
+                          onClick={() => handleSelectTrigger(t.content, { substituir: true })}
+                          className={cn(
+                            'w-full text-left px-3 py-2 text-sm border-b border-chat-border last:border-b-0',
+                            i === atalhoDestacado ? 'bg-chat-hover' : 'hover:bg-chat-hover',
+                          )}
+                        >
+                          <div className="font-medium text-chat-text truncate">{t.title}</div>
+                          <div className="text-xs text-chat-muted truncate">{t.content}</div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
                 <textarea
                   ref={msgTextareaRef}
                   // Sem `max-h-*` aqui de propósito: o teto das cinco linhas é
@@ -5679,6 +5798,12 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                         ? mencaoEmDigitacao(e.target.value, e.target.selectionStart ?? 0)
                         : null,
                     )
+                    // Atalhos "/": só na posição 0, como o WhatsApp — "/" no
+                    // meio da frase é texto normal, não comando. A cada tecla
+                    // a lista filtrada muda, então o destaque volta pro topo.
+                    const abrirAtalhos = e.target.value.startsWith('/')
+                    setAtalhosAbertos(abrirAtalhos)
+                    if (abrirAtalhos) setAtalhoDestacado(0)
                   }}
                   // Clique, Home e setas movem o cursor SEM disparar `onChange`.
                   // Sem isto a lista continuava aberta com o cursor longe da
@@ -5688,7 +5813,44 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                     const el = e.currentTarget
                     setMencaoAtiva(mencaoEmDigitacao(el.value, el.selectionStart ?? 0))
                   }}
+                  // Clique fora fecha o popup de atalhos (perder o foco do
+                  // campo já cobre isso, sem precisar de um listener global de
+                  // clique como a menção não usa aqui — ver comentário acima).
+                  onBlur={() => setAtalhosAbertos(false)}
                   onKeyDown={(e) => {
+                    // Atalhos "/" tomam o teclado enquanto o popup está aberto:
+                    // ↑/↓ navegam, Enter ESCOLHE (nunca envia — mesmo com a
+                    // lista vazia, senão o "/termo" sem match viraria mensagem
+                    // enviada sem querer) e Esc fecha sem mexer no texto.
+                    if (atalhosAbertos) {
+                      if (e.key === 'ArrowDown') {
+                        e.preventDefault()
+                        setAtalhoDestacado((i) =>
+                          atalhosFiltrados.length ? (i + 1) % atalhosFiltrados.length : 0,
+                        )
+                        return
+                      }
+                      if (e.key === 'ArrowUp') {
+                        e.preventDefault()
+                        setAtalhoDestacado((i) =>
+                          atalhosFiltrados.length
+                            ? (i - 1 + atalhosFiltrados.length) % atalhosFiltrados.length
+                            : 0,
+                        )
+                        return
+                      }
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        const escolhido = atalhosFiltrados[atalhoDestacado]
+                        if (escolhido) handleSelectTrigger(escolhido.content, { substituir: true })
+                        return
+                      }
+                      if (e.key === 'Escape') {
+                        e.preventDefault()
+                        setAtalhosAbertos(false)
+                        return
+                      }
+                    }
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault()
                       handleSend(e)
