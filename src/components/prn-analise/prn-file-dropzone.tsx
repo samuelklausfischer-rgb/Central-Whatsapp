@@ -8,7 +8,11 @@ export function FileUploadDropzone({ field, label, disabled }: any) {
 
   return (
     <FormItem className="w-full">
-      <FormLabel className="text-gray-600 font-bold text-xs uppercase tracking-widest">{label}</FormLabel>
+      {/* O rótulo é opcional: quando o dropzone já vem dentro de um bloco
+          que se apresenta (caso do Arquivo Diário), repetir o título polui. */}
+      {label && (
+        <FormLabel className="text-gray-600 font-bold text-xs uppercase tracking-widest">{label}</FormLabel>
+      )}
       <FormControl>
         {!file ? (
           <div
