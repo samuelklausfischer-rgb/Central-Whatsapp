@@ -234,6 +234,8 @@ export interface AgendaEvent {
   created_by: string
   /** Quem deve cumprir. Nulo = o próprio criador. */
   assigned_to: string | null
+  /** Cor de destaque escolhida na criação. Nula = visual padrão. Não sincroniza com o Outlook. */
+  cor: string | null
   created_at: string
   updated_at: string
 }

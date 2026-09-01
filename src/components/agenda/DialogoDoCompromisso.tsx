@@ -10,7 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import type { AgendaEscopo, AgendaGroup, AgendaImportancia } from '@/lib/supabase/types'
-import { COR_AVISO_REPETE } from './cores'
+import { COR_AVISO_REPETE, PALETA_AGENDA } from './cores'
 import type { ItemDaAgenda, Rascunho } from './tipos'
 
 /**
@@ -140,6 +140,46 @@ export function DialogoDoCompromisso({
                   <SelectItem value="grupo">De um grupo</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+          </div>
+
+          {/*
+            Cor de destaque — escolha da PESSOA, diferente de `importancia`
+            (que é sinal do sistema). "Sem cor" primeiro e selecionado por
+            padrão: a maioria dos compromissos não precisa de destaque, e sem
+            essa opção não haveria como voltar atrás depois de escolher uma.
+          */}
+          <div className="grid gap-1.5">
+            <Label>Cor</Label>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setRascunho((r) => ({ ...r, cor: null }))}
+                title="Sem cor"
+                aria-label="Sem cor"
+                aria-pressed={!rascunho.cor}
+                className={cn(
+                  'flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 border-dashed border-muted-foreground/50 text-[11px] text-muted-foreground transition-transform hover:scale-110',
+                  !rascunho.cor && 'ring-2 ring-primary ring-offset-2 ring-offset-background',
+                )}
+              >
+                –
+              </button>
+              {PALETA_AGENDA.map((c) => (
+                <button
+                  key={c.valor}
+                  type="button"
+                  onClick={() => setRascunho((r) => ({ ...r, cor: c.valor }))}
+                  title={c.nome}
+                  aria-label={c.nome}
+                  aria-pressed={rascunho.cor === c.valor}
+                  className={cn(
+                    'h-6 w-6 shrink-0 rounded-full border border-black/10 transition-transform hover:scale-110',
+                    rascunho.cor === c.valor && 'ring-2 ring-primary ring-offset-2 ring-offset-background',
+                  )}
+                  style={{ backgroundColor: c.valor }}
+                />
+              ))}
             </div>
           </div>
 
