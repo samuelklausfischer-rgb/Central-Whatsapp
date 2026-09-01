@@ -471,13 +471,18 @@ export async function listHistoryFiles(): Promise<HistoryFileReference[]> {
     return []
   }
 
-  return (data || []).map((file: any) => ({
-    ...file,
-    originalFilename:
-      typeof file?.metadata?.originalFilename === 'string' && file.metadata.originalFilename.trim()
-        ? file.metadata.originalFilename
-        : deriveOriginalFilename(file.name),
-  }))
+  return (data || [])
+    // O Storage devolve as subpastas junto com os arquivos. Como os diários moram
+    // em `userId/daily/`, a pasta "daily" vinha na lista e virava um card clicável
+    // no cofre. Entrada de pasta não tem id.
+    .filter((file: any) => file?.id)
+    .map((file: any) => ({
+      ...file,
+      originalFilename:
+        typeof file?.metadata?.originalFilename === 'string' && file.metadata.originalFilename.trim()
+          ? file.metadata.originalFilename
+          : deriveOriginalFilename(file.name),
+    }))
 }
 
 export async function uploadHistoryFile(file: File) {

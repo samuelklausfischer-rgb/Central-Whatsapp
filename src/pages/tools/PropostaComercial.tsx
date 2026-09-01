@@ -3,9 +3,11 @@ import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import {
   AlertTriangle,
+  ChevronDown,
   Download,
   FileText,
   Loader2,
+  Package,
   Plus,
   Printer,
   RefreshCw,
@@ -17,7 +19,9 @@ import { CardContent } from '@/components/ui/card'
 import { GlassCard } from '@/components/ui/surface'
 import { ListRow } from '@/components/ui/list-row'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 
@@ -28,10 +32,16 @@ import {
   slugDe,
   type Case,
   type DadosProposta,
+  type EmitenteProposta,
   type Exame,
 } from '@/lib/proposta/dados'
 import { carregarPecas, montarHtml } from '@/lib/proposta/montar-html'
 import { baixarBlob, gerarPdf, imprimir, temGeracaoDireta } from '@/lib/proposta/gerar-pdf'
+import {
+  baixarPropostaZip,
+  renderizarProposta,
+  servicoPropostaConfigurado,
+} from '@/services/proposta-render'
 import {
   carregarProposta,
   excluirProposta,
@@ -51,6 +61,9 @@ const dataDeHoje = () => format(new Date(), "dd 'de' MMMM 'de' yyyy", { locale: 
 export default function PropostaComercial() {
   const { toast } = useToast()
   const direto = useMemo(temGeracaoDireta, [])
+  // Quando o serviço remoto está setado ele é a fonte única (PDF/Word/Excel/ZIP);
+  // senão, a ferramenta monta o PDF localmente (fallback). Fixo por sessão.
+  const servicoConfigurado = useMemo(servicoPropostaConfigurado, [])
 
   const [nome, setNome] = useState('')
   const [cidadeUf, setCidadeUf] = useState('')
@@ -61,7 +74,18 @@ export default function PropostaComercial() {
   const [exames, setExames] = useState<Exame[]>([{ ...EXAME_NOVO }])
   const [cases, setCases] = useState<Case[]>([])
 
+  // Campos opcionais (seção recolhível). Só entram no payload quando preenchidos —
+  // vazios deixam o serviço usar os padrões da empresa.
+  const [termo, setTermo] = useState('')
+  const [objeto, setObjeto] = useState('')
+  const [entendimento, setEntendimento] = useState('')
+  const [pagamento, setPagamento] = useState('')
+  const [baseLegal, setBaseLegal] = useState('')
+  const [emitente, setEmitente] = useState<EmitenteProposta>({})
+  const [avancadoAberto, setAvancadoAberto] = useState(false)
+
   const [gerando, setGerando] = useState(false)
+  const [baixandoZip, setBaixandoZip] = useState(false)
   const [historico, setHistorico] = useState<ItemHistorico[]>([])
   const [carregandoHistorico, setCarregandoHistorico] = useState(true)
   /** Blob URL do último PDF, para a pré-visualização. Só existe no Electron. */
@@ -89,16 +113,40 @@ export default function PropostaComercial() {
     }
   }, [previaPdf])
 
-  const dados = useMemo<DadosProposta>(
-    () => ({
-      slug: slugDe(nome),
-      cliente: { nome: nome.trim(), cidade_uf: cidadeUf, artigo },
-      proposta: { cidade_emissao: cidadeEmissao, data, validade },
-      exames,
-      cases,
-    }),
-    [nome, cidadeUf, artigo, cidadeEmissao, data, validade, exames, cases],
-  )
+  const dados = useMemo<DadosProposta>(() => {
+    const cliente: DadosProposta['cliente'] = { nome: nome.trim(), cidade_uf: cidadeUf, artigo }
+    if (termo.trim()) cliente.termo = termo.trim()
+
+    const proposta: DadosProposta['proposta'] = { cidade_emissao: cidadeEmissao, data, validade }
+    if (objeto.trim()) proposta.objeto = objeto.trim()
+    if (entendimento.trim()) proposta.entendimento = entendimento.trim()
+    if (pagamento.trim()) proposta.pagamento = pagamento.trim()
+    if (baseLegal.trim()) proposta.base_legal = baseLegal.trim()
+
+    // Só os campos preenchidos — mandar `""` sobrescreveria o padrão do serviço.
+    const emitenteLimpo = Object.fromEntries(
+      Object.entries(emitente).filter(([, v]) => typeof v === 'string' && v.trim()),
+    ) as EmitenteProposta
+
+    const d: DadosProposta = { slug: slugDe(nome), cliente, proposta, exames, cases }
+    if (Object.keys(emitenteLimpo).length) d.emitente = emitenteLimpo
+    return d
+  }, [
+    nome,
+    cidadeUf,
+    artigo,
+    cidadeEmissao,
+    data,
+    validade,
+    exames,
+    cases,
+    termo,
+    objeto,
+    entendimento,
+    pagamento,
+    baseLegal,
+    emitente,
+  ])
 
   const preencherCom = (p: DadosProposta) => {
     setNome(p.cliente.nome)
@@ -109,7 +157,20 @@ export default function PropostaComercial() {
     setValidade(p.proposta.validade)
     setExames(p.exames.length ? p.exames : [{ ...EXAME_NOVO }])
     setCases(p.cases)
+    // Opcionais: repõe do registro (ou zera), para não vazar valores da proposta
+    // anterior ao trocar de item no histórico.
+    setTermo(p.cliente.termo || '')
+    setObjeto(p.proposta.objeto || '')
+    setEntendimento(p.proposta.entendimento || '')
+    setPagamento(p.proposta.pagamento || '')
+    setBaseLegal(p.proposta.base_legal || '')
+    setEmitente(p.emitente || {})
   }
+
+  const mudarEmitente = (campo: keyof EmitenteProposta, valor: string) =>
+    setEmitente((atual) => ({ ...atual, [campo]: valor }))
+
+  const formValido = Boolean(dados.cliente.nome) && dados.exames.some((e) => e.sigla || e.nome)
 
   const abrirDoHistorico = async (slug: string) => {
     try {
@@ -157,20 +218,34 @@ export default function PropostaComercial() {
       // `{cliente}` nos textos dos cases vira o nome do cliente ANTES de montar
       // o HTML — o template não conhece o token.
       const resolvidos = resolverToken(dados, dados.cliente.nome)
-      const pecas = await carregarPecas()
-      const html = montarHtml(resolvidos, pecas)
 
-      if (direto) {
-        const blob = await gerarPdf(html)
-        baixarBlob(blob, nomeDoPdf(dados.cliente.nome))
-        setPreviaPdf(URL.createObjectURL(blob))
+      if (servicoConfigurado) {
+        // Caminho primário: o serviço remoto é a fonte única (mesmos templates,
+        // paginação de exames, Word/Excel) e devolve o PDF pronto.
+        const arquivo = await renderizarProposta(resolvidos, 'pdf')
+        baixarBlob(arquivo.blob, arquivo.nome)
+        setPreviaPdf(URL.createObjectURL(arquivo.blob))
         toast({ title: 'PDF gerado e baixado.' })
       } else {
-        await imprimir(html)
-        toast({
-          title: 'Caixa de impressão aberta.',
-          description: 'Escolha "Salvar como PDF" para baixar a proposta.',
-        })
+        // FALLBACK: substituído pelo serviço quando VITE_PROPOSTA_RENDER_URL está setada.
+        console.warn(
+          'VITE_PROPOSTA_RENDER_URL não configurada — montando a proposta localmente (fallback).',
+        )
+        const pecas = await carregarPecas()
+        const html = montarHtml(resolvidos, pecas)
+
+        if (direto) {
+          const blob = await gerarPdf(html)
+          baixarBlob(blob, nomeDoPdf(dados.cliente.nome))
+          setPreviaPdf(URL.createObjectURL(blob))
+          toast({ title: 'PDF gerado e baixado.' })
+        } else {
+          await imprimir(html)
+          toast({
+            title: 'Caixa de impressão aberta.',
+            description: 'Escolha "Salvar como PDF" para baixar a proposta.',
+          })
+        }
       }
 
       // Salvar depois de gerar, e não antes: proposta que nem chegou a virar PDF
@@ -185,6 +260,31 @@ export default function PropostaComercial() {
       })
     } finally {
       setGerando(false)
+    }
+  }
+
+  /** Baixa PDF + Word + Excel num ZIP, direto do serviço remoto. */
+  const baixarTres = async () => {
+    if (!formValido) {
+      toast({ variant: 'destructive', title: 'Informe o nome do cliente e ao menos um exame.' })
+      return
+    }
+    setBaixandoZip(true)
+    try {
+      const resolvidos = resolverToken(dados, dados.cliente.nome)
+      const arquivo = await baixarPropostaZip(resolvidos)
+      baixarBlob(arquivo.blob, arquivo.nome)
+      toast({ title: 'PDF, Word e Excel baixados (ZIP).' })
+      await salvarProposta(resolvidos)
+      atualizarHistorico()
+    } catch (e) {
+      toast({
+        variant: 'destructive',
+        title: 'Não consegui baixar os arquivos',
+        description: e instanceof Error ? e.message : String(e),
+      })
+    } finally {
+      setBaixandoZip(false)
     }
   }
 
@@ -394,21 +494,248 @@ export default function PropostaComercial() {
             </CardContent>
           </GlassCard>
 
+          <GlassCard>
+            <Collapsible open={avancadoAberto} onOpenChange={setAvancadoAberto}>
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between px-6 py-4 text-left"
+                >
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                      Dados da empresa e textos (opcional)
+                    </p>
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      Deixe em branco para o serviço usar os padrões da PRN.
+                    </p>
+                  </div>
+                  <ChevronDown
+                    className={`h-4 w-4 text-muted-foreground transition-transform ${
+                      avancadoAberto ? 'rotate-180' : ''
+                    }`}
+                  />
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <CardContent className="pt-0 pb-6 space-y-5">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="p-termo">Termo do cliente</Label>
+                    <Input
+                      id="p-termo"
+                      value={termo}
+                      onChange={(e) => setTermo(e.target.value)}
+                      placeholder="hospital"
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Nome masculino usado no lugar de "hospital" — ex.: hospital, órgão, contratante.
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                      Emitente (PRN)
+                    </p>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="e-razao">Razão social</Label>
+                        <Input
+                          id="e-razao"
+                          value={emitente.razao_social || ''}
+                          onChange={(e) => mudarEmitente('razao_social', e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="e-cnpj">CNPJ</Label>
+                        <Input
+                          id="e-cnpj"
+                          value={emitente.cnpj || ''}
+                          onChange={(e) => mudarEmitente('cnpj', e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="e-rep">Representante legal</Label>
+                        <Input
+                          id="e-rep"
+                          value={emitente.representante_legal || ''}
+                          onChange={(e) => mudarEmitente('representante_legal', e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="e-cpf">CPF do representante</Label>
+                        <Input
+                          id="e-cpf"
+                          value={emitente.representante_cpf || ''}
+                          onChange={(e) => mudarEmitente('representante_cpf', e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="e-cargo">Cargo do representante</Label>
+                        <Input
+                          id="e-cargo"
+                          value={emitente.representante_cargo || ''}
+                          onChange={(e) => mudarEmitente('representante_cargo', e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="e-tel">Telefone</Label>
+                        <Input
+                          id="e-tel"
+                          value={emitente.telefone || ''}
+                          onChange={(e) => mudarEmitente('telefone', e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="e-tel2">Telefone 2</Label>
+                        <Input
+                          id="e-tel2"
+                          value={emitente.telefone2 || ''}
+                          onChange={(e) => mudarEmitente('telefone2', e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="e-email">E-mail</Label>
+                        <Input
+                          id="e-email"
+                          value={emitente.email || ''}
+                          onChange={(e) => mudarEmitente('email', e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="e-email2">E-mail 2</Label>
+                        <Input
+                          id="e-email2"
+                          value={emitente.email2 || ''}
+                          onChange={(e) => mudarEmitente('email2', e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="e-site">Site</Label>
+                        <Input
+                          id="e-site"
+                          value={emitente.site || ''}
+                          onChange={(e) => mudarEmitente('site', e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="e-insta">Instagram</Label>
+                        <Input
+                          id="e-insta"
+                          value={emitente.instagram || ''}
+                          onChange={(e) => mudarEmitente('instagram', e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1.5 sm:col-span-2">
+                        <Label htmlFor="e-end">Endereço</Label>
+                        <Input
+                          id="e-end"
+                          value={emitente.endereco || ''}
+                          onChange={(e) => mudarEmitente('endereco', e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="e-banco">Banco</Label>
+                        <Input
+                          id="e-banco"
+                          value={emitente.banco || ''}
+                          onChange={(e) => mudarEmitente('banco', e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="e-ag">Agência</Label>
+                        <Input
+                          id="e-ag"
+                          value={emitente.agencia || ''}
+                          onChange={(e) => mudarEmitente('agencia', e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="e-conta">Conta</Label>
+                        <Input
+                          id="e-conta"
+                          value={emitente.conta || ''}
+                          onChange={(e) => mudarEmitente('conta', e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                      Textos da proposta
+                    </p>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="p-objeto">Objeto</Label>
+                      <Textarea
+                        id="p-objeto"
+                        value={objeto}
+                        onChange={(e) => setObjeto(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="p-entendimento">Entendimento da demanda</Label>
+                      <Textarea
+                        id="p-entendimento"
+                        value={entendimento}
+                        onChange={(e) => setEntendimento(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="p-pagamento">Condições de pagamento</Label>
+                      <Textarea
+                        id="p-pagamento"
+                        value={pagamento}
+                        onChange={(e) => setPagamento(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="p-baselegal">Base legal</Label>
+                      <Textarea
+                        id="p-baselegal"
+                        value={baseLegal}
+                        onChange={(e) => setBaseLegal(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </CardContent>
+              </CollapsibleContent>
+            </Collapsible>
+          </GlassCard>
+
           <div className="flex flex-wrap items-center gap-3">
             <Button onClick={gerar} disabled={gerando} size="lg">
               {gerando ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
-              ) : direto ? (
+              ) : direto || servicoConfigurado ? (
                 <Download className="h-4 w-4" />
               ) : (
                 <Printer className="h-4 w-4" />
               )}
-              {direto ? 'Gerar PDF' : 'Gerar e imprimir'}
+              {direto || servicoConfigurado ? 'Gerar PDF' : 'Gerar e imprimir'}
             </Button>
+
+            {/* `<span>` com `title` porque botão desabilitado não dispara tooltip nativo. */}
+            <span title={servicoConfigurado ? undefined : 'Configure o serviço de proposta'}>
+              <Button
+                onClick={baixarTres}
+                disabled={!servicoConfigurado || !formValido || baixandoZip || gerando}
+                size="lg"
+                variant="outline"
+              >
+                {baixandoZip ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Package className="h-4 w-4" />
+                )}
+                Baixar os 3 arquivos
+              </Button>
+            </span>
+
             <p className="text-xs text-muted-foreground max-w-md">
-              {direto
-                ? `O arquivo baixa como "${nomeDoPdf(dados.cliente.nome || 'CLIENTE')}".`
-                : 'No navegador não dá para salvar o PDF sozinho: a caixa de impressão abre e você escolhe "Salvar como PDF". No app instalado o download é direto.'}
+              {servicoConfigurado
+                ? 'PDF, Word e Excel vêm do serviço da proposta. "Baixar os 3 arquivos" traz tudo num ZIP.'
+                : direto
+                  ? `O arquivo baixa como "${nomeDoPdf(dados.cliente.nome || 'CLIENTE')}".`
+                  : 'No navegador não dá para salvar o PDF sozinho: a caixa de impressão abre e você escolhe "Salvar como PDF". No app instalado o download é direto.'}
             </p>
           </div>
 

@@ -5,7 +5,7 @@ import { RefreshCw, ArrowLeft, BrainCircuit, ScanSearch, Loader2 } from 'lucide-
 
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import {
   submitPrnAnalysisJson,
   getPrnHistoryRuns,
@@ -163,9 +163,8 @@ function PrnAnalysisInner() {
       setDuplicityAnalysis(null)
 
       const dailyFile = values.daily_file[0] as File
-      const historicalSelection = values.historical_files || { saved: [], temporary: [] }
+      const historicalSelection = values.historical_files || { saved: [] }
       const savedHistoricalFiles = Array.isArray(historicalSelection.saved) ? historicalSelection.saved : []
-      const temporaryHistoricalFiles = Array.isArray(historicalSelection.temporary) ? historicalSelection.temporary : []
 
       const downloadedHistoricalFiles = await Promise.all(
         savedHistoricalFiles.map((file: any) =>
@@ -173,31 +172,20 @@ function PrnAnalysisInner() {
         ),
       )
 
-      const historicalSources = [
-        ...savedHistoricalFiles.map((file: any) => ({
-          storage_name: file.name,
-          original_filename: file.originalFilename || file.name,
-          source: 'vault' as const,
-        })),
-        ...temporaryHistoricalFiles.map((file: File) => ({
-          original_filename: file.name,
-          source: 'temporary' as const,
-        })),
-      ]
+      const historicalSources = savedHistoricalFiles.map((file: any) => ({
+        storage_name: file.name,
+        original_filename: file.originalFilename || file.name,
+        source: 'vault' as const,
+      }))
 
-      const historyMeta: Array<{ original_filename: string; source: 'vault' | 'temporary' | 'legacy' }> = [
-        ...savedHistoricalFiles.map((file: any) => ({
+      const historyMeta: Array<{ original_filename: string; source: 'vault' | 'temporary' | 'legacy' }> =
+        savedHistoricalFiles.map((file: any) => ({
           original_filename: file.originalFilename || file.name,
           source: 'vault' as const,
-        })),
-        ...temporaryHistoricalFiles.map((file: File) => ({
-          original_filename: file.name,
-          source: 'temporary' as const,
-        })),
-      ]
+        }))
 
       const { sheets: historicalRows, detectedMonths, filesWithoutSheet } = await extractHistoricalRows(
-        [...downloadedHistoricalFiles, ...temporaryHistoricalFiles],
+        downloadedHistoricalFiles,
         historyMeta,
       )
 
@@ -445,38 +433,20 @@ function PrnAnalysisInner() {
       )}
 
       {uiState === 'upload' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start animate-in fade-in slide-in-from-bottom-6 duration-700">
-          <div className="lg:col-span-7 xl:col-span-8">
-            <Card className="border-gray-200 shadow-md overflow-hidden bg-white">
-              <CardHeader className="bg-gray-50 border-b border-gray-100 pb-8 pt-8 px-8">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-blue-100 rounded-2xl border border-blue-200">
-                    <RefreshCw className="h-6 w-6 text-blue-600 animate-spin-slow" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-2xl font-bold text-gray-900 tracking-tight">Nova Execução de Análise</CardTitle>
-                    <CardDescription className="text-gray-500 text-sm mt-1 font-medium">
-                      Processe seus arquivos diários e históricos com o motor de regras PRN V2.
-                    </CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="p-8">
-                <PrnUploadForm key={formKey} onSubmit={onSubmit} />
-              </CardContent>
-            </Card>
-          </div>
-          <div className="lg:col-span-5 xl:col-span-4 h-full">
-            <div className="sticky top-8">
-              <PrnHistoryTable
-                historyRuns={historyRuns}
-                isHistoryLoading={isHistoryLoading}
-                fetchHistory={fetchHistory}
-                handleOpenHistory={handleOpenHistory}
-                handleDeleteHistory={handleDeleteHistory}
-              />
-            </div>
-          </div>
+        <div className="space-y-10 animate-in fade-in slide-in-from-bottom-6 duration-700">
+          <Card className="border-gray-200 shadow-md overflow-hidden bg-white">
+            <CardContent className="p-8">
+              <PrnUploadForm key={formKey} onSubmit={onSubmit} />
+            </CardContent>
+          </Card>
+
+          <PrnHistoryTable
+            historyRuns={historyRuns}
+            isHistoryLoading={isHistoryLoading}
+            fetchHistory={fetchHistory}
+            handleOpenHistory={handleOpenHistory}
+            handleDeleteHistory={handleDeleteHistory}
+          />
         </div>
       )}
     </div>

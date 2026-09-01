@@ -16,6 +16,10 @@ export interface Exame {
   unidade: string
   /** Sem "R$": o template já põe o símbolo. */
   valor: string
+  /** Detalhe opcional do exame (Word/Excel do serviço remoto). */
+  descricao?: string
+  /** Código interno opcional do exame. */
+  codigo?: string
 }
 
 export interface Case {
@@ -25,6 +29,38 @@ export interface Case {
   descricao: string
 }
 
+/**
+ * Dados do emitente (PRN) — razão social, representante legal e dados bancários.
+ *
+ * Tudo opcional: o serviço de render preenche os padrões da empresa quando o
+ * campo vem vazio. Só existe para o usuário sobrescrever caso a caso.
+ */
+export interface EmitenteProposta {
+  razao_social?: string
+  cnpj?: string
+  representante_legal?: string
+  representante_cpf?: string
+  representante_cargo?: string
+  telefone?: string
+  telefone2?: string
+  email?: string
+  email2?: string
+  site?: string
+  instagram?: string
+  endereco?: string
+  banco?: string
+  agencia?: string
+  conta?: string
+}
+
+/** Números institucionais da PRN (usados em textos do serviço remoto). */
+export interface PrnInstitucional {
+  estados?: string
+  exames_mes?: string
+  exames_ano?: string
+  ano_fundacao?: string
+}
+
 export interface DadosProposta {
   slug: string
   cliente: {
@@ -32,12 +68,36 @@ export interface DadosProposta {
     cidade_uf: string
     /** `o` (Hospital) ou `a` (Clínica) — concorda com o nome no slide 4. */
     artigo: string
+    /** Nome masculino usado no lugar de "hospital" (ex.: hospital, órgão, contratante). */
+    termo?: string
+    /** Razão social / nome formal do cliente, para textos jurídicos. */
+    nome_formal?: string
+    /** Órgão vinculado (quando o cliente é público). */
+    orgao?: string
+    /** Unidades/filiais do cliente. */
+    unidades?: string
+    /** Contatos do cliente (telefones/e-mails). */
+    contatos?: string[]
   }
   proposta: {
     cidade_emissao: string
     data: string
     validade: string
+    /** Texto de "entendimento da demanda". */
+    entendimento?: string
+    /** Descrição do objeto da proposta. */
+    objeto?: string
+    /** Condições de pagamento. */
+    pagamento?: string
+    /** Base legal (licitações). */
+    base_legal?: string
+    /** Texto de manifestação de interesse. */
+    manifestacao?: string
   }
+  /** Dados do emitente (PRN). Opcional — o serviço usa os padrões da empresa. */
+  emitente?: EmitenteProposta
+  /** Números institucionais da PRN. Opcional. */
+  prn?: PrnInstitucional
   exames: Exame[]
   cases: Case[]
 }

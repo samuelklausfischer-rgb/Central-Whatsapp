@@ -38,26 +38,11 @@ type SavedHistorySelection = {
 
 export type HistoricalFilesSelection = {
   saved: SavedHistorySelection[]
-  temporary: File[]
 }
 
 const normalizeSelection = (value: HistoricalFilesSelection | null | undefined): HistoricalFilesSelection => ({
   saved: Array.isArray(value?.saved) ? value.saved : [],
-  temporary: Array.isArray(value?.temporary) ? value.temporary : [],
 })
-
-const buildTempFileKey = (file: File) => `${file.name}-${file.size}-${file.lastModified}`
-
-const dedupeTemporaryFiles = (files: File[]) => {
-  const seen = new Set<string>()
-
-  return files.filter((file) => {
-    const key = buildTempFileKey(file)
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-}
 
 export function HistoricalFileSelector({
   value,
@@ -80,16 +65,10 @@ export function HistoricalFileSelector({
   // Evita rebaixar o mesmo arquivo do cofre a cada clique de seleção.
   const vaultFileCache = useRef(new Map<string, File>())
 
-  // Chave estável da seleção: os arrays trocam de identidade a cada onChange,
+  // Chave estável da seleção: o array troca de identidade a cada onChange,
   // mas o conteúdo selecionado é o que importa para recalcular a cobertura.
   const selectionKey = useMemo(
-    () =>
-      [
-        ...selection.saved.map((saved) => `v:${saved.name}`),
-        ...selection.temporary.map((file) => `t:${buildTempFileKey(file)}`),
-      ]
-        .sort()
-        .join('|'),
+    () => selection.saved.map((saved) => saved.name).sort().join('|'),
     [selection],
   )
 
@@ -112,7 +91,7 @@ export function HistoricalFileSelector({
   // Descobre quais meses a seleção cobre ANTES de a análise ser enviada — é o
   // que evita rodar o cruzamento com menos meses do que ele espera.
   useEffect(() => {
-    if (selection.saved.length === 0 && selection.temporary.length === 0) {
+    if (selection.saved.length === 0) {
       setCoverage(null)
       setIsInspecting(false)
       return
@@ -134,7 +113,7 @@ export function HistoricalFileSelector({
           }),
         )
 
-        const result = await inspectHistoricalCoverage([...vaultFiles, ...selection.temporary])
+        const result = await inspectHistoricalCoverage(vaultFiles)
         if (!cancelled) setCoverage(result)
       } catch (error) {
         // Falha aqui é só a prévia — não pode impedir o envio da análise.
@@ -273,43 +252,6 @@ export function HistoricalFileSelector({
     }
   }
 
-  const handleDirectFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
-    const incomingFiles = Array.from(e.target.files || [])
-    if (incomingFiles.length === 0) return
-
-    const validFiles = incomingFiles.filter((file) => file.size <= MAX_FILE_SIZE)
-    const invalidFiles = incomingFiles.filter((file) => file.size > MAX_FILE_SIZE)
-
-    if (invalidFiles.length > 0) {
-      toast({
-        title: 'Arquivo muito grande',
-        description:
-          invalidFiles.length === 1
-            ? `"${invalidFiles[0].name}" excede o limite de 10MB.`
-            : `${invalidFiles.length} arquivos excedem o limite de 10MB.`,
-        variant: 'destructive',
-      })
-    }
-
-    if (validFiles.length > 0) {
-      onChange({
-        ...selection,
-        temporary: dedupeTemporaryFiles([...selection.temporary, ...validFiles]),
-      })
-    }
-
-    if (e.target) e.target.value = ''
-  }
-
-  const removeTemporaryFile = (fileToRemove: File) => {
-    const targetKey = buildTempFileKey(fileToRemove)
-
-    onChange({
-      ...selection,
-      temporary: selection.temporary.filter((file) => buildTempFileKey(file) !== targetKey),
-    })
-  }
-
   const renderCoveragePanel = () => {
     if (isInspecting) {
       return (
@@ -383,7 +325,9 @@ export function HistoricalFileSelector({
             Cofre de Históricos
           </h4>
           <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-gray-400">
-            {selection.saved.length} do cofre e {selection.temporary.length} temporários selecionados
+            {selection.saved.length === 1
+              ? '1 arquivo selecionado'
+              : `${selection.saved.length} arquivos selecionados`}
           </p>
         </div>
         <Button
@@ -484,61 +428,6 @@ export function HistoricalFileSelector({
         />
       </label>
 
-      <div className="space-y-3 border-t border-gray-100 pt-4">
-        <div>
-          <h4 className="text-xs font-bold uppercase tracking-widest text-gray-600">
-            Arquivos Temporários
-          </h4>
-          <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-gray-400">
-            Entra apenas nesta execução e pode ser combinado com o cofre.
-          </p>
-        </div>
-
-        {selection.temporary.length > 0 ? (
-          <div className="space-y-2">
-            {selection.temporary.map((file) => (
-              <div
-                key={buildTempFileKey(file)}
-                className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 p-3"
-              >
-                <div className="flex items-center gap-3 overflow-hidden">
-                  <CheckCircle2 className="h-5 w-5 shrink-0 text-amber-600" />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-bold text-amber-800">{file.name}</div>
-                    <div className="text-[10px] uppercase tracking-widest text-amber-500 mt-0.5">
-                      Apenas para esta execução
-                    </div>
-                  </div>
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => removeTemporaryFile(file)}
-                  className="h-8 w-8 p-0 text-amber-500 hover:bg-amber-100 hover:text-amber-700"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="rounded-xl border border-dashed border-gray-200 bg-transparent p-4 text-center text-sm font-bold text-gray-400">
-            Nenhum arquivo temporário selecionado.
-          </div>
-        )}
-
-        <label className="relative flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 bg-transparent px-4 py-3 text-sm font-bold text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-all">
-          Usar arquivos temporários sem salvar
-          <input
-            type="file"
-            className="hidden"
-            accept=".xlsx, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            multiple
-            onChange={handleDirectFileSelect}
-          />
-        </label>
-      </div>
     </div>
 
     <AlertDialog open={!!fileToDelete} onOpenChange={(open) => !open && setFileToDelete(null)}>

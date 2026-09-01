@@ -85,7 +85,10 @@ export const carregarProposta = async (slug: string): Promise<DadosProposta | nu
     },
     // Colunas jsonb: o banco devolve o que foi gravado, mas uma linha antiga
     // pode não ter todos os campos — os padrões evitam `undefined` no template.
+    // Espalhamos `r.proposta` inteiro para que os textos editáveis (objeto,
+    // entendimento, pagamento, base_legal, manifestacao) voltem ao reabrir.
     proposta: {
+      ...(r.proposta || {}),
       cidade_emissao: r.proposta?.cidade_emissao || 'Joinville',
       data: r.proposta?.data || '',
       validade: r.proposta?.validade || '90 dias',

@@ -28,35 +28,38 @@ export const formSchema = z.object({
     .any()
     .refine((files) => files?.length === 1, 'Arquivo diário é obrigatório.')
     .refine((files) => files?.[0]?.size <= MAX_FILE_SIZE, 'O tamanho máximo do arquivo é 10MB.'),
-  historical_files: z
-    .any()
-    .refine((val) => {
-      const saved = Array.isArray(val?.saved) ? val.saved : []
-      const temporary = Array.isArray(val?.temporary) ? val.temporary : []
-      return saved.length + temporary.length > 0
-    }, 'Ao menos um arquivo histórico é obrigatório.')
-    .refine((val) => {
-      const temporary = Array.isArray(val?.temporary) ? val.temporary : []
-      return temporary.every((file: File) => file?.size <= MAX_FILE_SIZE)
-    }, 'O tamanho máximo de cada arquivo é 10MB.'),
+  historical_files: z.any().refine((val) => {
+    const saved = Array.isArray(val?.saved) ? val.saved : []
+    return saved.length > 0
+  }, 'Selecione ao menos um arquivo histórico no cofre.'),
 })
+
+/** Numerozinho que marca a ordem dos passos do formulário. */
+function StepBadge({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-blue-600 text-xs font-bold text-white">
+      {children}
+    </span>
+  )
+}
 
 export function PrnUploadForm({ onSubmit }: { onSubmit: (v: z.infer<typeof formSchema>) => void }) {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
+      // Já vem com o dia em que a página foi aberta — que é o caso normal.
+      // O formulário é remontado a cada nova análise (key={formKey} na página),
+      // então a data se renova sozinha. Continua editável pelo calendário.
+      reference_date: new Date(),
       historical_files: {
         saved: [],
-        temporary: [],
       },
     },
   })
 
   const hasDailyFile = !!form.watch('daily_file')?.[0]
   const historicalFilesVal = form.watch('historical_files')
-  const hasHistoricalFile =
-    (Array.isArray(historicalFilesVal?.saved) && historicalFilesVal.saved.length > 0) ||
-    (Array.isArray(historicalFilesVal?.temporary) && historicalFilesVal.temporary.length > 0)
+  const hasHistoricalFile = Array.isArray(historicalFilesVal?.saved) && historicalFilesVal.saved.length > 0
   const isSubmitDisabled = !hasDailyFile || !hasHistoricalFile
 
   return (
@@ -68,9 +71,12 @@ export function PrnUploadForm({ onSubmit }: { onSubmit: (v: z.infer<typeof formS
           render={({ field }) => (
             <FormItem className="flex flex-col space-y-3">
               <FormLabel className="text-gray-800 font-bold text-sm uppercase tracking-widest flex items-center gap-2">
+                <StepBadge>1</StepBadge>
                 Data de Referência
-                <span className="text-gray-400 font-medium lowercase tracking-normal text-xs">(opcional)</span>
               </FormLabel>
+              <p className="text-sm text-gray-500">
+                Já vem preenchida com a data de hoje. Só mude se a análise for de outro dia.
+              </p>
               <Popover>
                 <PopoverTrigger asChild>
                   <FormControl>
@@ -109,31 +115,41 @@ export function PrnUploadForm({ onSubmit }: { onSubmit: (v: z.infer<typeof formS
           )}
         />
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-2 items-start">
+        {/* Passo principal: é aqui que a pessoa erra menos se o bloco gritar. */}
+        <div className="rounded-3xl border-2 border-blue-200 bg-blue-50/40 p-6 md:p-8">
+          <div className="mb-2 flex items-center gap-2 text-sm font-bold uppercase tracking-widest text-gray-800">
+            <StepBadge>2</StepBadge>
+            Arquivo Diário
+          </div>
+          <p className="mb-5 text-sm text-gray-600">
+            A planilha com os <b>pagamentos lançados no dia</b> — é ela que será comparada com o histórico.
+          </p>
           <FormField
             control={form.control}
             name="daily_file"
-            render={({ field }) => <FileUploadDropzone field={field} label="Arquivo Diário" />}
-          />
-          <FormField
-            control={form.control}
-            name="historical_files"
-            render={({ field }) => (
-              <FormItem className="space-y-4">
-                <FormLabel className="text-gray-800 font-bold text-sm uppercase tracking-widest block">
-                  Arquivo Histórico
-                </FormLabel>
-                <FormControl>
-                  <HistoricalFileSelector
-                    value={field.value}
-                    onChange={field.onChange}
-                  />
-                </FormControl>
-                <FormMessage className="text-red-500 text-xs font-bold uppercase" />
-              </FormItem>
-            )}
+            render={({ field }) => <FileUploadDropzone field={field} />}
           />
         </div>
+
+        <FormField
+          control={form.control}
+          name="historical_files"
+          render={({ field }) => (
+            <FormItem className="space-y-3">
+              <FormLabel className="text-gray-800 font-bold text-sm uppercase tracking-widest flex items-center gap-2">
+                <StepBadge>3</StepBadge>
+                Arquivo Histórico
+              </FormLabel>
+              <p className="text-sm text-gray-500">
+                As bases dos meses anteriores que servem de comparação. O cruzamento usa os 3 meses mais recentes.
+              </p>
+              <FormControl>
+                <HistoricalFileSelector value={field.value} onChange={field.onChange} />
+              </FormControl>
+              <FormMessage className="text-red-500 text-xs font-bold uppercase" />
+            </FormItem>
+          )}
+        />
 
         <div className="pt-8 border-t border-gray-100 flex justify-end">
           <Button
