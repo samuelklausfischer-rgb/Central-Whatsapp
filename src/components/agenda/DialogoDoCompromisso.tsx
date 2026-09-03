@@ -10,6 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import type { AgendaEscopo, AgendaGroup, AgendaImportancia } from '@/lib/supabase/types'
+import type { StatusDaConexao } from '@/services/agenda_microsoft'
 import { COR_AVISO_REPETE } from './cores'
 import type { ItemDaAgenda, Rascunho } from './tipos'
 
@@ -27,7 +28,7 @@ export function DialogoDoCompromisso({
   rascunho,
   setRascunho,
   grupos,
-  conexaoConectada,
+  conexao,
   salvando,
   aoSalvar,
 }: {
@@ -37,10 +38,34 @@ export function DialogoDoCompromisso({
   rascunho: Rascunho
   setRascunho: Dispatch<SetStateAction<Rascunho>>
   grupos: AgendaGroup[]
-  conexaoConectada: boolean
+  /**
+   * O status inteiro, e não só `conectado`: a caixa de convidar precisa
+   * distinguir "você ainda não ligou o seu Outlook" (a pessoa resolve na barra
+   * de cima) de "o Outlook nem foi configurado no servidor" (aí é com quem
+   * administra o 365, e insistir seria mandar a pessoa numa tarefa impossível).
+   */
+  conexao: StatusDaConexao
   salvando: boolean
   aoSalvar: () => void
 }) {
+  /*
+    O convite do grupo já foi mandado alguma vez?
+
+    Isso TRANCA a caixa marcada, pelo mesmo motivo que "Salvar no Outlook" fica
+    trancada ao editar: desmarcar aqui significaria cancelar o compromisso na
+    agenda de todo mundo que já aceitou — um clique de arrependimento disparando
+    uma leva de cancelamentos. Para desfazer, o caminho é excluir o compromisso,
+    que já cancela no Outlook e diz o que vai fazer antes.
+
+    Marcar continua possível num compromisso de grupo que nasceu sem convite: aí
+    não há nada para desfazer, só convite a mandar.
+  */
+  const conviteJaFeito = Boolean(editando?.outlook_event_id)
+  // O evento fica na caixa de QUEM CRIOU, e o id dele só vale com o token dele.
+  // Um admin editando o compromisso de outra pessoa não tem como convidar.
+  const souDono = !editando || editando.souOCriador
+  const podeMexerNoConvite = conexao.conectado && souDono && !conviteJaFeito
+
   // Quem fecha limpa o `editando` (fica com quem chama, em `aoAbrirMudar`):
   // sem isso, abrir "Novo" logo depois de editar reabriria em modo de edição e
   // salvaria por cima do compromisso errado.
@@ -147,7 +172,7 @@ export function DialogoDoCompromisso({
             Só na agenda pessoal: "setor" e "grupo" são conceitos nossos, que
             não existem no Outlook de ninguém.
           */}
-          {rascunho.escopo === 'usuario' && conexaoConectada && (
+          {rascunho.escopo === 'usuario' && conexao.conectado && (
             <label
               className={cn(
                 'flex items-start gap-2.5 rounded-lg border border-border/60 bg-accent/30 p-3',
@@ -196,6 +221,49 @@ export function DialogoDoCompromisso({
                 </SelectContent>
               </Select>
             </div>
+          )}
+
+          {/*
+            Convidar o grupo no Outlook — SÓ no escopo de grupo.
+
+            É o oposto de "Salvar no Outlook" logo acima: aquele TIRA o
+            compromisso da nossa agenda, este o mantém aqui e manda o convite
+            por cima. Desmarcado, o compromisso de grupo continua funcionando
+            como sempre funcionou — todo mundo do grupo o vê no Central Whats.
+            Marcado, ele também cai na agenda da Microsoft de cada um, e aparece
+            no celular deles sem passar por aqui.
+
+            A caixa aparece mesmo desabilitada, e não some: um campo ausente não
+            explica nada, e a pessoa ficaria procurando onde convida o grupo.
+          */}
+          {rascunho.escopo === 'grupo' && (
+            <label
+              className={cn(
+                'flex items-start gap-2.5 rounded-lg border border-border/60 bg-accent/30 p-3',
+                podeMexerNoConvite ? 'cursor-pointer' : 'cursor-default opacity-70',
+              )}
+            >
+              <Checkbox
+                checked={rascunho.convidarOutlook}
+                onCheckedChange={(v) => setRascunho((r) => ({ ...r, convidarOutlook: v === true }))}
+                disabled={!podeMexerNoConvite}
+                className="mt-0.5"
+              />
+              <span className="min-w-0 text-sm">
+                Convidar o grupo no Outlook
+                <span className="block text-xs text-muted-foreground">
+                  {!conexao.configurado
+                    ? 'O Outlook ainda não foi configurado no servidor. Fale com quem administra o Microsoft 365.'
+                    : !conexao.conectado
+                      ? 'Conecte o seu Outlook na barra acima para poder convidar o grupo.'
+                      : !souDono
+                        ? 'Só quem criou pode convidar: o convite sai da caixa de correio de quem organiza.'
+                        : conviteJaFeito
+                          ? 'O grupo já foi convidado. Ao salvar, a lista é refeita com quem está no grupo agora. Para cancelar, exclua o compromisso.'
+                          : 'Cai na agenda da Microsoft de cada pessoa do grupo. Quem ainda não conectou o Outlook continua vendo só por aqui.'}
+                </span>
+              </span>
+            </label>
           )}
 
           <div className="grid grid-cols-2 gap-3">

@@ -18,8 +18,9 @@ import {
   subWeeks,
 } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { ChevronLeft, ChevronRight, CalendarDays, Plus, RefreshCw, Users } from 'lucide-react'
+import { ChevronLeft, ChevronRight, CalendarDays, Plus, RefreshCw, Search, Users, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAuth } from '@/hooks/use-auth'
 import { useToast } from '@/hooks/use-toast'
@@ -38,6 +39,7 @@ import {
   type Rascunho,
   type Visao,
 } from '@/components/agenda/tipos'
+import { porImportanciaDepoisHorario } from '@/components/agenda/ordem'
 import {
   atualizarEvento,
   criarEvento,
@@ -58,6 +60,7 @@ import {
   excluirDoOutlook,
   seRepete as seRepeteNoOutlook,
   type EventoDoOutlook,
+  type RascunhoDoOutlook,
   type StatusDaConexao,
 } from '@/services/agenda_microsoft'
 import { useRealtime } from '@/hooks/use-realtime'
@@ -127,8 +130,14 @@ function daNossaAgenda(
     setor: ev.setor,
     podeEditar: meu || ev.assigned_to === meuId || souAdmin,
     podeExcluir: meu || souAdmin,
+    souOCriador: meu,
     seRepete: false,
     groupId: ev.group_id,
+    // `?? null` porque as três são opcionais no tipo (ver `AgendaEvent`): uma
+    // linha gravada antes da migration 20260903143607 nem traz a chave.
+    outlook_event_id: ev.outlook_event_id ?? null,
+    outlook_ical_uid: ev.outlook_ical_uid ?? null,
+    outlook_sync_erro: ev.outlook_sync_erro ?? null,
   }
 }
 
@@ -151,8 +160,15 @@ function doOutlook(ev: EventoDoOutlook): ItemDaAgenda {
     // É a agenda da própria pessoa — quem consegue ler, consegue mexer.
     podeEditar: true,
     podeExcluir: true,
+    souOCriador: true,
     seRepete: seRepeteNoOutlook(ev),
     groupId: null,
+    // Um item lido DO Outlook não tem vínculo a registrar: ele já é o evento.
+    // O `outlook_event_id` existe para amarrar uma linha NOSSA a um evento de
+    // lá — aqui não há linha nossa nenhuma.
+    outlook_event_id: null,
+    outlook_ical_uid: null,
+    outlook_sync_erro: null,
   }
 }
 
@@ -179,6 +195,10 @@ function rascunhoVazio(dia: Date): Rascunho {
     escopo: 'usuario',
     groupId: '',
     noOutlook: false,
+    // Desmarcado por padrão: convidar dispara e-mail para o grupo inteiro, e
+    // isso tem de ser um ato deliberado. Um compromisso de grupo continua
+    // visível para todo mundo no Central Whats sem convite nenhum.
+    convidarOutlook: false,
   }
 }
 
@@ -209,9 +229,17 @@ export default function Agenda() {
   const [visao, setVisao] = useState<Visao>('mes')
   const [atualizandoOutlook, setAtualizandoOutlook] = useState(false)
   const [gruposAberto, setGruposAberto] = useState(false)
+  /** Id do compromisso cujo convite está sendo reenviado agora, ou null. */
+  const [reenviandoConvite, setReenviandoConvite] = useState<string | null>(null)
   const [ultimaSync, setUltimaSync] = useState<Date | null>(null)
   /** Reconta sozinho para o "há X min" andar sem depender de outra mudança. */
   const [, setTiquetaque] = useState(0)
+  /**
+   * Busca da lista lateral. Filtro de DESENHO, não de dado: peneira o que já
+   * está carregado, sem ir ao banco. O volume de um dia é pequeno, então não
+   * precisa do `useDeferredValue` que a lista de conversas usa.
+   */
+  const [busca, setBusca] = useState('')
 
   const souAdmin = Boolean(user?.is_admin)
 
@@ -418,6 +446,42 @@ export default function Agenda() {
   const doDiaSelecionado = porDia.get(format(diaSelecionado, 'yyyy-MM-dd')) || []
 
   /**
+   * A lista lateral, na ordem em que ela é lida: importante em cima.
+   *
+   * Derivado, não no lugar — `porDia` continua cronológico porque as grades
+   * dependem disso (ver o comentário em `ordem.ts`). A cópia com spread existe
+   * porque `sort` muda o array no lugar, e o original é o mesmo objeto guardado
+   * no `Map` do `porDia`: ordenar direto ali bagunçaria as grades.
+   */
+  const doDiaOrdenado = useMemo(
+    () => [...doDiaSelecionado].sort(porImportanciaDepoisHorario),
+    [doDiaSelecionado],
+  )
+
+  /** O que a busca deixa passar. Sem termo digitado, passa tudo. */
+  const doDiaVisivel = useMemo(() => {
+    const termo = busca.trim().toLowerCase()
+    if (!termo) return doDiaOrdenado
+    return doDiaOrdenado.filter((ev) =>
+      `${ev.titulo} ${ev.descricao ?? ''}`.toLowerCase().includes(termo),
+    )
+  }, [doDiaOrdenado, busca])
+
+  /**
+   * Trocar de dia zera a busca.
+   *
+   * Sem isto, um termo digitado num dia continuaria filtrando o dia seguinte —
+   * e como a lista lateral é a única coisa que a busca afeta, a pessoa veria
+   * "nada encontrado" num dia cheio e não teria pista do porquê. É efeito e não
+   * um `selecionarDia()` porque o dia muda por cinco caminhos diferentes
+   * (setas, "hoje", clique no mês, clique na semana, atalho) — um só lugar
+   * cobre todos, inclusive os que vierem depois.
+   */
+  useEffect(() => {
+    setBusca('')
+  }, [diaSelecionado])
+
+  /**
    * Navegar significa coisa diferente em cada visão — mês a mês, semana a
    * semana, dia a dia. No mês o `diaSelecionado` acompanha, senão a lista
    * lateral continuaria mostrando um dia que não está mais na grade.
@@ -481,8 +545,112 @@ export default function Agenda() {
       escopo: ev.escopo ?? 'usuario',
       groupId: ev.groupId ?? '',
       noOutlook: ev.origem === 'outlook',
+      // Já convidado continua marcado — o diálogo tranca a caixa nesse caso
+      // (ver `DialogoDoCompromisso`), então isto é o que a pessoa vê como
+      // estado atual, não uma escolha nova.
+      convidarOutlook: Boolean(ev.outlook_event_id),
     })
     setDialogoAberto(true)
+  }
+
+  /**
+   * Manda (ou refaz) o convite do grupo no Outlook e GRAVA o desfecho na linha
+   * do compromisso.
+   *
+   * O DESFECHO É SEMPRE GRAVADO — deu certo ou não. Sem isso a falha viraria um
+   * toast que some em cinco segundos: quem marcou acharia que convidou o grupo
+   * e só descobriria que ninguém foi convidado quando a sala ficasse vazia. Com
+   * a mensagem na linha, o cartão do dia mostra o aviso e oferece tentar de
+   * novo, quantas vezes forem precisas.
+   *
+   * Esta função NUNCA lança. Ela é chamada depois de o compromisso já estar
+   * salvo, e o convite é um extra: uma exceção aqui subindo para o `catch` do
+   * `salvar()` faria a tela dizer "não foi possível criar o compromisso" sobre
+   * um compromisso que foi criado.
+   *
+   * Com `outlookEventId` preenchido é PATCH (o mesmo evento, lista de
+   * convidados recalculada do grupo de agora); sem ele é POST, criando o evento
+   * na caixa de quem está chamando. Repare que essa distinção é o que permite
+   * ligar o convite depois, num compromisso de grupo que nasceu sem ele.
+   */
+  const sincronizarConviteDoGrupo = useCallback(
+    async (params: {
+      eventoId: string
+      groupId: string
+      outlookEventId: string | null
+      corpo: RascunhoDoOutlook
+    }): Promise<{ ok: boolean; titulo: string; detalhe?: string }> => {
+      try {
+        const corpo = { ...params.corpo, group_id: params.groupId }
+        const resposta = params.outlookEventId
+          ? await atualizarNoOutlook(params.outlookEventId, corpo)
+          : await criarNoOutlook(corpo)
+
+        await atualizarEvento(params.eventoId, {
+          outlook_event_id: resposta.id,
+          outlook_ical_uid: resposta.ical_uid,
+          outlook_sync_erro: null,
+        })
+
+        const quantos = resposta.convidados ?? 0
+        return {
+          ok: true,
+          titulo: 'Compromisso salvo e grupo convidado',
+          // Zero convidados não é erro: pode ser um grupo em que só o criador
+          // conectou o Outlook. Dizer isso evita a pessoa ficar esperando uma
+          // confirmação que nunca vai chegar de ninguém.
+          detalhe:
+            quantos === 0
+              ? 'Ninguém mais do grupo tem o Outlook conectado — o convite ficou só na sua agenda.'
+              : quantos === 1
+                ? '1 pessoa do grupo recebeu o convite no Outlook.'
+                : `${quantos} pessoas do grupo receberam o convite no Outlook.`,
+        }
+      } catch (e) {
+        const mensagem = e instanceof Error ? e.message : 'Não foi possível convidar o grupo no Outlook'
+        // O `.catch` vazio é intencional: se até a gravação do erro falhar (o
+        // banco caiu junto), não há mais nada a fazer aqui, e deixar essa
+        // segunda falha estourar apagaria a primeira, que é a informativa.
+        await atualizarEvento(params.eventoId, { outlook_sync_erro: mensagem }).catch(() => {})
+        return {
+          ok: false,
+          titulo: 'Compromisso salvo, mas o convite no Outlook falhou',
+          detalhe: mensagem,
+        }
+      }
+    },
+    [],
+  )
+
+  /** O botão "tentar de novo" do cartão, para um convite que falhou antes. */
+  const reenviarConvite = async (ev: ItemDaAgenda) => {
+    if (!ev.groupId || reenviandoConvite) return
+    setReenviandoConvite(ev.id)
+    try {
+      const desfecho = await sincronizarConviteDoGrupo({
+        eventoId: ev.id,
+        groupId: ev.groupId,
+        outlookEventId: ev.outlook_event_id,
+        // O Graph quer horário LOCAL sem fuso (a função declara
+        // America/Sao_Paulo por nós) e o que temos guardado é ISO em UTC —
+        // recortar a string traria o compromisso três horas fora do lugar.
+        corpo: {
+          titulo: ev.titulo,
+          descricao: ev.descricao,
+          inicio: paraCampoLocal(new Date(ev.starts_at)),
+          fim: paraCampoLocal(new Date(ev.ends_at)),
+          dia_inteiro: ev.dia_inteiro,
+        },
+      })
+      toast({
+        title: desfecho.ok ? 'Grupo convidado no Outlook' : desfecho.titulo,
+        description: desfecho.detalhe,
+        variant: desfecho.ok ? undefined : 'destructive',
+      })
+      await carregar()
+    } finally {
+      setReenviandoConvite(null)
+    }
   }
 
   const salvar = async () => {
@@ -562,15 +730,61 @@ export default function Agenda() {
         group_id: rascunho.escopo === 'grupo' ? rascunho.groupId : null,
       }
 
+      let salvo
       if (editando) {
         // `created_by` e `assigned_to` ficam DE FORA: quem editou não vira dono,
         // e a designação tem gatilho próprio no banco (`agenda_events_designacao`).
-        await atualizarEvento(editando.id, campos)
-        toast({ title: 'Compromisso atualizado' })
+        salvo = await atualizarEvento(editando.id, campos)
       } else {
-        await criarEvento({ ...campos, created_by: user.id, assigned_to: null })
-        toast({ title: 'Compromisso criado' })
+        salvo = await criarEvento({ ...campos, created_by: user.id, assigned_to: null })
       }
+
+      /*
+        O CONVITE VEM DEPOIS, E NÃO PODE DESFAZER O QUE JÁ FOI SALVO.
+
+        Nesta altura o compromisso já existe no banco. Se o Graph recusar, a
+        pessoa perde o convite, não a reunião — e é por isso que a chamada está
+        aqui embaixo e não antes, e por isso `sincronizarConviteDoGrupo` engole
+        a exceção em vez de deixá-la cair no `catch` lá de baixo (que diria
+        "não foi possível criar o compromisso" sobre um compromisso criado).
+
+        `souOCriador` na condição de edição não é zelo: o evento no Outlook mora
+        na caixa de quem criou, e o `outlook_event_id` só vale com o token dele.
+        Um admin editando o compromisso de outra pessoa criaria um evento novo
+        na PRÓPRIA caixa, sobrescreveria o id na linha, e o original ficaria
+        órfão no Outlook do criador — vivo e sem ninguém capaz de cancelá-lo.
+      */
+      const convidar =
+        rascunho.escopo === 'grupo' &&
+        rascunho.convidarOutlook &&
+        conexao.conectado &&
+        Boolean(salvo.group_id) &&
+        (!editando || editando.souOCriador)
+
+      if (convidar) {
+        const desfecho = await sincronizarConviteDoGrupo({
+          eventoId: salvo.id,
+          groupId: String(salvo.group_id),
+          // Ao editar, reaproveita o evento que já existe lá; ao criar, é nulo
+          // e a função faz o POST.
+          outlookEventId: editando?.outlook_event_id ?? null,
+          corpo: {
+            titulo: campos.titulo,
+            descricao: campos.descricao,
+            inicio: rascunho.inicio,
+            fim: rascunho.fim,
+            dia_inteiro: rascunho.diaInteiro,
+          },
+        })
+        toast({
+          title: desfecho.titulo,
+          description: desfecho.detalhe,
+          variant: desfecho.ok ? undefined : 'destructive',
+        })
+      } else {
+        toast({ title: editando ? 'Compromisso atualizado' : 'Compromisso criado' })
+      }
+
       setDialogoAberto(false)
       await carregar()
     } catch (e) {
@@ -604,8 +818,47 @@ export default function Agenda() {
         setRecarregaOutlook((n) => n + 1)
         return
       }
+      /*
+        Compromisso de grupo com convite: cancela no Outlook ANTES de apagar
+        daqui.
+
+        A ordem importa. Apagar a linha primeiro perderia o `outlook_event_id`,
+        e o evento continuaria vivo na agenda de todo mundo que foi convidado,
+        sem nenhum caminho no app para cancelá-lo. Cancelar na caixa do
+        organizador é o que faz o Exchange retirar a cópia de cada convidado.
+
+        A falha do Graph NÃO impede a exclusão local — senão um Outlook fora do
+        ar transformaria o compromisso numa linha impossível de apagar. O 404 já
+        volta como sucesso da própria função (é o caso de quem apagou pelo
+        celular antes), então o que sobra aqui é falha de verdade, e ela vira
+        aviso no lugar da confirmação.
+
+        `souOCriador` porque o id só existe na caixa dele: um admin apagando o
+        compromisso de outra pessoa chamaria o Graph com o token errado. Nesse
+        caso o evento fica mesmo órfão no Outlook do criador — a alternativa
+        seria esta função escrever na caixa de quem não pediu nada, o que é
+        justamente o poder que o modelo organizador+attendees existe para não
+        precisar ter.
+      */
+      let avisoDoOutlook: string | null = null
+      if (ev.outlook_event_id && ev.souOCriador) {
+        try {
+          await excluirDoOutlook(ev.outlook_event_id)
+        } catch (e) {
+          avisoDoOutlook = e instanceof Error ? e.message : 'O Outlook não respondeu.'
+        }
+      }
+
       await excluirEvento(ev.id)
-      toast({ title: 'Compromisso excluído' })
+      toast(
+        avisoDoOutlook
+          ? {
+              title: 'Compromisso excluído aqui, mas o convite pode ter ficado no Outlook',
+              description: `${avisoDoOutlook} Confira na sua agenda da Microsoft.`,
+              variant: 'destructive',
+            }
+          : { title: 'Compromisso excluído' },
+      )
       await carregar()
     } catch (e) {
       toast({
@@ -788,6 +1041,30 @@ export default function Agenda() {
               )}
             </div>
 
+            {/* A busca só aparece quando há o que buscar: num dia vazio ela
+                seria um campo que não filtra nada. */}
+            {doDiaSelecionado.length > 0 && (
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={busca}
+                  onChange={(e) => setBusca(e.target.value)}
+                  placeholder="Buscar por nome"
+                  className="h-9 pl-8 pr-8"
+                />
+                {busca && (
+                  <button
+                    type="button"
+                    onClick={() => setBusca('')}
+                    aria-label="Limpar busca"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            )}
+
             {carregando ? (
               <p className="text-sm text-muted-foreground">Carregando…</p>
             ) : doDiaSelecionado.length === 0 ? (
@@ -801,13 +1078,22 @@ export default function Agenda() {
                   <Plus className="h-3 w-3" /> Marcar algo neste dia
                 </button>
               </div>
+            ) : doDiaVisivel.length === 0 ? (
+              /* Dia TEM compromisso, a busca é que não achou — dizer "nada
+                 marcado" aqui seria mentira e faria a pessoa duvidar do que
+                 ela mesma agendou. */
+              <p className="text-sm text-muted-foreground">
+                Nada encontrado para «{busca.trim()}» neste dia.
+              </p>
             ) : (
-              doDiaSelecionado.map((ev) => (
+              doDiaVisivel.map((ev) => (
                 <CartaoDoCompromisso
                   key={ev.id}
                   ev={ev}
                   aoEditar={abrirEdicao}
                   aoExcluir={remover}
+                  aoReenviarConvite={reenviarConvite}
+                  reenviandoConvite={reenviandoConvite === ev.id}
                 />
               ))
             )}
@@ -838,7 +1124,7 @@ export default function Agenda() {
         rascunho={rascunho}
         setRascunho={setRascunho}
         grupos={grupos}
-        conexaoConectada={conexao.conectado}
+        conexao={conexao}
         salvando={salvando}
         aoSalvar={salvar}
       />

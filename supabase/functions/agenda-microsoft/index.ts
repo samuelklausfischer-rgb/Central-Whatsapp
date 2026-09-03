@@ -14,7 +14,14 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
  *   callback     — retorno do consentimento (o navegador vem parar AQUI)
  *   eventos      — compromissos de um período
  *   criar        — cria compromisso no Outlook
+ *   atualizar    — edita um compromisso
+ *   excluir      — cancela um compromisso
  *   desconectar  — apaga a conexão
+ *
+ * `criar` e `atualizar` aceitam um `group_id` opcional. Com ele, o compromisso
+ * nasce na caixa de QUEM CRIOU com todo mundo do grupo como `attendees`, e o
+ * Exchange é quem espalha a cópia para a agenda de cada um — ver
+ * `convidadosDoGrupo`.
  */
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || ''
@@ -279,6 +286,78 @@ async function buscarEventos(token: string, inicioIso: string, fimIso: string) {
   return { erro: null, eventos }
 }
 
+// ——— Convite de grupo ———
+
+interface Convidado {
+  emailAddress: { address: string }
+  type: 'required'
+}
+
+/**
+ * Quem entra como CONVIDADO num compromisso de grupo.
+ *
+ * POR QUE ISSO É RESOLVIDO AQUI, E NÃO NO NAVEGADOR
+ * O e-mail de trabalho de cada pessoa nunca sai do servidor. A RPC `colegas()`
+ * (migration 20260825180000) devolve de propósito só nome, setor e um booleano
+ * `tem_outlook` — sem endereço nenhum. Se a tela montasse a lista de convite,
+ * teria de conhecer o e-mail de todo mundo, e aí bastaria abrir o DevTools para
+ * extrair o catálogo da empresa inteira. Aqui a lista é montada com
+ * `service_role`, exatamente como `lerConexao` faz com os tokens, e o cliente
+ * só manda o `group_id`.
+ *
+ * POR QUE UM ÚNICO EVENTO COM `attendees`, E NÃO UM EVENTO POR PESSOA
+ * Uma chamada por membro exigiria o token de CADA um — que nem sempre existe, e
+ * que daria a esta função poder de escrever na caixa de quem não pediu nada
+ * naquele momento. Além disso os eventos seriam independentes: cada um com seu
+ * `iCalUId`, sem cancelamento em cadeia, e a tela veria a mesma reunião N vezes
+ * (é justamente para isso que `outlook_ical_uid` existe). Com organizador +
+ * attendees o Exchange propaga a cópia sozinho, PRESERVANDO o `iCalUId`, e um
+ * cancelamento na caixa do organizador cancela para todos.
+ *
+ * QUEM FICA DE FORA
+ *   - o próprio criador: ele é o ORGANIZADOR. Convidar a si mesmo faria o
+ *     Outlook mostrar um convite pendente de aceite do próprio evento;
+ *   - quem não conectou o Outlook, ou conectou e ficou sem `conta_email`.
+ *     NÃO se usa `profiles.email` como plano B de propósito: aquele campo é o
+ *     login do Central Whats (tem `@hotmail` lá dentro) e não é
+ *     necessariamente um endereço do Exchange. Um endereço inválido no array
+ *     faz o Graph recusar o evento INTEIRO — um convidado errado derrubaria o
+ *     convite dos outros. A tela já avisa quem está nessa situação, na hora de
+ *     montar o grupo (`DialogoDeGrupos`).
+ */
+async function convidadosDoGrupo(groupId: string, criadorId: string): Promise<Convidado[]> {
+  const respMembros = await fetch(
+    `${SUPABASE_URL}/rest/v1/agenda_group_members?group_id=eq.${encodeURIComponent(groupId)}&select=user_id`,
+    { headers: serviceHeaders },
+  )
+  if (!respMembros.ok) return []
+  const membros = (await respMembros.json()) as { user_id: string }[]
+
+  const ids = (Array.isArray(membros) ? membros : [])
+    .map((m) => m.user_id)
+    .filter((id) => id && id !== criadorId)
+  // Sem este corte a URL sairia como `user_id=in.()`, que o PostgREST recusa
+  // com 400 — um grupo de uma pessoa só viraria "Graph respondeu 400".
+  if (ids.length === 0) return []
+
+  const respConexoes = await fetch(
+    `${SUPABASE_URL}/rest/v1/agenda_conexoes?user_id=in.(${encodeURIComponent(ids.join(','))})&select=user_id,conta_email`,
+    { headers: serviceHeaders },
+  )
+  if (!respConexoes.ok) return []
+  const conexoes = (await respConexoes.json()) as { user_id: string; conta_email: string | null }[]
+
+  const enderecos = new Set<string>()
+  for (const c of Array.isArray(conexoes) ? conexoes : []) {
+    const email = (c.conta_email ?? '').trim()
+    // O `Set` cobre o caso de duas contas do app apontarem para a mesma caixa:
+    // o Graph aceita o endereço repetido, mas a pessoa recebe dois convites.
+    if (email) enderecos.add(email.toLowerCase())
+  }
+
+  return [...enderecos].map((address) => ({ emailAddress: { address }, type: 'required' as const }))
+}
+
 // ——— Entrada ———
 
 /**
@@ -419,12 +498,34 @@ Deno.serve(async (req) => {
     // Mesmo corpo nos dois casos. O Graph aceita PATCH parcial, mas mandar o
     // conjunto inteiro evita o caso em que limpar a descrição não apagaria nada
     // — campo ausente num PATCH é "não mexa", não "deixe vazio".
-    const corpo = {
+    const corpo: Record<string, unknown> = {
       subject: String(c.titulo),
       body: { contentType: 'text', content: String(c.descricao ?? '') },
       start: { dateTime: String(c.inicio), timeZone: FUSO },
       end: { dateTime: String(c.fim), timeZone: FUSO },
       isAllDay: Boolean(c.dia_inteiro),
+    }
+
+    /*
+      `attendees` SÓ entra quando veio um `group_id`.
+
+      A ausência da chave é significativa num PATCH: mandar `attendees: []` num
+      compromisso pessoal APAGARIA quem a pessoa tivesse convidado à mão pelo
+      próprio Outlook — e, pior, o Exchange enviaria o cancelamento para essa
+      gente. Como o compromisso pessoal nunca passa `group_id`, a chave nem
+      aparece no corpo, e o Graph deixa a lista existente em paz.
+
+      Na EDIÇÃO de um compromisso de grupo a lista é RECALCULADA do estado atual
+      de `agenda_group_members`, e não reaproveitada do que já estava no evento:
+      é isso que faz quem entrou no grupo depois receber o convite na próxima
+      edição, e quem saiu receber o cancelamento. O PATCH substitui a lista
+      inteira — e aqui isso é o comportamento desejado, não um efeito colateral.
+    */
+    const groupId = String(c.group_id ?? '')
+    let convidados: Convidado[] = []
+    if (groupId) {
+      convidados = await convidadosDoGrupo(groupId, userId)
+      corpo.attendees = convidados
     }
 
     const resp = await fetch(
@@ -437,7 +538,23 @@ Deno.serve(async (req) => {
     )
     const dados = await resp.json().catch(() => ({}))
     if (!resp.ok) return json({ error: String(dados?.error?.message ?? `Graph respondeu ${resp.status}`) }, 502)
-    return json({ ok: true, id: dados.id ?? idDoEvento })
+
+    /*
+      `ical_uid` volta porque é a ÚNICA chave que vale nas outras caixas.
+
+      O `id` devolvido aqui é o da caixa do organizador e não serve para achar o
+      mesmo compromisso no Outlook de um convidado — cada caixa reescreve o seu.
+      O `iCalUId` é o mesmo para todos, e é por ele que a tela deduplica o que
+      lê do Outlook contra o que já está na nossa agenda. Ele NÃO pode ser
+      escolhido por nós: quem o gera é o servidor da Microsoft, e é justamente
+      por isso que o modelo "um evento por pessoa" não funcionaria.
+    */
+    return json({
+      ok: true,
+      id: dados.id ?? idDoEvento,
+      ical_uid: dados.iCalUId ?? null,
+      convidados: convidados.length,
+    })
   }
 
   if (rota === 'excluir') {
@@ -449,6 +566,23 @@ Deno.serve(async (req) => {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token}` },
     })
+
+    /*
+      404 é SUCESSO aqui, não erro.
+
+      Cancelar algo que já não existe é a mesma coisa que cancelar: o objetivo
+      da chamada está cumprido. Isso acontece de verdade — a pessoa apaga o
+      compromisso pelo Outlook do celular e depois o apaga aqui, ou o app tenta
+      de novo depois de um erro de rede em que o DELETE tinha passado.
+
+      Sem esta linha o `remover()` da tela ficaria preso: o Graph responderia
+      404, a exclusão local seria interrompida, e o compromisso viraria uma
+      linha impossível de apagar. Repare que a mensagem do Graph para 404 é
+      "The specified object was not found in the store" — sem o número dentro
+      dela. Ou seja, quem recebesse o erro do outro lado não teria como
+      distinguir "já não existe" de "deu ruim" a não ser por este `if`.
+    */
+    if (resp.status === 404) return json({ ok: true, ja_nao_existia: true })
 
     // O DELETE do Graph responde 204 SEM CORPO. Tentar `.json()` aqui lançaria
     // no caminho de sucesso — por isso o corpo só é lido quando deu errado.
