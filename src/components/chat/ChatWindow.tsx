@@ -51,6 +51,7 @@ import {
   Forward,
   Settings,
   Captions,
+  Pin,
 } from 'lucide-react'
 import {
   Dialog,
@@ -130,6 +131,17 @@ import { getContactTags, toggleContactTag } from '@/services/contact_tags'
 import { useRealtime } from '@/hooks/use-realtime'
 import { useAuth } from '@/hooks/use-auth'
 import { sendMessage, reactToMessage, deleteMessage, editMessage } from '@/services/messages'
+import { MenuRadialDeReacoes } from '@/components/chat/MenuRadialDeReacoes'
+import { DialogoDeContatoFixo } from '@/components/chat/DialogoDeContatoFixo'
+import { BandejaDeFigurinhas } from '@/components/chat/BandejaDeFigurinhas'
+import { figurinhasRecentes, guardarFigurinha } from '@/services/figurinhas'
+import {
+  esquecerEnvioPendente,
+  getTodosOsEnviosPendentes,
+  guardarEnvioPendente,
+} from '@/lib/envios_pendentes'
+import { getDonoDoContato, type DonoDoContato } from '@/services/contact_owners'
+import { getUsoDeReacoes, registrarUsoDeReacao, type UsoDeReacoes } from '@/services/uso_de_reacoes'
 import { listarTentativasAbertas, descartarTentativa, marcarReenvio, type TentativaDeEnvio } from '@/services/tentativas-de-envio'
 import { updateContactByJid } from '@/services/contacts'
 import { createNote, getNotesByContact, deleteNote } from '@/services/notes'
@@ -1215,6 +1227,109 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [deleteConfirmMsg, setDeleteConfirmMsg] = useState<any>(null)
   const [reactionPopoverMessageId, setReactionPopoverMessageId] = useState<string | null>(null)
+  /**
+   * `{emoji: vezes}` da pessoa logada — ordena o menu radial de reações.
+   *
+   * Carregado uma vez por montagem e atualizado localmente a cada reação, sem
+   * reler o perfil: o valor só serve para ordenar seis botões, e uma ida ao
+   * servidor a cada reação pagaria caro por uma precisão que ninguém percebe.
+   */
+  const [usoDeReacoes, setUsoDeReacoes] = useState<UsoDeReacoes | null>(null)
+
+  /** `tempId` do envio que está sendo reenviado agora, para travar o botão. */
+  const [reenviando, setReenviando] = useState<string | null>(null)
+
+  /**
+   * Reenvia uma mensagem que falhou, a partir do payload guardado no aparelho.
+   *
+   * No sucesso chama `onOptimisticConfirm`, que TROCA o balão temporário pela
+   * linha real — e não o remove. É o comportamento pedido: some o aviso de
+   * falha, a mensagem continua na conversa. Em nenhum instante ela desaparece.
+   */
+  const reenviarFalha = useCallback(async (tempId: string) => {
+    const pendente = getTodosOsEnviosPendentes().find((e) => e.tempId === tempId)
+    if (!pendente) {
+      toast({
+        title: 'Não achei o conteúdo para reenviar',
+        description: 'Copie o texto e envie de novo, por favor.',
+        variant: 'destructive',
+      })
+      return
+    }
+    setReenviando(tempId)
+    try {
+      const res: any = await sendMessage({
+        content: pendente.payload.content,
+        device_id: pendente.deviceId,
+        sender_id: pendente.senderId,
+        is_read: true,
+        remote_sender: pendente.remoteSender,
+        mediaUrl: pendente.payload.mediaUrl,
+        mediaType: pendente.payload.mediaType,
+        mediaName: pendente.payload.mediaName,
+        reply_to_id: pendente.payload.reply_to_id,
+        mentioned: pendente.payload.mentioned,
+        mentionEveryone: pendente.payload.mentionEveryone,
+        noSignature: pendente.payload.noSignature,
+      })
+      esquecerEnvioPendente(tempId)
+      onOptimisticConfirm?.(tempId, res?.message)
+    } catch (err) {
+      toast({
+        title: traduzErro(err, 'Não consegui reenviar'),
+        variant: 'destructive',
+      })
+    } finally {
+      setReenviando(null)
+    }
+  }, [onOptimisticConfirm, toast])
+
+  /**
+   * Quando a rede volta, reenvia sozinho — mas SÓ o que falhou por estar
+   * offline.
+   *
+   * Nesse caso o navegador nem chegou a mandar a requisição, então não há como
+   * a mensagem ter saído: reenviar não duplica. Falha por timeout ou recusa da
+   * Evolution fica de fora de propósito (`motivo: 'desconhecido'`), porque ali a
+   * mensagem pode ter sido entregue e a resposta é que se perdeu — mandar de
+   * novo escreveria duas vezes para um paciente. Mesma regra que o verificador
+   * do banco já segue.
+   */
+  useEffect(() => {
+    const aoVoltarARede = () => {
+      const offline = getTodosOsEnviosPendentes().filter((e) => e.motivo === 'offline')
+      for (const envio of offline) void reenviarFalha(envio.tempId)
+    }
+    window.addEventListener('online', aoVoltarARede)
+    return () => window.removeEventListener('online', aoVoltarARede)
+  }, [reenviarFalha])
+
+  /** O atendente fixo deste contato, se houver, e se ele está no app agora. */
+  const [donoFixo, setDonoFixo] = useState<DonoDoContato | null>(null)
+  const [contatoFixoAberto, setContatoFixoAberto] = useState(false)
+
+  const recarregarDonoFixo = useCallback(async () => {
+    if (!device?.id || !contact) {
+      setDonoFixo(null)
+      return
+    }
+    setDonoFixo(await getDonoDoContato(device.id, contact))
+  }, [device?.id, contact])
+
+  useEffect(() => {
+    void recarregarDonoFixo()
+  }, [recarregarDonoFixo])
+
+  useEffect(() => {
+    if (!user?.id) return
+    let vivo = true
+    void getUsoDeReacoes(user.id).then((uso) => {
+      if (vivo) setUsoDeReacoes(uso)
+    })
+    return () => {
+      vivo = false
+    }
+  }, [user?.id])
   const [messageMenuOpenId, setMessageMenuOpenId] = useState<string | null>(null)
 
   // Handlers do menu de contexto da mensagem. Ficam aqui (e não dentro do
@@ -1367,6 +1482,15 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const [mensagemDestacada, setMensagemDestacada] = useState<string | null>(null)
 
   const messages = conversation?.messages || []
+
+  /**
+   * As figurinhas que já apareceram nesta conversa, para a aba "Da conversa"
+   * da bandeja. Derivado do que já está carregado — nenhuma consulta a mais.
+   */
+  const figurinhasDaConversa = useMemo(
+    () => figurinhasRecentes(messages),
+    [messages],
+  )
 
   /**
    * Registra o progresso de leitura POR MENSAGEM (recibo "Informações da
@@ -2526,6 +2650,44 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         })
       } catch (err) {
         tratarFalhaDeEnvio(err, tempId)
+        /**
+         * O ponto cego da tentativa de envio: quando ela mesma não consegue ser
+         * gravada.
+         *
+         * `tratarFalhaDeEnvio` cobre bem o caso em que o servidor foi
+         * alcançado — o erro traz `idTentativa`, a linha existe em
+         * `tentativas_de_envio` e o verificador de 1 minuto assume dali. Mas sem
+         * internet o insert da tentativa também não sai, o erro vem sem
+         * `idTentativa`, e sobra só o balão otimista em memória — que é apagado
+         * no instante em que a conexão volta, porque `online` dispara o refetch
+         * e a lista é substituída pela do servidor. Era o relato: "ao voltar a
+         * internet a msg some e não dá para reenviar".
+         *
+         * Então aqui guarda-se no APARELHO, e só neste caso: se a tentativa foi
+         * registrada no servidor, ela já é a fonte da verdade e duplicar aqui
+         * mostraria a mesma falha duas vezes.
+         *
+         * `navigator.onLine === false` é o que autoriza o reenvio automático
+         * depois — só aí dá para afirmar que a requisição não saiu. Qualquer
+         * outra causa fica 'desconhecido' e espera clique humano.
+         */
+        if (!(err as { idTentativa?: string } | null)?.idTentativa) {
+          guardarEnvioPendente({
+            tempId,
+            deviceId: device.id,
+            remoteSender: contact,
+            senderId: user.id,
+            criadoEm: tempMsg.created_at,
+            motivo: navigator.onLine === false ? 'offline' : 'desconhecido',
+            payload: {
+              content,
+              reply_to_id: replyId,
+              mentioned: mencionados,
+              mentionEveryone: marcarTodos,
+              noSignature: semAssinatura,
+            },
+          })
+        }
         console.error('[envio] falhou', err)
         toast({
           title: traduzErro(err, 'Erro ao enviar mensagem'),
@@ -3804,11 +3966,49 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
               {assignment?.status === 'finished' && (
                 <span className="text-xs text-gray-400 truncate shrink-0">Finalizado</span>
               )}
+              {/*
+                Contato fixo. Fica junto do status de atendimento porque
+                responde à mesma pergunta ("de quem é esta conversa?") — só que
+                de forma permanente. O ponto colorido é a presença: verde, as
+                mensagens dele caem direto nessa pessoa; cinza, vão para
+                aguardando até alguém assumir.
+              */}
+              {donoFixo && (
+                <span
+                  className="flex items-center gap-1 text-xs text-chat-muted truncate shrink-0"
+                  title={
+                    donoFixo.online
+                      ? `${donoFixo.owner_name ?? 'Atendente fixo'} está no app: as mensagens deste contato vão direto para essa pessoa.`
+                      : `${donoFixo.owner_name ?? 'Atendente fixo'} está fora do app: as mensagens ficam aguardando até alguém assumir.`
+                  }
+                >
+                  <Pin className="h-3 w-3 shrink-0" />
+                  {donoFixo.owner_name?.split(' ')[0] ?? 'Fixo'}
+                  <span
+                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${donoFixo.online ? 'bg-emerald-500' : 'bg-gray-400'}`}
+                  />
+                </span>
+              )}
             </div>
           </div>
         </div>
 
         <div className="flex items-center gap-1">
+          {/* Fixar/desfixar não depende do estado do atendimento: vale para as
+              conversas de amanhã também, inclusive as que ainda não existem. */}
+          {BARRA_ATENDIMENTO_VISIVEL && (
+            <button
+              type="button"
+              onClick={() => setContatoFixoAberto(true)}
+              title={donoFixo ? 'Trocar ou tirar o atendente fixo' : 'Fixar este contato em um atendente'}
+              aria-label="Contato fixo"
+              className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-chat-hover ${
+                donoFixo ? 'text-primary' : 'text-chat-muted'
+              }`}
+            >
+              <Pin className="h-4 w-4" />
+            </button>
+          )}
           {/*
             SEM DONO — inclui `assignment` nulo, e isso não é detalhe: 44 das
             2.202 conversas não têm linha em `conversation_assignments`
@@ -4741,11 +4941,18 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                            }
                           if (att.type === 'sticker') {
                             return (
-                              <a
+                              // Era um `<a target="_blank">`: clicar jogava a
+                              // pessoa para fora do app, numa aba do navegador
+                              // com o arquivo cru — e no Electron isso abre o
+                              // navegador do sistema, tirando a pessoa do
+                              // atendimento. Agora entra no mesmo visualizador
+                              // que imagem e vídeo já usavam.
+                              <button
                                 key={idx}
-                                href={att.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
+                                type="button"
+                                onClick={() =>
+                                  setMediaView({ url: att.url, type: 'sticker', name: att.name })
+                                }
                                 className="block max-w-[160px] overflow-hidden rounded-xl hover:opacity-90 hover:scale-[1.02] transition-all duration-300"
                               >
                                 <ChatImage
@@ -4754,7 +4961,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                                   className="w-full h-auto object-contain"
                                   reservaClassName="w-[160px] min-h-[120px]"
                                 />
-                              </a>
+                              </button>
                             )
                           }
                           {
@@ -4896,9 +5103,27 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                            <Clock className="h-3 w-3 text-chat-muted/60 shrink-0" />
                          )}
                          {isMe && msg.status === 'failed' && (
-                           <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-red-400">
-                             <AlertCircle className="h-3 w-3" /> falhou
-                           </span>
+                           // Era só o texto "falhou", sem saída nenhuma: a
+                           // pessoa via o problema e não tinha o que fazer. O
+                           // reenvio sai do payload guardado no aparelho, então
+                           // funciona mesmo depois de recarregar a página.
+                           <button
+                             type="button"
+                             disabled={reenviando === msg.id}
+                             onClick={(e) => {
+                               e.preventDefault()
+                               e.stopPropagation()
+                               void reenviarFalha(msg.id)
+                             }}
+                             className="inline-flex items-center gap-0.5 text-[10px] font-medium text-red-400 hover:text-red-300 hover:underline disabled:opacity-60"
+                           >
+                             {reenviando === msg.id ? (
+                               <Loader2 className="h-3 w-3 animate-spin" />
+                             ) : (
+                               <AlertCircle className="h-3 w-3" />
+                             )}
+                             {reenviando === msg.id ? 'reenviando…' : 'falhou · tentar novamente'}
+                           </button>
                          )}
                          <span className="text-[10px] font-medium text-chat-muted/70">{timestamp}</span>
                          <DropdownMenu
@@ -5014,58 +5239,55 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                       </div>
                     )}
                      {!msg.deleted_at && (
-                       <Popover
-                         open={reactionPopoverMessageId === msg.id}
-                         onOpenChange={(open) => setReactionPopoverMessageId(open ? msg.id : null)}
-                       >
-                         <PopoverTrigger asChild>
-                           <button
-                             type="button"
-                             aria-label="Adicionar reação"
-                             title="Adicionar reação"
-                             onClick={(e) => e.stopPropagation()}
-                             onMouseDown={(e) => e.stopPropagation()}
-                             onPointerDown={(e) => e.stopPropagation()}
-                             className={`absolute top-1/2 z-10 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-chat-border bg-chat-panel text-chat-muted shadow-chat transition-all duration-150 hover:bg-chat-hover hover:text-chat-text ${isMe ? '-left-8' : '-right-8'} ${
-                               reactionPopoverMessageId === msg.id
-                                 ? 'opacity-100 pointer-events-auto scale-100'
-                                 : 'opacity-0 pointer-events-none scale-95 group-hover:opacity-100 group-hover:pointer-events-auto group-hover:scale-100 group-focus-within:opacity-100 group-focus-within:pointer-events-auto group-focus-within:scale-100'
-                             }`}
-                           >
-                             <Smile className="h-4 w-4" />
-                           </button>
-                         </PopoverTrigger>
-                         <PopoverContent
-                           className="z-[80] w-auto rounded-full border-chat-border bg-chat-panel p-1.5 shadow-chat"
-                           side="top"
-                           align={isMe ? 'end' : 'start'}
-                           sideOffset={6}
-                           onClick={(e) => e.stopPropagation()}
+                       <div className={`absolute top-1/2 z-10 -translate-y-1/2 ${isMe ? '-left-8' : '-right-8'}`}>
+                         <button
+                           type="button"
+                           aria-label="Adicionar reação"
+                           title="Adicionar reação"
+                           aria-haspopup="menu"
+                           aria-expanded={reactionPopoverMessageId === msg.id}
+                           onClick={(e) => {
+                             e.preventDefault()
+                             e.stopPropagation()
+                             setReactionPopoverMessageId(
+                               reactionPopoverMessageId === msg.id ? null : msg.id,
+                             )
+                           }}
                            onMouseDown={(e) => e.stopPropagation()}
+                           onPointerDown={(e) => e.stopPropagation()}
+                           className={`flex h-8 w-8 items-center justify-center rounded-full border border-chat-border bg-chat-panel text-chat-muted shadow-chat transition-all duration-150 hover:bg-chat-hover hover:text-chat-text ${
+                             reactionPopoverMessageId === msg.id
+                               ? 'opacity-100 pointer-events-auto scale-100'
+                               : 'opacity-0 pointer-events-none scale-95 group-hover:opacity-100 group-hover:pointer-events-auto group-hover:scale-100 group-focus-within:opacity-100 group-focus-within:pointer-events-auto group-focus-within:scale-100'
+                           }`}
                          >
-                           <div className="flex gap-1">
-                             {['👍', '❤️', '😂', '😮', '😢', '🙏'].map((emoji) => (
-                               <button
-                                 key={emoji}
-                                 type="button"
-                                 className="rounded-full p-1 text-lg transition-transform hover:scale-125 hover:bg-chat-hover"
-                                 onClick={async (e) => {
-                                   e.preventDefault()
-                                   e.stopPropagation()
-                                   try {
-                                     await reactToMessage(msg.id, emoji, device.id, user.id)
-                                     setReactionPopoverMessageId(null)
-                                   } catch (err: any) {
-                                     toast({ title: err.message || 'Erro ao reagir', variant: 'destructive' })
-                                   }
-                                 }}
-                               >
-                                 {emoji}
-                               </button>
-                             ))}
-                           </div>
-                         </PopoverContent>
-                       </Popover>
+                           <Smile className="h-4 w-4" />
+                         </button>
+
+                         {reactionPopoverMessageId === msg.id && (
+                           <MenuRadialDeReacoes
+                             usoPorEmoji={usoDeReacoes}
+                             paraEsquerda={isMe}
+                             aoFechar={() => setReactionPopoverMessageId(null)}
+                             aoEscolher={async (emoji) => {
+                               try {
+                                 await reactToMessage(msg.id, emoji, device.id, user.id)
+                                 setReactionPopoverMessageId(null)
+                                 // Só conta o que deu certo, e sem esperar: a
+                                 // estatística não pode atrasar nem derrubar o
+                                 // ato de reagir.
+                                 void registrarUsoDeReacao(emoji)
+                                 setUsoDeReacoes((antes) => ({
+                                   ...(antes || {}),
+                                   [emoji]: ((antes || {})[emoji] || 0) + 1,
+                                 }))
+                               } catch (err: any) {
+                                 toast({ title: err.message || 'Erro ao reagir', variant: 'destructive' })
+                               }
+                             }}
+                           />
+                         )}
+                       </div>
                      )}
                  </div>
                 {isMe && (
@@ -5446,6 +5668,18 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
             </div>
           )}
           <div className="flex items-end gap-3 w-full">
+            {/* Figurinhas fica FORA do menu "+" de propósito: aquele menu abre
+                um popover, e a bandeja é outro popover — aninhar os dois deixa
+                o fechamento imprevisível (fechar a bandeja fecharia o menu
+                junto). Como botão irmão, cada um cuida do próprio estado. */}
+            {device?.id && contact && user?.id && (
+              <BandejaDeFigurinhas
+                deviceId={device.id}
+                remoteSender={contact}
+                userId={user.id}
+                recentes={figurinhasDaConversa}
+              />
+            )}
             <Popover open={isPlusOpen} onOpenChange={setIsPlusOpen}>
               <PopoverTrigger asChild>
                 <Button
@@ -6338,6 +6572,15 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           onClose={() => setTeamAssignOpen(false)}
           onAssigned={() => { void sincronizarAtribuicao() }}
         />
+
+        <DialogoDeContatoFixo
+          open={contatoFixoAberto}
+          deviceId={device.id}
+          remoteSender={contact}
+          donoAtual={donoFixo}
+          onClose={() => setContatoFixoAberto(false)}
+          onChanged={() => { void recarregarDonoFixo(); void sincronizarAtribuicao() }}
+        />
         {device && contact && (
           <MessageInfoDialog
             open={!!msgInfoAberta}
@@ -6347,7 +6590,26 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
             onClose={() => setMsgInfoAberta(null)}
           />
         )}
-        <MediaViewer media={mediaView} onClose={() => setMediaView(null)} />
+        <MediaViewer
+          media={mediaView}
+          onClose={() => setMediaView(null)}
+          aoSalvarFigurinha={async (m) => {
+            if (!user?.id) return
+            try {
+              await guardarFigurinha(user.id, m.url)
+              toast({
+                title: 'Figurinha guardada',
+                description: 'Ela já está na aba "Guardadas" do botão de figurinhas.',
+              })
+            } catch (e) {
+              toast({
+                title: 'Não consegui guardar',
+                description: e instanceof Error ? e.message : 'Erro desconhecido',
+                variant: 'destructive',
+              })
+            }
+          }}
+        />
         {/* Porta 1: "+" → escolher contato(s) → envia na conversa ABERTA. */}
         <ContactPickerDialog
           aberto={seletorContatoAberto}
