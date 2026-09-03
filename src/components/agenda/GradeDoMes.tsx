@@ -1,6 +1,6 @@
 import { format, isSameDay, isSameMonth, startOfDay } from 'date-fns'
 import { cn } from '@/lib/utils'
-import { corDoItem } from './cores'
+import { corDoItem, estiloDaCorPessoal } from './cores'
 import { DIAS_DA_SEMANA, type ItemDaAgenda } from './tipos'
 
 /**
@@ -76,6 +76,7 @@ export function GradeDoMes({
                     'w-full truncate rounded border px-1 text-[10px] leading-4',
                     corDoItem(ev.origem, ev.importancia),
                   )}
+                  style={estiloDaCorPessoal(ev.cor)}
                 >
                   {ev.dia_inteiro ? '' : `${format(new Date(ev.starts_at), 'HH:mm')} `}
                   {ev.titulo}

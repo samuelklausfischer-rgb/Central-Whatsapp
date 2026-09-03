@@ -52,7 +52,7 @@ export default function Triggers() {
       const data = await getTriggers()
       setTriggers(data)
     } catch (err) {
-      toast({ title: 'Erro ao carregar gatilhos', variant: 'destructive' })
+      toast({ title: 'Erro ao carregar atalhos de mensagem', variant: 'destructive' })
     } finally {
       setLoading(false)
     }
@@ -87,10 +87,10 @@ export default function Triggers() {
 
       if (editingId) {
         await updateTrigger(editingId, { title, content })
-        toast({ title: 'Gatilho atualizado com sucesso' })
+        toast({ title: 'Atalho atualizado com sucesso' })
       } else {
         await createTrigger({ title, content, user_id: user.id })
-        toast({ title: 'Gatilho criado com sucesso' })
+        toast({ title: 'Atalho criado com sucesso' })
       }
       setIsDialogOpen(false)
     } catch (err) {
@@ -100,12 +100,12 @@ export default function Triggers() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Deseja realmente excluir este gatilho?')) return
+    if (!confirm('Deseja realmente excluir este atalho?')) return
     try {
       await deleteTrigger(id)
-      toast({ title: 'Gatilho excluído' })
+      toast({ title: 'Atalho excluído' })
     } catch (err) {
-      toast({ title: 'Erro ao excluir o gatilho', variant: 'destructive' })
+      toast({ title: 'Erro ao excluir o atalho', variant: 'destructive' })
     }
   }
 
@@ -124,14 +124,21 @@ export default function Triggers() {
               <div className="h-10 w-10 rounded-xl bg-blue-500/20 border border-blue-500/30 flex items-center justify-center">
                 <Zap className="h-5 w-5 text-blue-400" />
               </div>
-              Gatilhos de Mensagem
+              Atalhos de Mensagem
             </h1>
             <p className="text-muted-foreground mt-2">
               Gerencie modelos de mensagens rápidas para utilizar no ChatHub.
             </p>
+            {/* Pedido da Ketlin: a função existia e ninguém achava. Isto aqui é a
+                descoberta que faltava — o gesto físico de como usar, na primeira
+                tela que quem cadastra um atalho vai ver. */}
+            <p className="text-sm text-blue-400 mt-1">
+              Digite <span className="font-mono">/</span> no campo de mensagem do chat para usar
+              seus atalhos.
+            </p>
           </div>
           <Button onClick={() => handleOpenDialog()} className="bg-blue-600 hover:bg-blue-500">
-            <Plus className="mr-2 h-4 w-4" /> Novo Gatilho
+            <Plus className="mr-2 h-4 w-4" /> Novo Atalho
           </Button>
         </div>
 
@@ -141,7 +148,7 @@ export default function Triggers() {
           <Search className="h-5 w-5 text-muted-foreground" />
           <input
             className="flex-1 bg-transparent border-none text-sm text-foreground focus:outline-none"
-            placeholder="Buscar gatilho por título..."
+            placeholder="Buscar atalho por título..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -149,7 +156,7 @@ export default function Triggers() {
 
         {/*
           Mesmo idioma de linha da home: um `GlassCard` só (em vez das caixas
-          `bg-muted border` feitas à mão, uma por gatilho) e `ListRow` para
+          `bg-muted border` feitas à mão, uma por atalho) e `ListRow` para
           cada linha. `EstadoPainel` cobre carregando/vazio — erro já é
           avisado por toast (comportamento existente, preservado) e por isso
           fica sempre `erro={false}` aqui.
@@ -160,7 +167,7 @@ export default function Triggers() {
               carregando={loading}
               erro={false}
               vazio={filtered.length === 0}
-              mensagemVazio="Nenhum gatilho encontrado. Crie o primeiro para enviar mensagens mais rápido."
+              mensagemVazio="Nenhum atalho encontrado. Crie o primeiro para enviar mensagens mais rápido."
             />
             {!loading && filtered.length > 0 && (
               <div className="space-y-0.5">
@@ -206,11 +213,11 @@ export default function Triggers() {
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="sm:max-w-md bg-card border-border">
           <DialogHeader>
-            <DialogTitle>{editingId ? 'Editar Gatilho' : 'Novo Gatilho'}</DialogTitle>
+            <DialogTitle>{editingId ? 'Editar Atalho' : 'Novo Atalho'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Título do Gatilho</label>
+              <label className="text-sm font-medium">Título do Atalho</label>
               <Input
                 placeholder="Ex: Saudação Inicial"
                 value={title}
@@ -239,7 +246,7 @@ export default function Triggers() {
               className="bg-blue-600 hover:bg-blue-500"
               disabled={!title || !content}
             >
-              Salvar Gatilho
+              Salvar Atalho
             </Button>
           </DialogFooter>
         </DialogContent>

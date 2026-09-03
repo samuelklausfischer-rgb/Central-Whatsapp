@@ -19,11 +19,25 @@ export function useRealtime<T extends Record<string, unknown>>(
   // websocket, fechando a janela em que uma mudança chegaria entre os dois e
   // seria perdida em silêncio.
   onSubscribed?: () => void,
+  // Também opcional e retrocompatível pelo mesmo motivo. Diferente de
+  // `onSubscribed` (que dispara em toda inscrição, inclusive o mount),
+  // `aoReconectar` SÓ dispara quando o canal volta a SUBSCRIBED depois de
+  // ter caído (CHANNEL_ERROR, TIMED_OUT ou CLOSED) — nunca na primeira
+  // inscrição. Motivo: `postgres_changes` não tem replay. Tudo que mudou no
+  // banco enquanto o WebSocket estava fora do ar (o backoff do
+  // `scheduleResubscribe` abaixo chega a 15s) nunca vira evento — some sem
+  // erro nenhum. Reconectar e seguir como se nada tivesse acontecido deixa
+  // esse intervalo como um buraco silencioso na tela; quem passa
+  // `aoReconectar` normalmente usa o gancho para refazer a leitura por REST
+  // e fechar essa janela.
+  aoReconectar?: () => void,
 ) {
   const callbackRef = useRef(callback)
   callbackRef.current = callback
   const onSubscribedRef = useRef(onSubscribed)
   onSubscribedRef.current = onSubscribed
+  const aoReconectarRef = useRef(aoReconectar)
+  aoReconectarRef.current = aoReconectar
 
   useEffect(() => {
     if (!enabled) return
@@ -33,6 +47,13 @@ export function useRealtime<T extends Record<string, unknown>>(
     let retryTimer: ReturnType<typeof setTimeout> | null = null
     let disposed = false
     let joined = false
+    // Local ao ciclo de vida deste efeito (mount → unmount), igual a `joined`
+    // e `retry` — não precisa ser um useRef de verdade porque o efeito
+    // inteiro é recriado do zero se `tableName`/`enabled`/`filter` mudarem.
+    // Marca se o canal já passou por CHANNEL_ERROR/TIMED_OUT/CLOSED desde a
+    // última vez que ficou SUBSCRIBED, para `aoReconectar` distinguir
+    // "primeira inscrição" de "voltou depois de cair".
+    let jaCaiu = false
 
     const handlePayload = (payload: RealtimePostgresChangesPayload<T>) => {
       const eventMap: Record<string, 'create' | 'update' | 'delete'> = {
@@ -66,12 +87,19 @@ export function useRealtime<T extends Record<string, unknown>>(
             joined = true
             retry = 0
             onSubscribedRef.current?.()
+            // Só conta como reconexão se já tinha caído antes — o mount
+            // inicial nunca dispara `aoReconectar`.
+            if (jaCaiu) {
+              jaCaiu = false
+              aoReconectarRef.current?.()
+            }
           } else if (
             status === 'CHANNEL_ERROR' ||
             status === 'TIMED_OUT' ||
             status === 'CLOSED'
           ) {
             joined = false
+            jaCaiu = true
             scheduleResubscribe()
           }
         })

@@ -1,7 +1,14 @@
 import { format } from 'date-fns'
 import { AlertTriangle, Link2, Mail, Pencil, Repeat, Trash2, UserCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { COR_ACAO_EXCLUIR, COR_AVISO, COR_OUTLOOK, COR_REPETE, CORES_IMPORTANCIA } from './cores'
+import {
+  COR_ACAO_EXCLUIR,
+  COR_AVISO,
+  COR_OUTLOOK,
+  COR_REPETE,
+  CORES_IMPORTANCIA,
+  estiloDaCorPessoal,
+} from './cores'
 import type { ItemDaAgenda } from './tipos'
 
 /** O cartão do compromisso, na lista lateral do dia. */
@@ -31,7 +38,10 @@ export function CartaoDoCompromisso({
   const podeReenviar = Boolean(ev.outlook_sync_erro) && ev.souOCriador && Boolean(aoReenviarConvite)
 
   return (
-    <div className="rounded-lg border border-border/60 bg-accent/30 p-3">
+    <div
+      className="rounded-lg border border-border/60 bg-accent/30 p-3"
+      style={estiloDaCorPessoal(ev.cor)}
+    >
       <div className="flex items-start justify-between gap-2">
         <button
           type="button"

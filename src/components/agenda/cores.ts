@@ -33,6 +33,7 @@
  * AO ACRESCENTAR COR NOVA: medir. Não deduzir pelo nome do tom.
  */
 
+import type { CSSProperties } from 'react'
 import type { AgendaImportancia } from '@/lib/supabase/types'
 
 /** Rótulo de importância, nos dois temas. */
@@ -72,6 +73,51 @@ export const COR_ACAO_EXCLUIR = 'text-red-700 hover:text-red-800 dark:text-red-4
 
 /** Ícone do Outlook na barra de conexão. */
 export const COR_ICONE_OUTLOOK = 'text-sky-700 dark:text-sky-400'
+
+/**
+ * A PALETA da cor de destaque pessoal (ITEM: "poder escolher uma cor para
+ * destacar aquela tarefa" — pedido do Samuel).
+ *
+ * Estes hex NÃO são texto sobre fundo — o rigor de contraste do cabeçalho
+ * deste arquivo é para rótulo de texto colorido, e aqui a cor vira só um
+ * anel/bolinha no seletor e um acento (borda + fundo bem suave) no
+ * compromisso. Ainda assim os oito tons foram escolhidos de olho nos dois
+ * temas: nenhum é claro-sobre-claro nem escuro-sobre-escuro quando usado como
+ * bolinha sólida sobre o vidro do app, em light ou dark.
+ *
+ * Sem CHECK no banco (ver a migration) — a paleta pode mudar aqui sem
+ * precisar de outra migration.
+ */
+export interface CorDaPaleta {
+  valor: string
+  nome: string
+}
+
+export const PALETA_AGENDA: CorDaPaleta[] = [
+  { valor: '#ef4444', nome: 'Vermelho' },
+  { valor: '#f97316', nome: 'Laranja' },
+  { valor: '#f59e0b', nome: 'Âmbar' },
+  { valor: '#22c55e', nome: 'Verde' },
+  { valor: '#06b6d4', nome: 'Ciano' },
+  { valor: '#3b82f6', nome: 'Azul' },
+  { valor: '#8b5cf6', nome: 'Violeta' },
+  { valor: '#ec4899', nome: 'Rosa' },
+]
+
+/**
+ * O acento visual da cor ESCOLHIDA PELA PESSOA, por cima do que já existe —
+ * nunca no lugar. `corDoItem`/`corDoBloco` continuam decidindo fundo e texto
+ * pela importância/origem, que é sinal do sistema; isto aqui só acrescenta
+ * uma borda esquerda e um fundo bem suave (~15%, hex `26`) na cor pessoal.
+ *
+ * `cor` nula devolve `undefined` de propósito: sem `style`, o compromisso
+ * fica EXATAMENTE como antes deste recurso existir — zero regressão para
+ * quem nunca escolheu uma cor, e para tudo que vem do Outlook (que não tem).
+ */
+export function estiloDaCorPessoal(cor: string | null | undefined): CSSProperties | undefined {
+  if (!cor) return undefined
+  return { borderLeftColor: cor, borderLeftWidth: 3, backgroundColor: `${cor}26` }
+}
 
 /** A cor do bloco na grade e do rótulo na célula do mês, conforme a origem. */
 export function corDoItem(origem: 'interna' | 'outlook', importancia: AgendaImportancia): string {

@@ -1,6 +1,6 @@
 import { format, isSameDay, startOfDay } from 'date-fns'
 import { cn } from '@/lib/utils'
-import { corDoBloco } from './cores'
+import { corDoBloco, estiloDaCorPessoal } from './cores'
 import {
   ALTURA_DA_HORA,
   DIAS_DA_SEMANA,
@@ -112,6 +112,7 @@ export function GradeDeHoras({
                         'truncate rounded border px-1 text-left text-[10px] leading-4',
                         corDoBloco(ev.origem, ev.importancia),
                       )}
+                      style={estiloDaCorPessoal(ev.cor)}
                     >
                       {ev.titulo}
                     </button>
@@ -132,7 +133,7 @@ export function GradeDeHoras({
                         'absolute inset-x-0.5 overflow-hidden rounded border px-1 text-left text-[10px] leading-tight transition-opacity hover:opacity-80',
                         corDoBloco(ev.origem, ev.importancia),
                       )}
-                      style={{ top, height }}
+                      style={{ top, height, ...estiloDaCorPessoal(ev.cor) }}
                     >
                       <span className="block truncate font-medium">{ev.titulo}</span>
                       {/* Só mostra a hora se couber: abaixo de ~30px a segunda

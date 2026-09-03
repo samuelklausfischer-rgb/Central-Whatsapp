@@ -65,6 +65,18 @@ function requireInstanceName(name: string): void {
   }
 }
 
+/**
+ * Reconecta o WhatsApp de um aparelho SEM exigir admin — qualquer pessoa com o
+ * aparelho liberado pode (decisão de 01/09/2026, junto com a faixa de alerta de
+ * desconexão). Vai `deviceId`, e não `instanceName`, de propósito: o gate da
+ * edge function valida o acesso a esse id e resolve o nome da instância no
+ * servidor — o cliente nunca escolhe QUAL instância conectar por nome.
+ */
+export const reconectarAparelho = (deviceId: string) =>
+  invoke<{ instanceName: string; qrcode: QrCodeData | null }>({
+    action: 'reconnect_device', deviceId,
+  })
+
 export const connectEvolutionInstance = (instanceName: string) => {
   requireInstanceName(instanceName)
   return invoke<{ instanceName: string; qrcode: QrCodeData | null }>({

@@ -50,6 +50,8 @@ export interface ItemDaAgenda {
   outlook_ical_uid: string | null
   /** Mensagem do Graph quando o convite falhou. O compromisso existe assim mesmo. */
   outlook_sync_erro: string | null
+  /** Cor de destaque escolhida na criação. Nula = visual padrão. Outlook não tem. */
+  cor: string | null
 }
 
 export interface Rascunho {
@@ -76,6 +78,8 @@ export interface Rascunho {
    * que a pessoa pediu.
    */
   convidarOutlook: boolean
+  /** Cor de destaque escolhida no seletor do diálogo. Nula = "sem cor". */
+  cor: string | null
 }
 
 export type Visao = 'mes' | 'semana' | 'dia'
