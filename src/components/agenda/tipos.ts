@@ -32,6 +32,8 @@ export interface ItemDaAgenda {
   seRepete: boolean
   /** O `group_id`, para o diálogo de edição voltar no grupo certo. */
   groupId: string | null
+  /** Cor de destaque escolhida na criação. Nula = visual padrão. Outlook não tem. */
+  cor: string | null
 }
 
 export interface Rascunho {
@@ -47,6 +49,8 @@ export interface Rascunho {
   groupId: string
   /** Salvar no Outlook em vez de na nossa agenda. Só para escopo pessoal. */
   noOutlook: boolean
+  /** Cor de destaque escolhida no seletor do diálogo. Nula = "sem cor". */
+  cor: string | null
 }
 
 export type Visao = 'mes' | 'semana' | 'dia'

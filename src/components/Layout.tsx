@@ -9,6 +9,7 @@ import { BroadcastListener } from '@/components/BroadcastListener'
 import { NovidadesDaVersao } from '@/components/ReleaseNotesDialog'
 import { TourDoApp } from '@/components/TourDoApp'
 import { AvisoDeVersaoNova } from '@/components/AvisoDeVersaoNova'
+import { AlertaDeviceDesconectado } from '@/components/AlertaDeviceDesconectado'
 import { ToolHost } from '@/components/tools/ToolHost'
 import { useAppHeartbeat } from '@/hooks/use-app-heartbeat'
 import { useNotificacoesDeMensagem } from '@/hooks/use-notificacoes-de-mensagem'
@@ -98,6 +99,16 @@ export default function Layout() {
         dentro de `/ferramentas/`, que usa `isFullBleed` para outro motivo (ver
         comentário acima) — o fundo do PRN é o padrão do app.
       */}
+      {/*
+        Faixa de "WhatsApp do setor caiu". Primeiro item do flex, ANTES até do
+        fundo e do cabeçalho: é o alerta mais chamativo do app e precisa
+        aparecer em toda rota, inclusive `/chat`. Não é `fixed` de propósito —
+        sendo mais um item do `flex flex-col` da raiz, ela só soma altura ao
+        que já existe (o `main` com `flex-1` cede o espaço sozinho) em vez de
+        flutuar por cima do conteúdo e escondida atrás dele às vezes.
+      */}
+      <AlertaDeviceDesconectado />
+
       {!location.pathname.startsWith('/chat') && <PrnBackground />}
       <BroadcastListener />
       {/*

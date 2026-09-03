@@ -1,7 +1,7 @@
 import { format } from 'date-fns'
 import { Link2, Mail, Pencil, Repeat, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { COR_ACAO_EXCLUIR, COR_OUTLOOK, COR_REPETE, CORES_IMPORTANCIA } from './cores'
+import { COR_ACAO_EXCLUIR, COR_OUTLOOK, COR_REPETE, CORES_IMPORTANCIA, estiloDaCorPessoal } from './cores'
 import type { ItemDaAgenda } from './tipos'
 
 /** O cartão do compromisso, na lista lateral do dia. */
@@ -15,7 +15,10 @@ export function CartaoDoCompromisso({
   aoExcluir: (ev: ItemDaAgenda) => void
 }) {
   return (
-    <div className="rounded-lg border border-border/60 bg-accent/30 p-3">
+    <div
+      className="rounded-lg border border-border/60 bg-accent/30 p-3"
+      style={estiloDaCorPessoal(ev.cor)}
+    >
       <div className="flex items-start justify-between gap-2">
         <button
           type="button"

@@ -721,6 +721,39 @@ async function connectInstanceAction(body: JsonRecord) {
   })
 }
 
+/**
+ * Reconectar SEM ser admin — decisão do Samuel em 01/09/2026.
+ *
+ * Quando o WhatsApp de um setor cai, esperar um admin aparecer para escanear o
+ * QR era o gargalo: a faixa de alerta avisava todo mundo, mas só admin podia
+ * agir. Reconectar não é administração de instância — é reestabelecer o que já
+ * existia, a mesma classe das ações de grupo logo acima: do dia a dia, não
+ * destrutiva, não irreversível.
+ *
+ * O cliente manda `deviceId`, NUNCA `instanceName` — o gate
+ * (`requireDeviceAccess`) valida exatamente esse id, e o `instance_key` é
+ * resolvido AQUI, do banco. Se o nome viesse do cliente, o gate validaria um
+ * aparelho e a ação conectaria outro.
+ *
+ * Criar/apagar/renomear instância continuam só-admin, como antes.
+ */
+async function reconnectDeviceAction(body: JsonRecord) {
+  const deviceId = String(body.deviceId || '').trim()
+
+  const resp = await fetch(
+    `${SUPABASE_URL}/rest/v1/devices?id=eq.${encodeURIComponent(deviceId)}&select=instance_key,deleted_at`,
+    { headers: serviceHeaders },
+  )
+  if (!resp.ok) return json({ error: 'Unable to load device' }, 500)
+  const rows = await resp.json()
+  const device = Array.isArray(rows) ? rows[0] : null
+  if (!device?.instance_key || device.deleted_at) {
+    return json({ error: 'Device not found' }, 404)
+  }
+
+  return await connectInstanceAction({ instanceName: device.instance_key })
+}
+
 async function disconnectInstanceAction(body: JsonRecord) {
   const instanceName = String(body.instanceName || '').trim()
   if (!instanceName) return json({ error: 'instanceName is required' }, 400)
@@ -828,6 +861,9 @@ Deno.serve(async (req: Request) => {
       'group_update_description',
       'group_promote_participant',
       'group_demote_participant',
+      // Reconectar o WhatsApp que caiu — ver o comentário em
+      // `reconnectDeviceAction`. Entrou aqui em 01/09/2026.
+      'reconnect_device',
     ])
 
     if (acoesDeAparelho.has(action)) {
@@ -847,6 +883,8 @@ Deno.serve(async (req: Request) => {
           return await groupUpdateParticipantAction(body, 'promote')
         case 'group_demote_participant':
           return await groupUpdateParticipantAction(body, 'demote')
+        case 'reconnect_device':
+          return await reconnectDeviceAction(body)
       }
     }
 

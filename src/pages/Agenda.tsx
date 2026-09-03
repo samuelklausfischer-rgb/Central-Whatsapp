@@ -46,6 +46,7 @@ import {
   getGrupos,
   type EventoComPessoas,
   type ModoDaAgenda,
+  type NovoEvento,
 } from '@/services/agenda'
 import type { AgendaGroup } from '@/lib/supabase/types'
 import {
@@ -129,6 +130,7 @@ function daNossaAgenda(
     podeExcluir: meu || souAdmin,
     seRepete: false,
     groupId: ev.group_id,
+    cor: ev.cor,
   }
 }
 
@@ -153,6 +155,9 @@ function doOutlook(ev: EventoDoOutlook): ItemDaAgenda {
     podeExcluir: true,
     seRepete: seRepeteNoOutlook(ev),
     groupId: null,
+    // Cor é campo só nosso: o Microsoft Graph tem categorias de cor próprias,
+    // e este recurso não tenta traduzir uma coisa na outra.
+    cor: null,
   }
 }
 
@@ -179,6 +184,7 @@ function rascunhoVazio(dia: Date): Rascunho {
     escopo: 'usuario',
     groupId: '',
     noOutlook: false,
+    cor: null,
   }
 }
 
@@ -481,6 +487,7 @@ export default function Agenda() {
       escopo: ev.escopo ?? 'usuario',
       groupId: ev.groupId ?? '',
       noOutlook: ev.origem === 'outlook',
+      cor: ev.cor,
     })
     setDialogoAberto(true)
   }
@@ -548,7 +555,7 @@ export default function Agenda() {
         return
       }
 
-      const campos = {
+      const campos: Record<string, unknown> = {
         titulo: rascunho.titulo.trim(),
         descricao: rascunho.descricao.trim() || null,
         starts_at: inicio.toISOString(),
@@ -562,13 +569,38 @@ export default function Agenda() {
         group_id: rascunho.escopo === 'grupo' ? rascunho.groupId : null,
       }
 
+      /**
+       * `cor` só entra no payload quando há algo definitivo a dizer sobre
+       * ela — mesmo motivo do `p_sem_assinatura` em `services/messages.ts`
+       * (~181-194 lá): a migration que cria a coluna pode ainda não ter sido
+       * aplicada no banco quando este código subir, e `insert`/`update` com
+       * uma chave que a tabela não tem falha o SALVAMENTO INTEIRO (o erro
+       * vira "column \"cor\" does not exist"). Aqui isso não seria "a cor não
+       * pegou" — seria "não deu para criar/editar o compromisso nenhum".
+       *
+       * Omitida por padrão, as duas pontas ficam independentes: criar/editar
+       * compromisso continua funcionando IGUAL A HOJE mesmo sem a migration,
+       * e o seletor de cor passa a ter efeito assim que ela for aplicada, sem
+       * ordem obrigatória de deploy.
+       *
+       * `editando?.cor` truthy é a prova de que a coluna JÁ EXISTE neste
+       * banco — um evento só chega com `cor` preenchida se o `select('*')` a
+       * trouxe — e é o que permite mandar `cor: null` com segurança quando a
+       * pessoa desmarca a cor de um compromisso que já tinha uma.
+       */
+      if (rascunho.cor) {
+        campos.cor = rascunho.cor
+      } else if (editando?.cor) {
+        campos.cor = null
+      }
+
       if (editando) {
         // `created_by` e `assigned_to` ficam DE FORA: quem editou não vira dono,
         // e a designação tem gatilho próprio no banco (`agenda_events_designacao`).
-        await atualizarEvento(editando.id, campos)
+        await atualizarEvento(editando.id, campos as Partial<NovoEvento>)
         toast({ title: 'Compromisso atualizado' })
       } else {
-        await criarEvento({ ...campos, created_by: user.id, assigned_to: null })
+        await criarEvento({ ...campos, created_by: user.id, assigned_to: null } as NovoEvento)
         toast({ title: 'Compromisso criado' })
       }
       setDialogoAberto(false)

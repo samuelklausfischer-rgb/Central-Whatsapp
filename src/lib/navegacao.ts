@@ -86,7 +86,12 @@ export const DESTINOS_PRINCIPAIS: DestinoNav[] = [
 const FERRAMENTAS_DO_APP: DestinoNav[] = [
   { title: 'Tarefas', description: 'Kanban interno', icon: ListTodo, url: '/crm' },
   { title: 'Anotações', description: 'Notas rápidas', icon: StickyNote, url: '/notes' },
-  { title: 'Gatilhos', description: 'Mensagens auto', icon: Zap, url: '/triggers' },
+  {
+    title: 'Atalhos de mensagem',
+    description: 'Respostas prontas',
+    icon: Zap,
+    url: '/triggers',
+  },
   {
     title: 'Agendamentos',
     description: 'Envios futuros',

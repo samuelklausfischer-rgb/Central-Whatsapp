@@ -543,6 +543,34 @@ export default function ChatHub() {
     }
   }, [selectedDeviceId, devices])
 
+  /**
+   * Reconexão dos canais de `messages`, `conversation_user_states` e
+   * `conversation_assignments` — chamada pelo `aoReconectar` de cada um deles
+   * lá embaixo.
+   *
+   * `postgres_changes` não tem replay: o que mudou no banco enquanto o
+   * WebSocket estava fora do ar (o backoff do `useRealtime` chega a 15s) some
+   * sem erro nenhum, e é exatamente esse buraco que fazia "Minhas" demorar
+   * 5-15s para mostrar uma conversa recém-designada — só o botão de recarregar
+   * (`handleRefreshAll`) ou a rede de 60s cobriam isso.
+   *
+   * COALESCE de propósito: os três canais são a MESMA conexão TCP, então uma
+   * queda de rede costuma derrubá-los juntos, e sem debounce a volta disparava
+   * três `loadDeviceData` idênticos em sequência. Reusa o mesmo caminho de
+   * leitura do botão "atualizar tudo" — não é uma consulta nova, só um
+   * gatilho novo. `selectedDeviceIdRef` (não o estado) porque a função nasce
+   * uma vez só (deps vazias no debounce) e o aparelho aberto pode ter mudado
+   * entre a queda e a volta.
+   */
+  const aoReconectarLista = useMemo(
+    () =>
+      debounce(() => {
+        const deviceId = selectedDeviceIdRef.current
+        if (deviceId) loadDeviceData(deviceId)
+      }, 400),
+    [loadDeviceData],
+  )
+
   // Esta assinatura cuida SÓ da tela: lista, store e resumos. O aviso de
   // mensagem nova (som e notificação) tem canal próprio, no `Layout` — ver
   // `hooks/use-notificacoes-de-mensagem.ts`.
@@ -623,7 +651,7 @@ export default function ChatHub() {
         debouncedRefreshSummaries(selectedDeviceId)
       }
     }
-  })
+  }, true, undefined, undefined, aoReconectarLista)
 
   const debouncedRefreshSummaries = useMemo(
     () => debounce((deviceId: string) => {
@@ -732,6 +760,31 @@ export default function ChatHub() {
     })
   }, [])
 
+  /**
+   * Some com o balão otimista SEM marcá-lo como falho.
+   *
+   * Usado quando a falha ficou GRAVADA em `tentativas_de_envio` (o erro vem
+   * carimbado com o id — ver o `catch` de `sendMessage`). Nesse caso o balão
+   * persistido, que sobrevive a recarregar e traz o botão de reenviar, é a
+   * representação boa; manter também o de memória mostraria a mesma falha duas
+   * vezes, uma delas sem saída.
+   *
+   * `markOptimisticFailed` continua existindo para o caso em que nem o registro
+   * deu certo, e para a rede de 60s.
+   */
+  const discardOptimisticMessage = useCallback((tempId: string) => {
+    const chaveDeOrigem = pendingTempsRef.current.find((p) => p.tempId === tempId)?.chave ?? null
+    pendingTempsRef.current = pendingTempsRef.current.filter((p) => p.tempId !== tempId)
+    setConversationMessages((prev) => {
+      const proximas = prev.filter((m) => m.id !== tempId)
+      if (chaveDeOrigem && selectedDeviceIdRef.current && selectedContactRef.current
+        && chaveDeOrigem === chaveDaConversa(selectedDeviceIdRef.current, selectedContactRef.current)) {
+        definirMensagensSePresente(chaveDeOrigem, proximas)
+      }
+      return proximas
+    })
+  }, [])
+
   useRealtime('conversation_user_states', (e) => {
     if (e.record.user_id !== user?.id) return
     if (e.action === 'create' || e.action === 'update') {
@@ -749,7 +802,7 @@ export default function ChatHub() {
     }
     // Reflete pin/arquivar/lida na ordenação da sidebar sem esperar a próxima mensagem.
     if (selectedDeviceId) debouncedRefreshSummaries(selectedDeviceId)
-  })
+  }, true, undefined, undefined, aoReconectarLista)
 
   /**
    * ÚNICO caminho de escrita de uma atribuição no que a tela enxerga.
@@ -856,7 +909,13 @@ export default function ChatHub() {
     //
     // Rede de segurança continua existindo: `refetchOpen` (foco/visibilidade/rede e o
     // tick de 60 s) e o evento de `messages`.
-  })
+    //
+    // `aoReconectar` abaixo NÃO reintroduz o custo descrito acima: ele só roda na
+    // reconexão do canal (rara), nunca por evento, e é a única forma de recuperar
+    // uma atribuição que mudou justamente durante a queda — sem replay, esse
+    // evento nunca chega. É a causa raiz do atraso de 5-15s em "Minhas" descrito
+    // no diagnóstico deste ajuste.
+  }, true, undefined, undefined, aoReconectarLista)
 
   // Copia para o estado o que o store tem NESTA chave. É o único caminho de
   // escrita do que aparece na tela: como a leitura é indexada pela mesma chave que
@@ -1450,6 +1509,7 @@ export default function ChatHub() {
           onOptimisticSend={addOptimisticMessage}
           onOptimisticConfirm={confirmOptimisticMessage}
           onOptimisticFail={markOptimisticFailed}
+          onOptimisticDiscard={discardOptimisticMessage}
           estadoConversa={estadoConversa}
           onRetryMessages={handleRetryMessages}
           conversas={conversations}

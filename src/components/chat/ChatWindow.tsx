@@ -1,4 +1,5 @@
 ﻿import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, useDeferredValue, Fragment } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   conversationDraftKey,
   saveDraft,
@@ -141,6 +142,7 @@ import {
 } from '@/lib/envios_pendentes'
 import { getDonoDoContato, type DonoDoContato } from '@/services/contact_owners'
 import { getUsoDeReacoes, registrarUsoDeReacao, type UsoDeReacoes } from '@/services/uso_de_reacoes'
+import { listarTentativasAbertas, descartarTentativa, marcarReenvio, type TentativaDeEnvio } from '@/services/tentativas-de-envio'
 import { updateContactByJid } from '@/services/contacts'
 import { createNote, getNotesByContact, deleteNote } from '@/services/notes'
 import { createTask, getTaskAssignees, type TaskAssignee } from '@/services/tasks'
@@ -1095,9 +1097,10 @@ const LINHAS_MAXIMAS_DO_COMPOSITOR = 5
  */
 const JANELA_DE_EDICAO_MS = 15 * 60 * 1000
 
-export function ChatWindow({ device, contact, conversation, assignment: assignmentProp, onAssignmentChange, contacts, onBack, sheetOpen, onSheetOpenChange, onStartConversation, onOpenConversationByJid, onOptimisticSend, onOptimisticConfirm, onOptimisticFail, estadoConversa = 'pronto', onRetryMessages, conversas = [], onForwardMessage }: any) {
+export function ChatWindow({ device, contact, conversation, assignment: assignmentProp, onAssignmentChange, contacts, onBack, sheetOpen, onSheetOpenChange, onStartConversation, onOpenConversationByJid, onOptimisticSend, onOptimisticConfirm, onOptimisticFail, onOptimisticDiscard, estadoConversa = 'pronto', onRetryMessages, conversas = [], onForwardMessage }: any) {
   const { user } = useAuth()
   const { toast } = useToast()
+  const navigate = useNavigate()
 
   const [msgText, setMsgText] = useState('')
   const [isEmojiOpen, setIsEmojiOpen] = useState(false)
@@ -1131,6 +1134,21 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const [triggers, setTriggers] = useState<any[]>([])
   const [searchTrigger, setSearchTrigger] = useState('')
   const [isPlusOpen, setIsPlusOpen] = useState(false)
+  /**
+   * Popup de atalhos de mensagem ativado por `/` no início do compositor —
+   * "no WhatsApp digita-se `/`" era exatamente o gesto que faltava para achar
+   * os Gatilhos Rápidos, que já existiam escondidos no popover "+".
+   *
+   * Diferente de `mencaoAtiva` (que guarda `{ termo, inicio }` porque a menção
+   * pode nascer no meio do texto, depois de um espaço), aqui o início é SEMPRE
+   * a posição 0 — o `/` só conta na largada da mensagem, como no WhatsApp
+   * Business. Por isso um booleano basta: o termo de busca é lido direto de
+   * `msgText` (ver `termoAtalhoBarra` abaixo), sem duplicar em outro estado
+   * que poderia dessincronizar.
+   */
+  const [atalhosAbertos, setAtalhosAbertos] = useState(false)
+  /** Índice destacado por teclado (↑/↓) na lista filtrada de atalhos. */
+  const [atalhoDestacado, setAtalhoDestacado] = useState(0)
 
   const [labels, setLabels] = useState<any[]>([])
   const [contactTags, setContactTags] = useState<any[]>([])
@@ -1619,6 +1637,135 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     if (isGroupActionsOpen) setIsGroupActionsOpen(false)
   }
 
+  // ─────────────── Tentativas de envio em aberto (falhou/pendente) ───────────────
+  // Vêm do BANCO (`public.tentativas_de_envio`), não do array `messages`: são a
+  // prova de um envio que falhou e sobrevivem a trocar de conversa ou recarregar a
+  // página — ao contrário do balão otimista (`onOptimisticFail`, em ChatHub.tsx),
+  // que é só estado em memória e some no reload. `sendMessage` (services/messages)
+  // é quem grava/apaga essas linhas sozinho; aqui só se lê e se reage aos botões.
+  const [tentativasAbertas, setTentativasAbertas] = useState<TentativaDeEnvio[]>([])
+  const [reenviandoId, setReenviandoId] = useState<string | null>(null)
+  const [descartandoId, setDescartandoId] = useState<string | null>(null)
+
+  // Mesmo padrão de `convKeyDaColagem` acima, e pelo mesmo motivo: o ChatWindow
+  // NÃO desmonta ao trocar de conversa, então sem este reset SÍNCRONO (durante o
+  // render, não só no efeito abaixo) a tentativa falhada da conversa ANTERIOR
+  // chegaria a pintar por um frame na conversa nova, antes da busca terminar —
+  // exatamente a classe de bug que este arquivo já cometeu três vezes.
+  const [tentativasConvKey, setTentativasConvKey] = useState(convKey)
+  if (convKey !== tentativasConvKey) {
+    setTentativasConvKey(convKey)
+    setTentativasAbertas([])
+  }
+
+  // Busca ao abrir a conversa (não há assinatura de realtime nova para esta
+  // tabela — fora de escopo). `cancelado` evita que a resposta de uma busca
+  // antiga (conversa A) sobrescreva a lista depois que já se trocou para a
+  // conversa B e a busca dela já respondeu.
+  useEffect(() => {
+    if (!device?.id || !contact) return
+    let cancelado = false
+    listarTentativasAbertas(device.id, contact)
+      .then((linhas) => {
+        if (!cancelado) setTentativasAbertas(linhas)
+      })
+      .catch(() => {
+        // Falhar ao listar não pode quebrar a conversa — só some o aviso de
+        // envio pendurado até a próxima abertura.
+      })
+    return () => {
+      cancelado = true
+    }
+  }, [device?.id, contact])
+
+  /**
+   * Reenvia uma tentativa falhada com o mesmo `sendMessage` do resto do
+   * arquivo, usando `conteudo`/`anexos`/`reply_to_id` GRAVADOS na tentativa —
+   * não o que estiver no compositor agora, que pode já ser outra coisa.
+   */
+  const reenviarTentativa = useCallback(
+    async (t: TentativaDeEnvio) => {
+      if (!device?.id || !user?.id || !contact) return
+      setReenviandoId(t.id)
+      try {
+        await marcarReenvio(t.id)
+        await sendMessage({
+          content: t.conteudo,
+          device_id: device.id,
+          sender_id: user.id,
+          is_read: true,
+          remote_sender: contact,
+          mediaUrl: t.anexos?.mediaUrl,
+          mediaType: t.anexos?.mediaType,
+          mediaName: t.anexos?.mediaName,
+          reply_to_id: t.reply_to_id ?? undefined,
+        })
+        // Sucesso: ESTE `sendMessage` já apagou a linha NOVA que ele mesmo
+        // gravou antes de chamar a Evolution (contrato do serviço de
+        // tentativas). A que está na tela é a ANTIGA — apagá-la é
+        // responsabilidade de quem chama, e é o que a linha abaixo faz.
+        await descartarTentativa(t.id)
+        setTentativasAbertas((prev) => prev.filter((x) => x.id !== t.id))
+      } catch (err) {
+        console.error('[tentativa] reenvio falhou', err)
+        toast({ title: traduzErro(err, 'Não foi possível reenviar'), variant: 'destructive' })
+        // O banco pode ter mudado (contador de tentativas, uma segunda linha
+        // falha da tentativa nova) — resincroniza em vez de arriscar um
+        // estado local desencontrado do que ficou gravado de fato.
+        listarTentativasAbertas(device.id, contact).then(setTentativasAbertas).catch(() => {})
+      } finally {
+        setReenviandoId(null)
+      }
+    },
+    [device?.id, user?.id, contact, toast],
+  )
+
+  /**
+   * O que fazer quando um envio falha — em UM lugar só, porque são seis
+   * caminhos de envio neste arquivo e antes cada um tratava do seu jeito
+   * (quatro deles só davam um toast, e a falha sumia).
+   *
+   * Se o erro vem CARIMBADO com `idTentativa`, a falha ficou gravada no banco:
+   * o balão persistido, com botão de reenviar, é a representação boa. Então o
+   * balão otimista em memória é DESCARTADO (não marcado como falho) para a
+   * mesma falha não aparecer duas vezes, e a lista é relida na hora — sem isso
+   * o botão de reenviar só apareceria na próxima vez que a conversa fosse
+   * aberta, que não é o que foi pedido.
+   *
+   * Sem carimbo, nem o registro deu certo (tipicamente offline, em que as duas
+   * requisições morrem juntas). Aí cai no comportamento de antes: balão em
+   * memória marcado como falho, que é melhor que nada.
+   */
+  const tratarFalhaDeEnvio = useCallback(
+    (err: unknown, tempId?: string) => {
+      const idTentativa = (err as { idTentativa?: string } | null)?.idTentativa
+      if (idTentativa) {
+        if (tempId) onOptimisticDiscard?.(tempId)
+        if (device?.id && contact) {
+          listarTentativasAbertas(device.id, contact).then(setTentativasAbertas).catch(() => {})
+        }
+      } else if (tempId) {
+        onOptimisticFail?.(tempId)
+      }
+    },
+    [device?.id, contact, onOptimisticDiscard, onOptimisticFail],
+  )
+
+  const descartarTentativaUi = useCallback(
+    async (id: string) => {
+      setDescartandoId(id)
+      try {
+        await descartarTentativa(id)
+        setTentativasAbertas((prev) => prev.filter((x) => x.id !== id))
+      } catch (err) {
+        toast({ title: traduzErro(err, 'Não foi possível descartar'), variant: 'destructive' })
+      } finally {
+        setDescartandoId(null)
+      }
+    },
+    [toast],
+  )
+
   const convKeyRef = useRef<string | null>(convKey)
   const draftKeyRef = useRef<string | null>(convKey)
   const liveDraftRef = useRef<ConversationDraft>(EMPTY_DRAFT)
@@ -1673,6 +1820,11 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     // notificar o grupo, sem nenhum sinal na tela.
     setMencionarTodos(d.mentionEveryone)
     setMencaoAtiva(null)
+    // Mesmo motivo do `setMencaoAtiva(null)` acima: o ChatWindow não desmonta
+    // ao trocar de conversa, então sem fechar aqui o popup de atalhos "/"
+    // ficaria pintado sobre o texto restaurado da conversa nova.
+    setAtalhosAbertos(false)
+    setAtalhoDestacado(0)
     setNoteTitle(d.noteTitle)
     setNoteContent(d.noteContent)
     setNoteCategory(d.noteCategory)
@@ -2372,7 +2524,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       })
       onOptimisticConfirm?.(tempId, res?.message)
     } catch (err) {
-      onOptimisticFail?.(tempId)
+      tratarFalhaDeEnvio(err, tempId)
       toast({
         title: err instanceof Error ? err.message : 'Erro ao enviar mensagem',
         variant: 'destructive',
@@ -2460,12 +2612,10 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         reply_to_snapshot: replySnapshot,
         attachments: [],
       }
-      // Caminho otimista limpa de forma síncrona, antes de qualquer await — aqui
-      // não há janela para trocar de conversa no meio.
-      setMsgText('')
-      setReplyingTo(null)
-      setMencaoAtiva(null)
-      setMencionarTodos(false)
+      // Conversa em que o envio começou — mesmo padrão dos ramos de áudio/anexo
+      // mais abaixo, necessário agora que a limpeza do compositor deixou de ser
+      // síncrona (ver comentário no sucesso, logo abaixo).
+      const chaveEnvio = convKey
       onOptimisticSend?.(tempMsg)
       try {
         // Envia o texto CRU — o servidor adiciona a assinatura. A RPC retorna a
@@ -2482,36 +2632,62 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           noSignature: semAssinatura,
         })
         onOptimisticConfirm?.(tempId, res?.message)
+        // Limpa só DEPOIS do sucesso — como o ramo de áudio já fazia. Antes
+        // limpava de forma SÍNCRONA logo aqui em cima, antes do `await`: se o
+        // envio falhasse bem no início (antes até de `sendMessage` gravar a
+        // tentativa), a pessoa perdia o que escreveu sem deixar rastro nenhum.
+        // Agora o texto some do compositor só quando de fato sai; se falhar,
+        // `tentativas_de_envio` guarda o conteúdo e o balão vermelho (mais
+        // abaixo, na lista de mensagens) mostra de onde reenviar.
+        limparCompositorAposEnvio(chaveEnvio, () => {
+          setMsgText('')
+          setReplyingTo(null)
+          setMencaoAtiva(null)
+          // Sem isto o popup de atalhos "/" ficava pintado sobre o compositor
+          // vazio depois de enviar (msgText não passa pelo `onChange` aqui).
+          setAtalhosAbertos(false)
+          setMencionarTodos(false)
+        })
       } catch (err) {
-        onOptimisticFail?.(tempId)
+        tratarFalhaDeEnvio(err, tempId)
         /**
-         * Guarda a falha NO APARELHO antes de qualquer outra coisa.
+         * O ponto cego da tentativa de envio: quando ela mesma não consegue ser
+         * gravada.
          *
-         * Sem isto, o balão vermelho vivia só na memória do React: bastava a
-         * internet voltar (`online` dispara o refetch da conversa, que substitui
-         * a lista pela do servidor) para a mensagem sumir sem ter sido enviada e
-         * sem deixar como reenviar. Agora ela sobrevive ao refetch, ao F5 e a
-         * fechar o app.
+         * `tratarFalhaDeEnvio` cobre bem o caso em que o servidor foi
+         * alcançado — o erro traz `idTentativa`, a linha existe em
+         * `tentativas_de_envio` e o verificador de 1 minuto assume dali. Mas sem
+         * internet o insert da tentativa também não sai, o erro vem sem
+         * `idTentativa`, e sobra só o balão otimista em memória — que é apagado
+         * no instante em que a conexão volta, porque `online` dispara o refetch
+         * e a lista é substituída pela do servidor. Era o relato: "ao voltar a
+         * internet a msg some e não dá para reenviar".
+         *
+         * Então aqui guarda-se no APARELHO, e só neste caso: se a tentativa foi
+         * registrada no servidor, ela já é a fonte da verdade e duplicar aqui
+         * mostraria a mesma falha duas vezes.
          *
          * `navigator.onLine === false` é o que autoriza o reenvio automático
-         * depois: só aí dá para afirmar que a requisição não saiu. Qualquer
+         * depois — só aí dá para afirmar que a requisição não saiu. Qualquer
          * outra causa fica 'desconhecido' e espera clique humano.
          */
-        guardarEnvioPendente({
-          tempId,
-          deviceId: device.id,
-          remoteSender: contact,
-          senderId: user.id,
-          criadoEm: tempMsg.created_at,
-          motivo: navigator.onLine === false ? 'offline' : 'desconhecido',
-          payload: {
-            content,
-            reply_to_id: replyId,
-            mentioned: mencionados,
-            mentionEveryone: marcarTodos,
-            noSignature: semAssinatura,
-          },
-        })
+        if (!(err as { idTentativa?: string } | null)?.idTentativa) {
+          guardarEnvioPendente({
+            tempId,
+            deviceId: device.id,
+            remoteSender: contact,
+            senderId: user.id,
+            criadoEm: tempMsg.created_at,
+            motivo: navigator.onLine === false ? 'offline' : 'desconhecido',
+            payload: {
+              content,
+              reply_to_id: replyId,
+              mentioned: mencionados,
+              mentionEveryone: marcarTodos,
+              noSignature: semAssinatura,
+            },
+          })
+        }
         console.error('[envio] falhou', err)
         toast({
           title: traduzErro(err, 'Erro ao enviar mensagem'),
@@ -2551,6 +2727,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           setMsgText('')
           setReplyingTo(null)
           setMencaoAtiva(null)
+          setAtalhosAbertos(false)
           setMencionarTodos(false)
         })
         toast({ title: 'Mensagem editada' })
@@ -2574,6 +2751,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         limparCompositorAposEnvio(chaveEnvio, () => {
           discardAudio()
           setMencaoAtiva(null)
+          setAtalhosAbertos(false)
           setMencionarTodos(false)
         })
       } else if (attachments.length > 0) {
@@ -2639,9 +2817,14 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         setAttachments([])
         setReplyingTo(null)
         setMencaoAtiva(null)
+        setAtalhosAbertos(false)
         setMencionarTodos(false)
       })
     } catch (err) {
+      // Este é o caminho de áudio, anexo e edição. Até agora ele só dava um
+      // toast: a falha sumia e não havia o que reenviar. Sem balão otimista
+      // para descartar, aqui o helper só traz a tentativa gravada para a tela.
+      tratarFalhaDeEnvio(err)
       console.error('[envio] falhou', err)
       toast({
         title: traduzErro(err, 'Erro ao enviar mensagem'),
@@ -2865,11 +3048,13 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       limparCompositorAposEnvio(chaveEnvio, () => {
         discardAudio()
         setMencaoAtiva(null)
+        setAtalhosAbertos(false)
         setMencionarTodos(false)
       })
     } catch (err) {
       // Não descarta o áudio no erro: a pessoa precisa poder tentar de novo
       // (ou usar o botão de enviar manual, que ainda funciona) sem regravar.
+      tratarFalhaDeEnvio(err)
       console.error('[envio] áudio falhou', err)
       toast({
         title: traduzErro(err, 'Erro ao enviar áudio'),
@@ -3256,10 +3441,31 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     }
   }
 
-  const handleSelectTrigger = (content: string) => {
-    setMsgText((prev) => (prev ? prev + '\n\n' + content : content))
+  /**
+   * Insere o conteúdo de um atalho no compositor. Dois chamadores, dois
+   * comportamentos: o popover "+" ANEXA ao que já estava escrito (útil para
+   * colar um atalho no meio de uma mensagem em andamento); o atalho "/"
+   * (`substituir: true`) TROCA a mensagem inteira, porque ali o que está
+   * escrito é só o "/termo" que serviu para filtrar — deixá-lo ali sobraria
+   * na frente do texto pronto, e a pessoa teria que apagar à mão.
+   */
+  const handleSelectTrigger = (content: string, opts?: { substituir?: boolean }) => {
+    setMsgText((prev) => (opts?.substituir ? content : prev ? prev + '\n\n' + content : content))
     setIsPlusOpen(false)
     setSearchTrigger('')
+    setAtalhosAbertos(false)
+    if (opts?.substituir) {
+      // Devolve o foco e o cursor pro fim do texto recém-inserido — sem isto
+      // a pessoa teria que clicar de volta no campo pra continuar digitando.
+      requestAnimationFrame(() => {
+        const el = msgTextareaRef.current
+        if (el) {
+          el.focus()
+          const posicao = el.value.length
+          el.setSelectionRange(posicao, posicao)
+        }
+      })
+    }
   }
 
   const handleToggleLabel = async (labelId: string) => {
@@ -3592,6 +3798,15 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
 
   const filteredTriggers = triggers.filter((t) =>
     t.title.toLowerCase().includes(searchTrigger.toLowerCase()),
+  )
+
+  // O que vem depois do "/" filtra os atalhos, igual `searchTrigger` filtra
+  // `filteredTriggers` acima — só que aqui o termo é o próprio `msgText`, e
+  // não um campo de busca à parte (ver o comentário de `atalhosAbertos`).
+  const termoAtalhoBarra = msgText.startsWith('/') ? msgText.slice(1) : ''
+  const atalhosFiltrados = useMemo(
+    () => triggers.filter((t) => t.title.toLowerCase().includes(termoAtalhoBarra.toLowerCase())),
+    [triggers, termoAtalhoBarra],
   )
 
   if (!device || !contact) {
@@ -5083,6 +5298,105 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           </React.Fragment>
           )
         }))}
+        {/* Tentativas de envio em aberto — DEPOIS das mensagens reais de propósito
+            (são as mais recentes por definição). `tipo === 'edicao'` fica de fora:
+            editar não é mensagem nova, e um balão vermelho aqui para uma edição que
+            falhou confundiria mais do que ajudaria (o toast do próprio fluxo de
+            edição já avisa). Ver reset por conversa e a busca logo acima. */}
+        {tentativasAbertas
+          .filter((t) => t.tipo !== 'edicao')
+          .map((t) => {
+            const falhou = t.status === 'falhou'
+            // Mídia sem `anexos` gravado não tem o que reenviar (o arquivo já
+            // se foi) — só dá para descartar.
+            const podeReenviar = !(t.tipo === 'midia' && !t.anexos)
+            return (
+              <div key={`tentativa-${t.id}`} className="flex flex-col items-end gap-1">
+                <div className="flex gap-2.5 items-end w-full justify-end">
+                  <div
+                    className={cn(
+                      'max-w-[88%] sm:max-w-[78%] rounded-2xl rounded-br-sm px-3.5 py-2 shadow-chat-bubble border text-chat-text',
+                      falhou
+                        ? 'bg-red-500/10 border-red-500/40'
+                        : 'bg-chat-bubble-out border-chat-bubble-outline',
+                    )}
+                  >
+                    {t.conteudo?.trim() && (
+                      <div className="text-[15px] leading-relaxed break-words whitespace-pre-wrap">
+                        {t.conteudo}
+                      </div>
+                    )}
+                    {t.anexos?.mediaName && (
+                      <div className="mt-1 flex items-center gap-1.5 text-[12px] text-chat-muted/80">
+                        <Paperclip className="h-3 w-3 shrink-0" />
+                        <span className="truncate">{t.anexos.mediaName}</span>
+                      </div>
+                    )}
+                    {/* O motivo importa, e não é só diagnóstico: quando o
+                        verificador não CONSEGUE confirmar com a Evolution, ele
+                        grava aqui um aviso pedindo para conferir no WhatsApp
+                        antes de reenviar. Esconder isso deixaria a pessoa
+                        clicar em "tentar de novo" achando que a mensagem
+                        certamente não saiu — e a paciente receberia duas
+                        vezes. Quando o texto é o erro cru da Evolution, ele
+                        também ajuda: o projeto já decidiu mostrá-lo nos toasts
+                        de envio, porque "número inválido" e "arquivo recusado"
+                        pedem reações diferentes. */}
+                    {falhou && t.erro && (
+                      <div className="mt-1 text-[11px] leading-snug text-red-400/90 break-words">
+                        {t.erro.length > 160 ? `${t.erro.slice(0, 160)}…` : t.erro}
+                      </div>
+                    )}
+                    <div className="mt-1 flex items-center justify-end gap-1">
+                      {falhou ? (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-red-400">
+                          <AlertCircle className="h-3 w-3" /> não saiu
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] text-chat-muted/70">
+                          <Clock className="h-3 w-3" /> enviando…
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                {falhou && (
+                  <div className="flex items-center gap-2 mr-1">
+                    {podeReenviar && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 text-[12px]"
+                        disabled={reenviandoId === t.id}
+                        onClick={() => reenviarTentativa(t)}
+                      >
+                        {reenviandoId === t.id ? (
+                          <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                        ) : (
+                          <Send className="h-3 w-3 mr-1" />
+                        )}
+                        Tentar de novo
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-[12px] text-chat-muted"
+                      disabled={descartandoId === t.id}
+                      onClick={() => descartarTentativaUi(t.id)}
+                    >
+                      {descartandoId === t.id ? (
+                        <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                      ) : (
+                        <Trash2 className="h-3 w-3 mr-1" />
+                      )}
+                      Descartar
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
         </div>
       </div>
@@ -5419,13 +5733,21 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                   Contato
                 </button>
                 <div className="border-t border-chat-border my-2" />
-                <div className="text-[11px] font-semibold text-chat-muted uppercase tracking-wider px-2 pb-1.5 pt-0.5">
-                  Gatilhos Rápidos
+                <div className="px-2 pb-1.5 pt-0.5 flex items-baseline justify-between gap-2">
+                  <span className="text-[11px] font-semibold text-chat-muted uppercase tracking-wider">
+                    Atalhos de mensagem
+                  </span>
+                  {/* Descoberta era o problema real (Ketlin não achava a
+                      função escondida aqui): a dica aparece bem onde ela já
+                      está olhando, no gesto mais rápido que o clique. */}
+                  <span className="text-[10px] text-chat-muted normal-case font-normal">
+                    dica: digite / na mensagem
+                  </span>
                 </div>
                 <div className="px-2 pb-1.5">
                   <input
                     className="w-full bg-chat-panel border border-chat-border rounded-md px-2.5 py-1.5 text-sm text-chat-text placeholder:text-chat-muted focus:outline-none focus:ring-1 focus:ring-blue-500/50"
-                    placeholder="Buscar gatilho..."
+                    placeholder="Buscar atalho..."
                     value={searchTrigger}
                     onChange={(e) => setSearchTrigger(e.target.value)}
                   />
@@ -5433,7 +5755,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                 <div className="max-h-40 overflow-y-auto space-y-0.5 px-1 pb-1">
                   {filteredTriggers.length === 0 ? (
                     <div className="p-2 text-center text-xs text-chat-muted">
-                      Nenhum gatilho encontrado.
+                      Nenhum atalho encontrado.
                     </div>
                   ) : (
                     filteredTriggers.map((t) => (
@@ -5641,6 +5963,58 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                     onFechar={() => setMencaoAtiva(null)}
                   />
                 )}
+                {/*
+                  Popup de atalhos "/" — mesmo molde ancorado do
+                  `MentionAutocomplete` acima (`absolute bottom-full`), mas
+                  inline aqui em vez de componente à parte: diferente da
+                  menção (que despacha um `keydown` global em fase de
+                  captura para chegar antes do textarea), aqui quem já
+                  intercepta o teclado é o próprio `onKeyDown` do textarea
+                  logo abaixo — não existe segundo listener para coordenar.
+                */}
+                {atalhosAbertos && (
+                  <div
+                    className="absolute bottom-full left-0 mb-2 w-80 max-h-64 overflow-y-auto rounded-lg border border-chat-border bg-chat-panel shadow-chat z-50"
+                    // `mousedown` (não `click`) é quando o navegador tiraria o
+                    // foco do textarea — e o `onBlur` acima fecharia o popup
+                    // ANTES do `onClick` do botão disparar, matando a escolha.
+                    // `preventDefault` aqui mantém o foco no textarea e deixa
+                    // o clique completar normalmente.
+                    onMouseDown={(e) => e.preventDefault()}
+                  >
+                    {atalhosFiltrados.length === 0 ? (
+                      <div className="p-3 text-center text-sm text-chat-muted space-y-2">
+                        <p>Você ainda não tem atalhos de mensagem.</p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAtalhosAbertos(false)
+                            navigate('/triggers')
+                          }}
+                          className="text-xs text-blue-400 hover:underline"
+                        >
+                          Criar atalho de mensagem
+                        </button>
+                      </div>
+                    ) : (
+                      atalhosFiltrados.map((t, i) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onMouseEnter={() => setAtalhoDestacado(i)}
+                          onClick={() => handleSelectTrigger(t.content, { substituir: true })}
+                          className={cn(
+                            'w-full text-left px-3 py-2 text-sm border-b border-chat-border last:border-b-0',
+                            i === atalhoDestacado ? 'bg-chat-hover' : 'hover:bg-chat-hover',
+                          )}
+                        >
+                          <div className="font-medium text-chat-text truncate">{t.title}</div>
+                          <div className="text-xs text-chat-muted truncate">{t.content}</div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
                 <textarea
                   ref={msgTextareaRef}
                   // Sem `max-h-*` aqui de propósito: o teto das cinco linhas é
@@ -5658,6 +6032,12 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                         ? mencaoEmDigitacao(e.target.value, e.target.selectionStart ?? 0)
                         : null,
                     )
+                    // Atalhos "/": só na posição 0, como o WhatsApp — "/" no
+                    // meio da frase é texto normal, não comando. A cada tecla
+                    // a lista filtrada muda, então o destaque volta pro topo.
+                    const abrirAtalhos = e.target.value.startsWith('/')
+                    setAtalhosAbertos(abrirAtalhos)
+                    if (abrirAtalhos) setAtalhoDestacado(0)
                   }}
                   // Clique, Home e setas movem o cursor SEM disparar `onChange`.
                   // Sem isto a lista continuava aberta com o cursor longe da
@@ -5667,7 +6047,44 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                     const el = e.currentTarget
                     setMencaoAtiva(mencaoEmDigitacao(el.value, el.selectionStart ?? 0))
                   }}
+                  // Clique fora fecha o popup de atalhos (perder o foco do
+                  // campo já cobre isso, sem precisar de um listener global de
+                  // clique como a menção não usa aqui — ver comentário acima).
+                  onBlur={() => setAtalhosAbertos(false)}
                   onKeyDown={(e) => {
+                    // Atalhos "/" tomam o teclado enquanto o popup está aberto:
+                    // ↑/↓ navegam, Enter ESCOLHE (nunca envia — mesmo com a
+                    // lista vazia, senão o "/termo" sem match viraria mensagem
+                    // enviada sem querer) e Esc fecha sem mexer no texto.
+                    if (atalhosAbertos) {
+                      if (e.key === 'ArrowDown') {
+                        e.preventDefault()
+                        setAtalhoDestacado((i) =>
+                          atalhosFiltrados.length ? (i + 1) % atalhosFiltrados.length : 0,
+                        )
+                        return
+                      }
+                      if (e.key === 'ArrowUp') {
+                        e.preventDefault()
+                        setAtalhoDestacado((i) =>
+                          atalhosFiltrados.length
+                            ? (i - 1 + atalhosFiltrados.length) % atalhosFiltrados.length
+                            : 0,
+                        )
+                        return
+                      }
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        const escolhido = atalhosFiltrados[atalhoDestacado]
+                        if (escolhido) handleSelectTrigger(escolhido.content, { substituir: true })
+                        return
+                      }
+                      if (e.key === 'Escape') {
+                        e.preventDefault()
+                        setAtalhosAbertos(false)
+                        return
+                      }
+                    }
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault()
                       handleSend(e)
