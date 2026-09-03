@@ -101,10 +101,34 @@ export interface RascunhoDoOutlook {
   inicio: string
   fim: string
   dia_inteiro?: boolean
+  /**
+   * Compromisso de GRUPO: convida todo mundo do grupo.
+   *
+   * Vai só o id. Os e-mails são resolvidos no servidor, com `service_role` —
+   * o endereço de trabalho das pessoas nunca chega ao navegador (é por isso
+   * que a RPC `colegas()` devolve `tem_outlook` em vez do e-mail).
+   */
+  group_id?: string
 }
 
-export async function criarNoOutlook(evento: RascunhoDoOutlook): Promise<void> {
-  await chamar('criar', evento)
+/**
+ * O que a função devolve depois de gravar no Outlook.
+ *
+ * Os DOIS identificadores existem porque servem para coisas diferentes, e
+ * trocá-los é o defeito que só aparece quando a segunda pessoa abre a agenda:
+ *   `id`        → vale só na caixa de quem criou. É por ele que se edita e cancela.
+ *   `ical_uid`  → é o mesmo em TODAS as caixas. É a chave de deduplicação.
+ */
+export interface RespostaDoOutlook {
+  id: string
+  ical_uid: string | null
+  /** Quantas pessoas do grupo entraram como convidadas — 0 quando não é grupo. */
+  convidados?: number
+}
+
+export async function criarNoOutlook(evento: RascunhoDoOutlook): Promise<RespostaDoOutlook> {
+  const dados = (await chamar('criar', evento)) as RespostaDoOutlook
+  return { id: String(dados.id ?? ''), ical_uid: dados.ical_uid ?? null, convidados: dados.convidados ?? 0 }
 }
 
 /**
@@ -113,9 +137,17 @@ export async function criarNoOutlook(evento: RascunhoDoOutlook): Promise<void> {
  * Se o `id` for de uma OCORRÊNCIA de repetição, a mudança vale só para aquele
  * dia — a Microsoft transforma a ocorrência numa exceção da série. Quem avisa a
  * pessoa é a tela; aqui só se registra o porquê.
+ *
+ * Com `group_id`, a lista de convidados é REFEITA a partir de quem está no
+ * grupo agora: quem entrou depois recebe o convite, quem saiu recebe o
+ * cancelamento. Sem ele, a lista de convidados do evento fica intocada.
  */
-export async function atualizarNoOutlook(id: string, evento: RascunhoDoOutlook): Promise<void> {
-  await chamar('atualizar', { ...evento, id })
+export async function atualizarNoOutlook(
+  id: string,
+  evento: RascunhoDoOutlook,
+): Promise<RespostaDoOutlook> {
+  const dados = (await chamar('atualizar', { ...evento, id })) as RespostaDoOutlook
+  return { id: String(dados.id ?? id), ical_uid: dados.ical_uid ?? null, convidados: dados.convidados ?? 0 }
 }
 
 /** Idem: apagar uma ocorrência apaga só aquele dia, não a série. */

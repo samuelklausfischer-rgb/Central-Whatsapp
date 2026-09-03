@@ -28,10 +28,28 @@ export interface ItemDaAgenda {
    */
   podeEditar: boolean
   podeExcluir: boolean
+  /**
+   * Sou EU quem criou? É uma pergunta diferente de `podeEditar` — um admin
+   * edita o compromisso de qualquer um, mas o evento no Outlook mora na caixa
+   * de quem criou, e o `outlook_event_id` só vale com o token DELE.
+   *
+   * Se um admin mandasse o convite, o Graph criaria um evento novo na caixa
+   * DELE, sobrescreveria o `outlook_event_id` da linha, e o compromisso
+   * original ficaria órfão no Outlook do criador — vivo, sem ninguém capaz de
+   * cancelá-lo pelo app. Por isso tudo que fala com o Outlook em compromisso de
+   * grupo é guardado por este campo, e não por `podeEditar`.
+   */
+  souOCriador: boolean
   /** Ocorrência de um compromisso que se repete: mexer vale só para este dia. */
   seRepete: boolean
   /** O `group_id`, para o diálogo de edição voltar no grupo certo. */
   groupId: string | null
+  /** Id do evento na caixa do criador. Preenchido = o grupo já foi convidado. */
+  outlook_event_id: string | null
+  /** `iCalUId`, igual em todas as caixas. Chave de deduplicação. */
+  outlook_ical_uid: string | null
+  /** Mensagem do Graph quando o convite falhou. O compromisso existe assim mesmo. */
+  outlook_sync_erro: string | null
   /** Cor de destaque escolhida na criação. Nula = visual padrão. Outlook não tem. */
   cor: string | null
 }
@@ -49,6 +67,17 @@ export interface Rascunho {
   groupId: string
   /** Salvar no Outlook em vez de na nossa agenda. Só para escopo pessoal. */
   noOutlook: boolean
+  /**
+   * Convidar o grupo no Outlook. Só para escopo de grupo.
+   *
+   * É um campo SEPARADO de `noOutlook`, e não o mesmo reaproveitado, porque as
+   * duas ações são opostas: `noOutlook` diz "isto NÃO fica na nossa agenda, vai
+   * só para o Outlook"; `convidarOutlook` diz "isto fica na nossa agenda E
+   * também vira convite". Se fossem um campo só, marcar a caixa num
+   * compromisso de grupo o tiraria do Central Whats — exatamente o contrário do
+   * que a pessoa pediu.
+   */
+  convidarOutlook: boolean
   /** Cor de destaque escolhida no seletor do diálogo. Nula = "sem cor". */
   cor: string | null
 }
