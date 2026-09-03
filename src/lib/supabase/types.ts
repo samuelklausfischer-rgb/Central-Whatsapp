@@ -238,6 +238,24 @@ export interface AgendaEvent {
   cor: string | null
   created_at: string
   updated_at: string
+  /*
+    O vínculo com o convite no Outlook. OPCIONAIS de propósito: quem cria um
+    compromisso não informa nenhum dos três — eles são preenchidos DEPOIS, com
+    o que o Microsoft Graph respondeu. Se fossem obrigatórios, `NovoEvento`
+    (que é `Omit<AgendaEvent, 'id' | 'created_at' | 'updated_at'>`) passaria a
+    exigi-los em todo insert, inclusive nos compromissos que nunca vão ao
+    Outlook.
+  */
+  /** Id do evento na caixa de QUEM CRIOU. Serve para editar e cancelar. */
+  outlook_event_id?: string | null
+  /** O `iCalUId`, igual em todas as caixas. Chave de deduplicação na tela. */
+  outlook_ical_uid?: string | null
+  /**
+   * Mensagem do Graph quando o convite falhou. Nulo = sincronizado ou nunca
+   * tentado. O compromisso existe aqui de qualquer jeito — o convite é um
+   * extra, não um pré-requisito (migration 20260903143607).
+   */
+  outlook_sync_erro?: string | null
 }
 
 export interface AgendaGroup {

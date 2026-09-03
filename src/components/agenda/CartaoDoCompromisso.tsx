@@ -1,7 +1,14 @@
 import { format } from 'date-fns'
-import { Link2, Mail, Pencil, Repeat, Trash2 } from 'lucide-react'
+import { AlertTriangle, Link2, Mail, Pencil, Repeat, Trash2, UserCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { COR_ACAO_EXCLUIR, COR_OUTLOOK, COR_REPETE, CORES_IMPORTANCIA, estiloDaCorPessoal } from './cores'
+import {
+  COR_ACAO_EXCLUIR,
+  COR_AVISO,
+  COR_OUTLOOK,
+  COR_REPETE,
+  CORES_IMPORTANCIA,
+  estiloDaCorPessoal,
+} from './cores'
 import type { ItemDaAgenda } from './tipos'
 
 /** O cartão do compromisso, na lista lateral do dia. */
@@ -9,11 +16,27 @@ export function CartaoDoCompromisso({
   ev,
   aoEditar,
   aoExcluir,
+  aoReenviarConvite,
+  reenviandoConvite = false,
 }: {
   ev: ItemDaAgenda
   aoEditar: (ev: ItemDaAgenda) => void
   aoExcluir: (ev: ItemDaAgenda) => void
+  /** Refaz o convite do grupo no Outlook depois de uma falha. */
+  aoReenviarConvite?: (ev: ItemDaAgenda) => void
+  reenviandoConvite?: boolean
 }) {
+  /*
+    O botão de tentar de novo só faz sentido para QUEM CRIOU.
+
+    O evento mora na caixa de correio do organizador, e refazer o convite com o
+    token de outra pessoa criaria um evento novo na caixa dela — deixando o
+    original órfão no Outlook do criador. Para quem não criou, o aviso aparece
+    mesmo assim: saber que o convite não chegou é informação útil (é a diferença
+    entre "não recebi" e "não fui convidado"), mesmo sem poder consertar.
+  */
+  const podeReenviar = Boolean(ev.outlook_sync_erro) && ev.souOCriador && Boolean(aoReenviarConvite)
+
   return (
     <div
       className="rounded-lg border border-border/60 bg-accent/30 p-3"
@@ -41,6 +64,20 @@ export function CartaoDoCompromisso({
               <Repeat className="h-2.5 w-2.5" />
             </span>
           )}
+          {/* Selo DISCRETO, só ícone: o convite deu certo, então não há nada
+              para a pessoa fazer — é confirmação, não chamado. O caso que
+              precisa de espaço e de palavras é o contrário, o da falha, e ele
+              aparece embaixo. O `outlook_sync_erro` tem precedência: com erro
+              pendente, o `outlook_event_id` pode ser de uma tentativa anterior
+              que já não corresponde ao que está na tela. */}
+          {ev.outlook_event_id && !ev.outlook_sync_erro && (
+            <span
+              className={cn('inline-flex items-center rounded border px-1 text-[10px]', COR_OUTLOOK)}
+              title="O grupo foi convidado no Outlook"
+            >
+              <UserCheck className="h-2.5 w-2.5" />
+            </span>
+          )}
           {/* Origem antes de importância: saber DE ONDE vem é o que responde
               "por que isso está aqui se eu não marquei". */}
           {ev.origem === 'outlook' ? (
@@ -63,6 +100,38 @@ export function CartaoDoCompromisso({
 
       {ev.descricao && (
         <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{ev.descricao}</p>
+      )}
+
+      {/*
+        AVISO, e não erro: o compromisso existe, está marcado e todo mundo do
+        grupo o vê aqui. O que falhou foi só o convite na agenda da Microsoft —
+        por isso `COR_AVISO` (âmbar) e não `COR_ERRO` (vermelho), que é
+        reservado ao que impede a tela de funcionar.
+
+        A mensagem do Graph vai INTEIRA, sem tradução: "conexão expirada" e
+        "o endereço fulano@… não existe" dão em ações completamente diferentes,
+        e resumir as duas para "falha ao convidar" apagaria justamente a parte
+        que diz o que fazer.
+      */}
+      {ev.outlook_sync_erro && (
+        <div className={cn('mt-2 rounded-lg border p-2.5 text-xs', COR_AVISO)}>
+          <p className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 break-words">
+              O grupo <b>não foi convidado</b> no Outlook: {ev.outlook_sync_erro}
+            </span>
+          </p>
+          {podeReenviar && (
+            <button
+              type="button"
+              onClick={() => aoReenviarConvite?.(ev)}
+              disabled={reenviandoConvite}
+              className="mt-1.5 pl-[1.375rem] text-xs font-medium underline-offset-2 hover:underline disabled:opacity-60"
+            >
+              {reenviandoConvite ? 'Convidando…' : 'Tentar de novo'}
+            </button>
+          )}
+        </div>
       )}
 
       <div className="mt-2 flex flex-wrap items-center gap-3">
