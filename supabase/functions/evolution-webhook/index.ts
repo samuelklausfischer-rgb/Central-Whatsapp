@@ -13,7 +13,7 @@ const STORAGE_BUCKET = 'chat-attachments'
 // Trocar A CADA deploy. É o único jeito de provar que o isolate do Deno recarregou:
 // conferir o arquivo dentro do container mostra o que está em disco, não o que está
 // rodando. A verificação é um POST à função conferindo este campo na resposta.
-const BUILD_MARKER = 'contatos-citacao-nono-digito-2026-08-13'
+const BUILD_MARKER = 'participant-alt-figurinha-lid-2026-09-03'
 
 type MediaType = 'image' | 'video' | 'audio' | 'document' | 'sticker'
 
@@ -805,7 +805,12 @@ function buildMediaDownloadAttempts(messageData: Record<string, any>, convertToM
     id: key.id,
     fromMe: key.fromMe,
     remoteJid: key.remoteJidAlt || key.remoteJid,
-    participant: key.participant,
+    // Mesmo fallback do bloco principal: com endereçamento LID, o participante
+    // de verdade está em `participantAlt`. Aqui isso decide se a Evolution
+    // consegue localizar a mídia para devolver o base64 — mandar o pseudo-ID
+    // `@lid` faz a busca falhar, e o anexo (figurinha, imagem, áudio de grupo)
+    // simplesmente não desce.
+    participant: key.participantAlt || key.participant,
   }
 
   return [
@@ -1190,7 +1195,25 @@ async function tratarWebhook(req: Request): Promise<Response> {
   const isFromMe = key.fromMe === true
   const pushName = messageData.pushName || ''
   const externalId = key.id || ''
-  const participant = key.participant || ''
+  /**
+   * `participantAlt` PRIMEIRO — pelo mesmo motivo que `remoteJidAlt` vem
+   * primeiro na linha logo abaixo.
+   *
+   * Quando o contato usa o endereçamento novo do WhatsApp (`addressingMode:
+   * 'lid'`), a Evolution manda em `key.participant` um pseudo-identificador
+   * `@lid`, e o JID de telefone de verdade fica em `key.participantAlt`. O
+   * `remoteJid` já tratava isso desde que o LID apareceu; `participant` ficou
+   * para trás — e como `group_participant` é o que identifica QUEM falou dentro
+   * de um grupo, a mensagem entrava atribuída a um identificador que não casa
+   * com contato nenhum. É o caminho mais provável para "algumas figurinhas de
+   * grupo não aparecem": a linha até grava, mas pendurada em um participante
+   * que a tela não sabe resolver.
+   *
+   * Busca no repositório inteiro antes desta mudança: `participantAlt` não
+   * aparecia em lugar nenhum, apesar de `remoteJidAlt` estar a três linhas
+   * daqui. Era assimetria, não decisão.
+   */
+  const participant = key.participantAlt || key.participant || ''
 
   // `messageData.remoteJid` cobre o formato plano do update da Evolution v2.
   const rawJid = key.remoteJidAlt || key.remoteJid || messageData.remoteJid || ''

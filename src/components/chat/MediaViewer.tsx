@@ -1,10 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Download, ZoomIn, ZoomOut, RotateCcw, Loader2 } from 'lucide-react'
+import { X, Download, ZoomIn, ZoomOut, RotateCcw, Loader2, Star } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { downloadFile, nomeParaDownload, type TipoArquivoDownload } from '@/lib/download'
 
-export type ViewerMedia = { url: string; type: 'image' | 'video' | 'pdf' | 'excel'; name?: string }
+/**
+ * `'sticker'` é tratado como imagem em tudo (zoom, pan, download) — o que muda é
+ * só a ação a mais de guardar na coleção. Existe como tipo próprio, e não como
+ * `'image'` com uma flag, porque é o tipo que decide se o botão "Salvar
+ * figurinha" aparece: uma foto de exame não vai para a bandeja de figurinhas.
+ */
+export type ViewerMedia = {
+  url: string
+  type: 'image' | 'video' | 'pdf' | 'excel' | 'sticker'
+  name?: string
+}
 
 const EXCEL_ROW_LIMIT = 500
 
@@ -37,7 +47,9 @@ const VISTA_INICIAL: Vista = { scale: MIN_SCALE, tx: 0, ty: 0 }
 /** Mapeia o tipo do visualizador para a categoria usada no nome padrão de download. */
 function tipoParaDownload(tipo: ViewerMedia['type']): TipoArquivoDownload {
   if (tipo === 'video') return 'video'
-  if (tipo === 'image') return 'imagem'
+  // Figurinha junto de imagem: baixar uma figurinha com nome de "documento"
+  // daria um arquivo `.webp` chamado documento-….
+  if (tipo === 'image' || tipo === 'sticker') return 'imagem'
   return 'documento'
 }
 
@@ -47,7 +59,19 @@ function tipoParaDownload(tipo: ViewerMedia['type']): TipoArquivoDownload {
  * - Vídeo: player com controles + autoplay.
  * - Fechar (X / clique no fundo / ESC) e baixar.
  */
-export function MediaViewer({ media, onClose }: { media: ViewerMedia | null; onClose: () => void }) {
+export function MediaViewer({
+  media,
+  onClose,
+  aoSalvarFigurinha,
+}: {
+  media: ViewerMedia | null
+  onClose: () => void
+  /**
+   * Guardar a figurinha na coleção da pessoa. Opcional: quem abre o
+   * visualizador para uma foto ou um PDF não passa nada, e o botão nem existe.
+   */
+  aoSalvarFigurinha?: (media: ViewerMedia) => void
+}) {
   const [vista, setVista] = useState<Vista>(VISTA_INICIAL)
   /** Verdadeiro enquanto há dedo/botão pressionado — desliga a transição. */
   const [interagindo, setInteragindo] = useState(false)
@@ -60,7 +84,8 @@ export function MediaViewer({ media, onClose }: { media: ViewerMedia | null; onC
   /** Distância e escala no instante em que a pinça começou. */
   const pincaRef = useRef<{ distancia: number; escala: number } | null>(null)
 
-  const isImage = media?.type === 'image'
+  // Figurinha desenha e se comporta como imagem — só o botão a mais é diferente.
+  const isImage = media?.type === 'image' || media?.type === 'sticker'
   const isPdf = media?.type === 'pdf'
   const isExcel = media?.type === 'excel'
   const url = media?.url
@@ -288,6 +313,16 @@ export function MediaViewer({ media, onClose }: { media: ViewerMedia | null; onC
             </button>
             <span className="mx-1 h-6 w-px bg-white/20" />
           </>
+        )}
+        {media.type === 'sticker' && aoSalvarFigurinha && (
+          <button
+            type="button"
+            onClick={() => aoSalvarFigurinha(media)}
+            title="Salvar figurinha"
+            className={toolBtn}
+          >
+            <Star className="h-5 w-5" />
+          </button>
         )}
         <button
           type="button"

@@ -5,6 +5,7 @@ import { ChatList } from '@/components/chat/ChatList'
 import { ChatWindow } from '@/components/chat/ChatWindow'
 import { syncDeviceAvatar } from '@/services/devices'
 import { getMessages, getConversationSummaries, getConversationMessages, sendMessage, type ConversationSummary } from '@/services/messages'
+import { comoMensagemNaTela, getEnviosPendentes } from '@/lib/envios_pendentes'
 import {
   getContacts,
   updateContactByJid,
@@ -868,6 +869,37 @@ export default function ChatHub() {
     setEstadoConversa(entrada.estado)
   }, [])
 
+  /**
+   * Devolve a lista do servidor com os envios que FALHARAM reinjetados.
+   *
+   * POR QUE ISTO PRECISA EXISTIR
+   * O que o servidor devolve é, por definição, o que conseguiu ser gravado. Uma
+   * mensagem que falhou por falta de internet não está lá — e como
+   * `definirMensagens` SUBSTITUI a lista inteira, ela era apagada da tela no
+   * primeiro refetch. E o primeiro refetch acontece exatamente quando a internet
+   * volta (`window.addEventListener('online', refetchOpen)`, mais abaixo): a
+   * pessoa via a mensagem sumir no instante em que a conexão voltava, sem ter
+   * sido enviada e sem deixar como reenviar. Era esse o relato.
+   *
+   * A comparação é por `tempId`: se o reenvio já deu certo, a linha real veio do
+   * servidor com id próprio e o pendente já foi esquecido do aparelho — nada é
+   * duplicado.
+   */
+  const comFalhasGuardadas = useCallback((deviceId: string, contact: string, doServidor: any[]) => {
+    const pendentes = getEnviosPendentes(deviceId, contact)
+    if (pendentes.length === 0) return doServidor
+    const jaNaLista = new Set(doServidor.map((m: any) => m.id))
+    const faltando = pendentes
+      .filter((p) => !jaNaLista.has(p.tempId))
+      .map(comoMensagemNaTela)
+    if (faltando.length === 0) return doServidor
+    // Ordena junto com o resto: a falha volta para o lugar cronológico em que
+    // foi digitada, não empilhada no fim.
+    return [...doServidor, ...faltando].sort((a: any, b: any) =>
+      String(a.created_at).localeCompare(String(b.created_at)),
+    )
+  }, [])
+
   // Busca as mensagens de uma conversa específica. O resultado vai SEMPRE para o
   // store (continua sendo um retrato válido daquela conversa mesmo se o usuário já
   // trocou de tela); só o espelho de render respeita a seleção atual.
@@ -878,7 +910,7 @@ export default function ChatHub() {
 
     return getConversationMessages(deviceId, contact)
       .then((msgs) => {
-        definirMensagens(chave, msgs)
+        definirMensagens(chave, comFalhasGuardadas(deviceId, contact, msgs))
         sincronizarDaLoja(deviceId, contact)
       })
       .catch(() => {
