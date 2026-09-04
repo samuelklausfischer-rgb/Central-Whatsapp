@@ -118,6 +118,30 @@ export function marcarErro(chave: string): void {
 }
 
 /**
+ * Identidade ESTÁVEL de renderização, preservada quando um registro do servidor
+ * substitui um objeto que já estava na lista.
+ *
+ * A lista de mensagens é renderizada com `key={msg.chaveRender ?? msg.id}`. Uma
+ * mensagem enviada por aqui nasce como balão otimista com `id: temp-...` e, um
+ * segundo depois, é substituída pela linha real, que tem UUID do banco. Se a
+ * `key` mudasse nessa troca, o React desmontaria o balão e montaria outro no
+ * lugar — e a animação de entrada (`animate-in fade-in slide-in-from-bottom-2`,
+ * no ChatWindow) rodaria de novo. Era exatamente o "flick" relatado em 03/09.
+ *
+ * Por isso a linha real herda o `tempId` em `chaveRender`. E por isso este
+ * helper existe: todo evento POSTERIOR (uma reação, uma edição, o eco do
+ * Realtime da própria mensagem) traz um registro fresco do servidor, que não
+ * conhece `chaveRender`. Sem preservar aqui, a chave voltaria ao UUID na
+ * primeira reação e o flick reapareceria — mais tarde e mais difícil de achar.
+ *
+ * Mensagem que nunca foi otimista não tem `chaveRender` e cai em `msg.id`,
+ * exatamente como antes.
+ */
+function herdarChaveRender(novo: any, anterior: any): any {
+  return anterior?.chaveRender ? { ...novo, chaveRender: anterior.chaveRender } : novo
+}
+
+/**
  * Aplica um evento de Realtime na conversa DA MENSAGEM — aberta ou não. É o que
  * faz reabrir uma conversa já mostrar o que chegou enquanto ela estava fechada.
  *
@@ -141,9 +165,15 @@ export function aplicarEventoDeMensagem(
   let proximas: any[]
   if (acao === 'create') {
     if (atual.mensagens.some((m) => m.id === registro.id)) {
-      proximas = atual.mensagens.map((m) => (m.id === registro.id ? registro : m))
+      proximas = atual.mensagens.map((m) => (m.id === registro.id ? herdarChaveRender(registro, m) : m))
     } else if (tempIdParaSubstituir && atual.mensagens.some((m) => m.id === tempIdParaSubstituir)) {
-      proximas = atual.mensagens.map((m) => (m.id === tempIdParaSubstituir ? registro : m))
+      // A linha real HERDA a identidade de renderização do balão otimista —
+      // ver `herdarChaveRender`. Sem isto a `key` do React mudaria de
+      // `temp-...` para o UUID, o balão seria desmontado e remontado, e a
+      // animação de entrada rodaria de novo: é o "flick" ~1s após enviar.
+      proximas = atual.mensagens.map((m) =>
+        m.id === tempIdParaSubstituir ? { ...registro, chaveRender: tempIdParaSubstituir } : m,
+      )
     } else {
       // Inclui o caso "temp já saiu do array": sem este fallback o `map` seria
       // no-op e a mensagem real seria DESCARTADA em silêncio.
@@ -151,7 +181,7 @@ export function aplicarEventoDeMensagem(
     }
   } else if (acao === 'update') {
     if (!atual.mensagens.some((m) => m.id === registro.id)) return false
-    proximas = atual.mensagens.map((m) => (m.id === registro.id ? registro : m))
+    proximas = atual.mensagens.map((m) => (m.id === registro.id ? herdarChaveRender(registro, m) : m))
   } else {
     if (!atual.mensagens.some((m) => m.id === registro.id)) return false
     proximas = atual.mensagens.filter((m) => m.id !== registro.id)

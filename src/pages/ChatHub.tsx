@@ -721,7 +721,12 @@ export default function ChatHub() {
           // O eco do realtime já inseriu a mensagem real → só remove a temp.
           proximas = prev.filter((m) => m.id !== tempId)
         } else {
-          proximas = prev.map((m) => (m.id === tempId ? realMsg : m))
+          // A linha real HERDA a identidade de renderização do balão otimista
+          // (`chaveRender`). A lista usa `key={msg.chaveRender ?? msg.id}`: sem
+          // isto a key mudaria de `temp-...` para o UUID do banco, o React
+          // desmontaria o balão e montaria outro, e a animação de entrada
+          // rodaria de novo — o "flick" ~1s depois de enviar, relatado em 03/09.
+          proximas = prev.map((m) => (m.id === tempId ? { ...realMsg, chaveRender: tempId } : m))
         }
       } else {
         // Sem a linha real: ao menos marca como enviada.

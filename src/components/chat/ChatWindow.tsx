@@ -4702,7 +4702,13 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
               previousMsg.remote_sender !== msg.remote_sender
             )
           return (
-            <React.Fragment key={msg.id}>
+            // `chaveRender` antes de `id`: a mensagem enviada por aqui nasce
+            // como balão otimista (`temp-...`) e é substituída pela linha real
+            // (UUID do banco) quando a RPC responde. Sem esta herança de
+            // identidade a key mudaria, o React remontaria o balão e a animação
+            // de entrada rodaria de novo — o "flick" ~1s depois de enviar. Ver
+            // `herdarChaveRender` em `stores/conversationMessages.ts`.
+            <React.Fragment key={msg.chaveRender ?? msg.id}>
               {shouldShowDateSeparator && (
                 // Separador DENTRO do fluxo, não `sticky`. Como `position: sticky`
                 // não reserva espaço ao grudar, a pílula flutuava permanentemente
