@@ -75,8 +75,11 @@ const PASSOS: PassoDoTour[] = [
   },
   {
     alvo: 'ferramentas',
-    titulo: 'Ferramentas',
-    texto: 'Tarefas, anotações, gatilhos, agendamentos e os sistemas da PRN liberados para você.',
+    // O botão passou a se chamar "Mais" em 04/09 (era "Ferramentas"). O título
+    // do passo acompanha, senão o tour aponta para um botão com outro nome.
+    titulo: 'Mais',
+    texto:
+      'Tarefas, anotações, atalhos de mensagem, agendamentos e os sistemas da PRN liberados para você.',
     comoUsar: 'O que aparece aqui muda por pessoa: se um sistema não está na lista, é porque ainda não foi liberado para o seu usuário.',
   },
   {

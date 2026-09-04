@@ -1,6 +1,6 @@
 import {
   LogOut,
-  LayoutGrid,
+  Plus,
   ChevronDown,
   RefreshCw,
   Download,
@@ -63,8 +63,8 @@ function FerramentasMenu() {
           data-tour="ferramentas"
           className="group gap-1.5 rounded-full h-9 px-4 border border-border text-muted-foreground transition-all duration-200 hover:text-foreground hover:bg-accent data-[state=open]:bg-accent data-[state=open]:text-foreground"
         >
-          <LayoutGrid className="h-4 w-4" />
-          <span className="text-sm font-medium hidden sm:block">Ferramentas</span>
+          <Plus className="h-4 w-4" />
+          <span className="text-sm font-medium hidden sm:block">Mais</span>
           <ChevronDown className="h-3.5 w-3.5 transition-transform duration-200 group-data-[state=open]:rotate-180" />
         </Button>
       </DropdownMenuTrigger>
