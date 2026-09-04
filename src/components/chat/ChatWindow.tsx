@@ -2612,11 +2612,37 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         reply_to_snapshot: replySnapshot,
         attachments: [],
       }
-      // Conversa em que o envio começou — mesmo padrão dos ramos de áudio/anexo
-      // mais abaixo, necessário agora que a limpeza do compositor deixou de ser
-      // síncrona (ver comentário no sucesso, logo abaixo).
+      // Conversa em que o envio começou. A limpeza logo abaixo é síncrona (não
+      // há `await` antes dela), então a guarda por conversa do helper vira
+      // trivialmente verdadeira — fica como cinto: se alguém inserir um `await`
+      // acima no futuro, continua correto.
       const chaveEnvio = convKey
       onOptimisticSend?.(tempMsg)
+      // Limpeza SÍNCRONA, no mesmo tick do balão otimista: o React agrupa os
+      // dois setState num commit só, e balão nasce + barra esvazia no MESMO
+      // frame. Isto é o "instantâneo" do WhatsApp.
+      //
+      // Já foi diferente. Em 28/08 (a5703e1) a limpeza passou a rodar só DEPOIS
+      // do `await sendMessage`, para não perder o texto se o envio falhasse — e
+      // o efeito foi o texto ficar parado na barra por 1-3s (o tempo da RPC),
+      // que é exatamente o "travamento" relatado em 03/09. O motivo original
+      // não vale mais: a falha está coberta em dois níveis, com o CONTEÚDO
+      // guardado nos dois. Com `idTentativa`, o balão vermelho persistido de
+      // `tentativas_de_envio` ("Tentar de novo"); sem ele, `guardarEnvioPendente`
+      // (no catch) grava o payload inteiro no aparelho, o balão "falhou · tentar
+      // novamente" reenvia, e com motivo `offline` o reenvio é AUTOMÁTICO
+      // quando a rede volta (`aoVoltarARede`). Por isso NÃO se devolve o texto
+      // ao compositor na falha: a pessoa mandaria de novo à mão em cima do
+      // reenvio automático, e a paciente receberia duplicado.
+      limparCompositorAposEnvio(chaveEnvio, () => {
+        setMsgText('')
+        setReplyingTo(null)
+        setMencaoAtiva(null)
+        // Sem isto o popup de atalhos "/" ficava pintado sobre o compositor
+        // vazio depois de enviar (msgText não passa pelo `onChange` aqui).
+        setAtalhosAbertos(false)
+        setMencionarTodos(false)
+      })
       try {
         // Envia o texto CRU — o servidor adiciona a assinatura. A RPC retorna a
         // linha real inserida, usada para substituir a temp de forma determinística.
@@ -2632,22 +2658,6 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           noSignature: semAssinatura,
         })
         onOptimisticConfirm?.(tempId, res?.message)
-        // Limpa só DEPOIS do sucesso — como o ramo de áudio já fazia. Antes
-        // limpava de forma SÍNCRONA logo aqui em cima, antes do `await`: se o
-        // envio falhasse bem no início (antes até de `sendMessage` gravar a
-        // tentativa), a pessoa perdia o que escreveu sem deixar rastro nenhum.
-        // Agora o texto some do compositor só quando de fato sai; se falhar,
-        // `tentativas_de_envio` guarda o conteúdo e o balão vermelho (mais
-        // abaixo, na lista de mensagens) mostra de onde reenviar.
-        limparCompositorAposEnvio(chaveEnvio, () => {
-          setMsgText('')
-          setReplyingTo(null)
-          setMencaoAtiva(null)
-          // Sem isto o popup de atalhos "/" ficava pintado sobre o compositor
-          // vazio depois de enviar (msgText não passa pelo `onChange` aqui).
-          setAtalhosAbertos(false)
-          setMencionarTodos(false)
-        })
       } catch (err) {
         tratarFalhaDeEnvio(err, tempId)
         /**
