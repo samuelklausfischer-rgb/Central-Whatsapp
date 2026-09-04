@@ -63,10 +63,15 @@ export const FERRAMENTAS_HOSPEDADAS: Record<string, FerramentaHospedavel> = {
     telaCheia: true,
   },
   assinaturas: { titulo: 'Assinaturas', url: '/ferramentas/assinaturas', Componente: Assinaturas },
+  // Passou a ser embutida por iframe em 04/09/2026, então `telaCheia` como as
+  // outras: o app filho tem cabeçalho, grade de duas colunas e rolagem próprios.
+  // Sem isso ele receberia o `max-w-7xl` do painel, que não tem altura definida
+  // — e o `h-full` do iframe colapsa contra um pai de altura automática.
   'proposta-comercial': {
     titulo: 'Proposta Comercial',
     url: '/ferramentas/proposta-comercial',
     Componente: PropostaComercial,
+    telaCheia: true,
   },
   // Nativa, como o Controle de Mensagens: sem `telaCheia`, para receber o respiro
   // e a largura máxima do painel.

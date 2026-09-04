@@ -10,21 +10,13 @@ import {
 } from '@/lib/tool-embed'
 import { useToolVersion } from '@/hooks/use-tool-version'
 
-interface ToolFrameProps {
+interface ToolFrameComum {
   /** Nome da ferramenta, usado no título do iframe e nas mensagens de erro. */
   title: string
   /** URL do app publicado (vem de env). */
   baseUrl: string
   /** Nome da variável de ambiente, citado no aviso quando a URL não está configurada. */
   envVarName: string
-  /** Produz a credencial que o filho vai usar para abrir a sessão dele. */
-  getCredential: () => Promise<EmbedCredential>
-  /**
-   * Opcional: reenvia credencial depois do handshake (o Relatórios usa para
-   * repassar o access token a cada TOKEN_REFRESHED). Recebe o `send` e devolve
-   * a função de limpeza.
-   */
-  watch?: (send: (credential: EmbedCredential) => void) => () => void
   /**
    * Intervalo entre checagens de `version.json`, em ms. Default: 5 minutos.
    * Exposto como prop (em vez de constante) para permitir ajuste por
@@ -32,6 +24,40 @@ interface ToolFrameProps {
    */
   versionCheckIntervalMs?: number
 }
+
+/**
+ * COMO O QUADRO SABE QUE FICOU PRONTO.
+ *
+ * `'handshake'` (padrão): o app filho fala o protocolo de `tool-embed.ts` —
+ * manda `ready`, recebe a credencial, e só então a tela é liberada. É o caso de
+ * Relatórios, Licitações, PRN Hub e Gestão Médica, todos apps React que
+ * espelham `src/lib/embed.ts`.
+ *
+ * `'ao-carregar'`: o app filho NÃO fala o protocolo e nunca vai mandar `ready`
+ * — a Proposta Comercial é uma página Flask/HTML puro, de outro repositório. A
+ * prontidão vira o `onLoad` do iframe.
+ *
+ * POR QUE UMA PROP, E NÃO DEDUZIR PELA FALTA DE `getCredential`: sem isto,
+ * apagar o `getCredential` de uma ferramenta que PRECISA dele viraria, em
+ * silêncio, "não autentica e diz que está pronto". A união abaixo faz o
+ * compilador recusar essa combinação — o erro aparece no build, não em
+ * produção.
+ */
+type ToolFrameProps = ToolFrameComum &
+  (
+    | {
+        prontidao?: 'handshake'
+        /** Produz a credencial que o filho vai usar para abrir a sessão dele. */
+        getCredential: () => Promise<EmbedCredential>
+        /**
+         * Opcional: reenvia credencial depois do handshake (o Relatórios usa
+         * para repassar o access token a cada TOKEN_REFRESHED). Recebe o `send`
+         * e devolve a função de limpeza.
+         */
+        watch?: (send: (credential: EmbedCredential) => void) => () => void
+      }
+    | { prontidao: 'ao-carregar'; getCredential?: never; watch?: never }
+  )
 
 type Status = 'connecting' | 'ready' | 'error'
 
@@ -42,7 +68,9 @@ export function ToolFrame({
   getCredential,
   watch,
   versionCheckIntervalMs,
+  prontidao,
 }: ToolFrameProps) {
+  const semHandshake = prontidao === 'ao-carregar'
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const { resolvedTheme } = useTheme()
   const [status, setStatus] = useState<Status>('connecting')
@@ -69,7 +97,65 @@ export function ToolFrame({
 
   // Detecção de versão do app publicado — genérica, então Licitações herda de
   // graça. Degrada em silêncio quando `version.json` não existe (ver o hook).
-  const { updateVersion, dismiss, applied } = useToolVersion({ baseUrl, intervalMs: versionCheckIntervalMs })
+  const { updateVersion, dismiss, applied } = useToolVersion({
+    // `version.json` não existe num app Flask que serve um HTML só — pedir por
+    // ele rende três erros de CORS no console por sessão e uma faixa de
+    // atualização que nunca vai aparecer. String vazia usa a saída antecipada
+    // que o hook já tem, em vez de mais um `if` aqui.
+    baseUrl: semHandshake ? '' : baseUrl,
+    intervalMs: versionCheckIntervalMs,
+  })
+
+  /**
+   * SÓ EM `semHandshake`: o servidor respondeu alguma coisa?
+   *
+   * Sem isto, um endereço morto dava TELA BRANCA E MUDA: a navegação falha, o
+   * Chrome comita a página de erro dele, o `onLoad` dispara mesmo assim, o
+   * overlay some — e sobra um retângulo em branco, sem explicação e sem o botão
+   * de abrir em outra aba. É a mesma falha que o timeout logo abaixo foi escrito
+   * para evitar, e o timeout não pega esta porque o `load` de fato aconteceu.
+   *
+   * `mode: 'no-cors'` é o que torna a sonda possível: a resposta vem opaca (não
+   * dá para ler status nem corpo), mas a PROMISE distingue o que interessa —
+   * REJEITA quando o host não resolve ou recusa conexão, e RESOLVE quando o
+   * servidor respondeu qualquer coisa, inclusive um 502. O 502 a gente aceita
+   * mostrar dentro do quadro: ele se explica sozinho na tela, ao contrário do
+   * branco.
+   *
+   * `null` = ainda sondando; a prontidão espera as duas coisas (o `load` e esta).
+   */
+  const [servidorRespondeu, setServidorRespondeu] = useState<boolean | null>(null)
+  const [carregouODocumento, setCarregouODocumento] = useState(false)
+
+  useEffect(() => {
+    if (!semHandshake || !target) return
+    let vivo = true
+    setServidorRespondeu(null)
+    fetch(target.src, { mode: 'no-cors', cache: 'no-store' })
+      .then(() => vivo && setServidorRespondeu(true))
+      .catch(() => vivo && setServidorRespondeu(false))
+    return () => {
+      vivo = false
+    }
+  }, [semHandshake, target, retryNonce])
+
+  // Junta as duas metades. Se a sonda travar sem responder, quem fecha a conta é
+  // o timeout de 15s lá embaixo — por isso ele continua valendo neste modo.
+  useEffect(() => {
+    if (!semHandshake) return
+    if (servidorRespondeu === false) {
+      setError(
+        `O ${title} não respondeu. O endereço pode estar fora do ar ou ter mudado. ` +
+          `Abrir em outra aba mostra o que o servidor está dizendo.`,
+      )
+      setStatus('error')
+      return
+    }
+    if (servidorRespondeu === true && carregouODocumento) {
+      setStatus('ready')
+      setError(null)
+    }
+  }, [semHandshake, servidorRespondeu, carregouODocumento, title])
 
   // Refs para não recriar o listener a cada render — o handshake precisa
   // sobreviver a re-renders, senão um `ready` chega com o listener já removido.
@@ -91,7 +177,9 @@ export function ToolFrame({
   )
 
   useEffect(() => {
-    if (!target) return
+    // `semHandshake`: não há `ready` para esperar nem credencial para entregar.
+    // A prontidão vem do `onLoad` do iframe, lá embaixo.
+    if (!target || semHandshake) return
     let mounted = true
     let stopWatching: (() => void) | undefined
     // O filho repete o `ready` até receber a credencial (ver `embed.ts` lá).
@@ -141,7 +229,7 @@ export function ToolFrame({
       stopWatching?.()
       window.removeEventListener('message', onMessage)
     }
-  }, [send, target, title])
+  }, [send, target, title, semHandshake])
 
   /**
    * O TEMA VIAJA PARA O FILHO, e mora aqui e não em cada ferramenta de propósito:
@@ -181,6 +269,12 @@ export function ToolFrame({
    * outra origem — comportamento dele, não nosso —, então o iframe fica em
    * branco e ninguém descobre por quê. Quinze segundos é folgado para um app
    * que carrega, e curto o bastante para não parecer travado.
+   *
+   * EM `semHandshake` ELE CONTINUA VALENDO, com outro significado: deixa de ser
+   * "o filho não fez o aperto de mão" e passa a ser "nem o documento nem a sonda
+   * terminaram". Host morto já é pego pela sonda, que rejeita; o que sobra para
+   * o timeout é o caso de TRAVAR SEM RESPONDER — servidor que aceita a conexão e
+   * nunca devolve nada, em que nem o `load` nem a sonda concluem.
    */
   const ESPERA_MAXIMA_MS = 15000
 
@@ -188,19 +282,26 @@ export function ToolFrame({
     if (!target || status !== 'connecting') return
     const t = setTimeout(() => {
       setError(
-        `O ${title} não respondeu. Quase sempre é uma de duas coisas: o endereço pede ` +
-          `usuário e senha do próprio servidor — e o navegador não permite esse pedido ` +
-          `dentro do app, então a tela fica em branco para sempre — ou o serviço está fora ` +
-          `do ar. Abrir em outra aba mostra qual dos dois é.`,
+        semHandshake
+          ? `O ${title} não terminou de carregar. Quase sempre é o serviço fora do ar. ` +
+              `Abrir em outra aba mostra o que o servidor está respondendo.`
+          : `O ${title} não respondeu. Quase sempre é uma de duas coisas: o endereço pede ` +
+              `usuário e senha do próprio servidor — e o navegador não permite esse pedido ` +
+              `dentro do app, então a tela fica em branco para sempre — ou o serviço está fora ` +
+              `do ar. Abrir em outra aba mostra qual dos dois é.`,
       )
       setStatus('error')
     }, ESPERA_MAXIMA_MS)
     return () => clearTimeout(t)
-  }, [target, status, title, retryNonce])
+  }, [target, status, title, retryNonce, semHandshake])
 
   const retry = () => {
     setError(null)
     setStatus('connecting')
+    // Zerar as duas metades da prontidão de `semHandshake`: sem isto o `load`
+    // antigo continuaria valendo e o retry liberaria a tela sem sondar de novo.
+    setCarregouODocumento(false)
+    setServidorRespondeu(null)
     setNonce(crypto.randomUUID())
     setRetryNonce((n) => n + 1)
   }
@@ -214,6 +315,8 @@ export function ToolFrame({
     setIframeVersion(updateVersion)
     setError(null)
     setStatus('connecting')
+    setCarregouODocumento(false)
+    setServidorRespondeu(null)
     setNonce(crypto.randomUUID())
     setRetryNonce((n) => n + 1)
   }
@@ -244,6 +347,11 @@ export function ToolFrame({
         title={title}
         className="h-full w-full border-0"
         allow="clipboard-write; fullscreen"
+        // Metade da prontidão de quem não fala o protocolo. Sozinho ele NÃO
+        // significa "deu certo" — dispara também para a página de erro do
+        // navegador —, por isso é cruzado com a sonda `servidorRespondeu` lá em
+        // cima antes de liberar a tela.
+        onLoad={semHandshake ? () => setCarregouODocumento(true) : undefined}
       />
 
       {/* Faixa discreta — mesmo tom do UpdateGate (Electron), mas nunca em tela

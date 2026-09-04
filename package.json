@@ -14,8 +14,6 @@
     "build:dev": "vite build --mode development",
     "build:electron": "node scripts/checar-env.mjs && vite build --base ./ && node central-whats-app/create-icon.cjs && electron-builder --config central-whats-app/builder.json",
     "publish:electron": "node scripts/checar-env.mjs && vite build --base ./ && node central-whats-app/create-icon.cjs && node central-whats-app/create-tag.cjs && electron-builder --config central-whats-app/builder.json --publish always && node central-whats-app/publish-notify.cjs",
-    "conferir:proposta": "node scripts/conferir-proposta.mjs",
-    "conferir:proposta-pdf": "node scripts/conferir-proposta.mjs && electron scripts/conferir-pdf-proposta.cjs",
     "lint": "oxlint src",
     "lint:fix": "oxlint src --fix",
     "format": "oxfmt",

@@ -34,6 +34,21 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.218',
+    date: '2026-09-04 11:30',
+    title: 'A Proposta Comercial agora é o gerador de verdade',
+    details: [
+      '📄 Proposta Comercial: a ferramenta passou a ser o gerador que o time de fato mantém, em vez da cópia que vivia aqui dentro e envelhecia a cada atualização. Chegam junto o "Colar informações (IA)", que preenche o formulário a partir de um texto solto, e o download de Word e Excel além do PDF',
+      '📚 O histórico de propostas agora é o do próprio gerador — é lá que estão as propostas montadas pelo time',
+      '🏠 Painel: "Não respondidas hoje" virou "Chat não finalizado" e passou a seguir o filtro de período — mostra o que você pegou naquela janela e ainda não fechou. "Meus atendimentos" virou "Contatos não finalizados", que é o total, sem filtro',
+      '🧭 Barra do topo enxuta: o modo claro/escuro e as últimas atualizações foram para o menu do seu nome, Painel virou só o ícone de casa, Conversas virou "Whats" e Ferramentas virou "+ Mais"',
+      '🐛 A mensagem enviada parou de "piscar" um segundo depois de aparecer na conversa',
+      '🐛 O texto sai da barra de mensagem na hora do Enter, sem os 1 a 3 segundos de espera',
+    ],
+    usabilidade:
+      'Se você usava a Proposta Comercial por aqui, o formulário é outro e o histórico também: as propostas que você montava direto no gerador continuam lá, e agora aparecem dentro do app.',
+  },
+  {
     version: '0.0.217',
     date: '2026-08-26 17:20',
     title: 'Quem enxerga o quê: três ferramentas mudaram de porta',

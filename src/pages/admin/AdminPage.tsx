@@ -728,9 +728,14 @@ export default function AdminPage() {
                 Acesso à Proposta Comercial
               </Label>
             </div>
+            {/* A frase sobre "histórico da equipe" saiu em 04/09/2026: ela
+                descrevia a tabela `pdf_proposta_comercial`, lida pela página
+                nativa que foi aposentada. O gerador agora é o app publicado,
+                embutido, com histórico próprio — e ele gera PDF, Word, Excel e
+                ZIP, não só PDF. */}
             <p className="-mt-1 text-xs text-muted-foreground">
-              Libera o gerador de proposta comercial em PDF. O histórico é da equipe: quem tem
-              acesso enxerga e reaproveita as propostas de todo mundo.
+              Libera o gerador de proposta comercial (PDF, Word, Excel e ZIP), com o histórico
+              de propostas do próprio sistema.
             </p>
 
             {/* A seção aparece TAMBÉM para admin. Escondê-la fazia o cadastro

@@ -3,7 +3,6 @@ const { autoUpdater } = require('electron-updater')
 const log = require('electron-log')
 const path = require('path')
 const fs = require('fs')
-const os = require('os')
 
 // Desabilita QUIC (HTTP/3): o Chromium interno tenta negociar QUIC por padrão
 // e, quando o servidor/proxy de destino não responde bem, a conexão trava por
@@ -125,68 +124,6 @@ ipcMain.on('focus-window', () => {
   if (mainWindow) {
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.focus()
-  }
-})
-
-// ── Proposta comercial em PDF ─────────────────────────────────────────────────
-
-/**
- * Tamanho da página da proposta, em POLEGADAS.
- *
- * Os slides são 1440x810 px de CSS, e 1 px de CSS vale 1/96 de polegada:
- * 1440/96 = 15 e 810/96 = 8,4375.
- *
- * A unidade é polegada desde o Electron 21, quando o `printToPDF` passou a usar
- * o motor de impressão do Chromium. Passar micrômetros (a unidade antiga) não
- * gera um PDF errado — gera `Error: Printing failed`, sem dizer o porquê.
- */
-const PAGINA_PROPOSTA = { width: 15, height: 8.4375 }
-
-/**
- * Gera o PDF da proposta com o mesmo motor de sempre.
- *
- * O app Python chamava `chrome --headless --print-to-pdf`; aqui o Chromium já
- * está dentro do Electron, então o resultado é idêntico sem depender de o
- * Chrome estar instalado na máquina de quem usa.
- *
- * POR QUE ARQUIVO TEMPORÁRIO, E NÃO `data:` URL
- * O HTML passa de 1 MB e navegação de topo para `data:` é bloqueada pelo
- * Chromium. `loadFile` num temporário é o caminho que funciona sempre.
- *
- * A janela é criada sem `preload` e sem integração com Node de propósito: ela
- * só desenha um HTML que já veio pronto, e não deve poder falar com o app.
- */
-ipcMain.handle('gerar-pdf-proposta', async (_evento, html) => {
-  if (typeof html !== 'string' || !html) throw new Error('HTML da proposta vazio.')
-
-  const tmp = path.join(
-    fs.mkdtempSync(path.join(os.tmpdir(), 'prn-proposta-')),
-    'proposta.html',
-  )
-  await fs.promises.writeFile(tmp, html, 'utf-8')
-
-  const janela = new BrowserWindow({
-    show: false,
-    webPreferences: { nodeIntegration: false, contextIsolation: true, javascript: true },
-  })
-
-  try {
-    await janela.loadFile(tmp)
-    const pdf = await janela.webContents.printToPDF({
-      printBackground: true,
-      margins: { marginType: 'none' },
-      pageSize: PAGINA_PROPOSTA,
-      // O `preferCSSPageSize` faria o Chromium seguir o `@page` do template. Não
-      // usamos: o `@page` está em px, e a medida explícita acima é a que garante
-      // o mesmo tamanho que o `--print-to-pdf` do Chrome entregava.
-      preferCSSPageSize: false,
-    })
-    log.info(`Proposta gerada: ${(pdf.length / 1024 / 1024).toFixed(2)} MB`)
-    return pdf
-  } finally {
-    if (!janela.isDestroyed()) janela.destroy()
-    // Apaga a pasta temporária inteira; falhar aqui não pode derrubar a geração.
-    fs.promises.rm(path.dirname(tmp), { recursive: true, force: true }).catch(() => {})
   }
 })
 

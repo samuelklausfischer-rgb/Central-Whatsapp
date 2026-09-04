@@ -6,8 +6,7 @@ type AppRuntimeConfig = {
   VITE_LICITACAO_SUPABASE_URL?: string
   VITE_PRN_HUB_APP_URL?: string
   VITE_GESTAO_MEDICA_APP_URL?: string
-  VITE_PROPOSTA_RENDER_URL?: string
-  VITE_PROPOSTA_API_KEY?: string
+  VITE_PROPOSTA_APP_URL?: string
 }
 
 /**
@@ -41,6 +40,21 @@ const PRN_HUB_APP_URL_PADRAO = 'https://frontends-projetos-hub.srofjl.easypanel.
  * atravessa direto e não existe ponte para configurar.
  */
 const GESTAO_MEDICA_APP_URL_PADRAO = 'https://frontends-gestao-medica.srofjl.easypanel.host'
+/**
+ * Proposta Comercial. Ganhou padrão no código em 04/09/2026, quando a ferramenta
+ * deixou de ser uma página React nativa e virou o app publicado embutido.
+ *
+ * Antes ela era `VITE_PROPOSTA_RENDER_URL`, o endereço de um serviço de render
+ * chamado por `fetch`, e vazio era ACEITÁVEL: a página caía numa montagem local
+ * do HTML. Esse caminho local não existe mais, então vazio passou a significar o
+ * cartão "não está configurado" — exatamente o sintoma da v0.0.207 descrito
+ * acima. O nome mudou junto porque não é mais um serviço de render, é o app que
+ * a aba embute: agora bate com `VITE_RELATORIOS_APP_URL` e companhia.
+ *
+ * O padrão é o que torna a renomeação segura. O pior caso vira "a variável
+ * antiga do EasyPanel é ignorada e o código usa este mesmo endereço".
+ */
+const PROPOSTA_APP_URL_PADRAO = 'https://frontends-propostacomercial.srofjl.easypanel.host'
 
 declare global {
   interface Window {
@@ -90,13 +104,8 @@ export const appEnv = {
     runtimeConfig?.VITE_GESTAO_MEDICA_APP_URL ||
     import.meta.env.VITE_GESTAO_MEDICA_APP_URL ||
     GESTAO_MEDICA_APP_URL_PADRAO,
-  // Serviço HTTP que renderiza a proposta (PDF/Word/Excel/ZIP) — a fonte única.
-  // SEM padrão no código de propósito: enquanto vier vazia, a Proposta Comercial
-  // cai no caminho antigo (montagem local do HTML), então o app não quebra antes
-  // do serviço ser publicado. Quando setada, vira o caminho primário.
-  VITE_PROPOSTA_RENDER_URL:
-    runtimeConfig?.VITE_PROPOSTA_RENDER_URL || import.meta.env.VITE_PROPOSTA_RENDER_URL || '',
-  // Chave opcional do serviço acima (header `X-API-Key`). Vazia = sem header.
-  VITE_PROPOSTA_API_KEY:
-    runtimeConfig?.VITE_PROPOSTA_API_KEY || import.meta.env.VITE_PROPOSTA_API_KEY || '',
+  VITE_PROPOSTA_APP_URL:
+    runtimeConfig?.VITE_PROPOSTA_APP_URL ||
+    import.meta.env.VITE_PROPOSTA_APP_URL ||
+    PROPOSTA_APP_URL_PADRAO,
 }
