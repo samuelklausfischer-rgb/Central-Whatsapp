@@ -1,6 +1,6 @@
 import supabase from '@/lib/supabase/client'
 import { getConversationSummaries } from '@/services/messages'
-import { getMyStates, getDeviceAssignments, respondidaEm } from '@/services/conversation_states'
+import { getDeviceAssignments } from '@/services/conversation_states'
 
 export interface DashboardFilters {
   userId: string
@@ -212,17 +212,32 @@ export async function getContactMetrics(
   }
 }
 
-/** Uma conversa que chegou hoje e ainda não teve resposta. */
-export interface PendingReply {
+/**
+ * Uma conversa que EU peguei e ainda não finalizei. Alimenta o card
+ * "Chat não finalizado" e a lista que ele abre.
+ */
+export interface NaoFinalizado {
+  device_id: string
+  remote_sender: string
+  sender_name: string | null
+  /** Quando a conversa passou para as minhas mãos — é por isto que o filtro corta. */
+  assigned_at: string
+}
+
+/**
+ * Uma conversa com mensagens ainda não lidas.
+ *
+ * Os campos vinham de `PendingReply`, que saiu junto com o card de "não
+ * respondidas" (04/09). Manter a herança obrigaria a preservar uma interface
+ * sem dono só para esta estender; estão escritos aqui porque agora é o único
+ * lugar que os usa.
+ */
+export interface UnreadConversation {
   device_id: string
   remote_sender: string
   sender_name: string | null
   last_message_content: string | null
   last_message_created_at: string
-}
-
-/** Uma conversa com mensagens ainda não lidas. */
-export interface UnreadConversation extends PendingReply {
   unread_count: number
 }
 
@@ -235,59 +250,66 @@ export interface ConversationMetrics {
    * uma lista de conversas faria o número não bater com o que se vê.
    */
   unreadConversations: number
-  pendingReplies: number
+  /** Idem, para o card de não lidas. */
+  unreadList: UnreadConversation[]
+  /**
+   * Conversas atribuídas a mim e ainda não finalizadas, SEM recorte de data —
+   * de propósito. É o card "Contatos não finalizados", o total do que está na
+   * minha mão; o card vizinho é a fatia do período. Se este também seguisse o
+   * filtro, os dois mostrariam a mesma coisa e o "total" deixaria de existir.
+   */
+  myOpen: number
+  /**
+   * As que eu peguei DENTRO do período selecionado e ainda não finalizei.
+   * Card "Chat não finalizado — {período}".
+   */
+  naoFinalizadosPeriodo: number
   /**
    * A lista por trás do número. Vem junto porque é a mesma varredura — pedir de
    * novo ao abrir o painel repetiria uma RPC por aparelho sem necessidade.
    */
-  pendingList: PendingReply[]
-  /** Idem, para o card de não lidas. */
-  unreadList: UnreadConversation[]
-  /** Conversas atribuídas a mim e ainda não finalizadas. */
-  myOpen: number
-  /** Conversas que passaram para mim hoje, mesmo que já finalizadas. */
-  myToday: number
+  naoFinalizadosList: NaoFinalizado[]
 }
 
 const METRICAS_VAZIAS: ConversationMetrics = {
   unread: 0,
   unreadConversations: 0,
-  pendingReplies: 0,
-  pendingList: [],
   unreadList: [],
   myOpen: 0,
-  myToday: 0,
+  naoFinalizadosPeriodo: 0,
+  naoFinalizadosList: [],
 }
 
-export async function getConversationMetrics(deviceIds: string[]): Promise<ConversationMetrics> {
+/**
+ * `periodo` é OPCIONAL e recorta só o card "Chat não finalizado" — os de não
+ * lidas e o total continuam sem data. Nasceu em 04/09: até então esta função
+ * não recebia período nenhum e calculava um "hoje" interno, então o seletor
+ * Hoje/Ontem/7 dias do painel não tinha efeito nenhum sobre estes cards.
+ * Sem `periodo`, o card do período simplesmente não conta nada.
+ */
+export async function getConversationMetrics(
+  deviceIds: string[],
+  periodo?: { from: Date; to: Date },
+): Promise<ConversationMetrics> {
   if (!deviceIds.length) return { ...METRICAS_VAZIAS }
 
-  // Recorte de HOJE. Antes não havia filtro nenhum: conversa parada há semanas
-  // pesava igual a uma que chegou agora, e o número servia mais como acúmulo
-  // histórico do que como fila do dia.
-  const inicioDeHoje = new Date()
-  inicioDeHoje.setHours(0, 0, 0, 0)
-
-  // `conversation_assignments` entra junto porque "respondida" tem DUAS marcas:
-  // a individual (`responded_at`) e a compartilhada (`global_responded_at`,
-  // gravada quando alguém finaliza o atendimento). A lista de conversas sempre
-  // usou as duas; este card usava só a individual, então conversa finalizada por
-  // um colega sumia da lista e continuava contando aqui.
-  const [allSummaries, states, assignmentsPorAparelho, userId] = await Promise.all([
+  // `getMyStates()` saiu daqui em 04/09, junto com o card de "não respondidas":
+  // ele existia só para montar o `statesMap`, usado no cruzamento de
+  // `responded_at` individual com `global_responded_at`. Sem aquele card, era
+  // uma consulta por carga do painel para não usar o resultado.
+  const [allSummaries, assignmentsPorAparelho, userId] = await Promise.all([
     Promise.all(
       deviceIds.map(async (id) => {
         const summaries = await getConversationSummaries(id)
         return summaries.map((s) => ({ ...s, device_id: id }))
       })
     ).then((r) => r.flat()),
-    getMyStates(),
     Promise.all(
       deviceIds.map(async (id) => [id, await getDeviceAssignments(id)] as const),
     ),
     supabase.auth.getSession().then((r) => r.data.session?.user?.id ?? ''),
   ])
 
-  const statesMap = new Map(states.map((s) => [`${s.device_id}|${s.remote_sender}`, s]))
   // `getDeviceAssignments` já devolve chaveado por `aparelho|contato` (o mesmo
   // contato existe em várias instâncias e o atendimento é de cada uma), então aqui
   // é só juntar os mapas dos aparelhos.
@@ -295,35 +317,7 @@ export async function getConversationMetrics(deviceIds: string[]): Promise<Conve
     assignmentsPorAparelho.flatMap(([, mapa]) => [...mapa.entries()]),
   )
 
-  const pendentes = allSummaries
-    .filter((s) => {
-      if (s.last_message_direction !== 'inbound') return false
-      if (new Date(s.last_message_created_at) < inicioDeHoje) return false
-      // `as const` porque `statesMap` foi montado com chaves de literal de
-      // template: sem isto o TypeScript alarga para `string` e recusa a busca.
-      // Mesma forma da `chaveDaConversa` que chaveia `assignmentsMap`.
-      const chave = `${s.device_id}|${s.remote_sender}` as const
-      const respondidoEm = respondidaEm(
-        statesMap.get(chave)?.responded_at,
-        assignmentsMap.get(chave)?.global_responded_at,
-      )
-      if (!respondidoEm) return true
-      return new Date(s.last_message_created_at) > new Date(respondidoEm)
-    })
-    // Mais recente primeiro: quem acabou de escrever é quem está esperando na linha.
-    .sort((a, b) => new Date(b.last_message_created_at).getTime() - new Date(a.last_message_created_at).getTime())
-    .map((s) => ({
-      // `device_id` viaja junto do `remote_sender` de propósito: a mesma pessoa
-      // pode ter conversa em mais de um aparelho, e abrir só pelo JID levaria
-      // para a conversa errada.
-      device_id: s.device_id,
-      remote_sender: s.remote_sender,
-      sender_name: s.sender_name ?? null,
-      last_message_content: s.last_message_content ?? null,
-      last_message_created_at: s.last_message_created_at,
-    }))
-
-  // Não lidas: sem recorte de data, ao contrário de `pendentes`. O card se chama
+  // Não lidas: sem recorte de data. O card se chama
   // "agora" justamente porque mensagem não lida de ontem continua não lida hoje —
   // aplicar o corte de hoje aqui esconderia conversa esquecida, que é o oposto do
   // que o card serve para mostrar.
@@ -343,29 +337,63 @@ export async function getConversationMetrics(deviceIds: string[]): Promise<Conve
       unread_count: s.unread_count || 0,
     }))
 
-  // Meus atendimentos. `assignmentsMap` já foi montado acima para o cálculo de
-  // pendentes — este bloco não custa consulta nenhuma.
+  // O que está na MINHA mão. `assignmentsMap` já foi montado acima — este bloco
+  // não custa consulta nenhuma.
   //
-  // 'open' fica de fora do que está "na minha mão": é o estado inicial de toda
-  // conversa, sem dono. Só 'taken' (peguei), 'assigned' (designaram para mim) e
-  // 'waiting' representam atendimento em curso.
+  // 'open' fica de fora: é o estado inicial de toda conversa, sem dono. Só
+  // 'taken' (peguei), 'assigned' (designaram para mim) e 'waiting' representam
+  // atendimento em curso — e 'waiting' na prática nunca tem `assigned_to`, então
+  // o filtro por dono logo acima já a descarta; fica na lista por clareza.
+  //
+  // O status é quem decide se está finalizada, NÃO `finished_at`: conversa
+  // finalizada que recebe mensagem nova é reaberta pelo gatilho do banco e volta
+  // para 'open' MANTENDO o `finished_at` antigo. Filtrar pela data daria número
+  // errado.
+  const emAberto = (status: string) =>
+    status === 'taken' || status === 'assigned' || status === 'waiting'
+
   let myOpen = 0
-  let myToday = 0
+  const naoFinalizados: NaoFinalizado[] = []
   if (userId) {
-    for (const a of assignmentsMap.values()) {
-      if (a.assigned_to !== userId) continue
-      if (a.status === 'taken' || a.status === 'assigned' || a.status === 'waiting') myOpen++
-      if (a.assigned_at && new Date(a.assigned_at) >= inicioDeHoje) myToday++
+    for (const [chave, a] of assignmentsMap.entries()) {
+      if (a.assigned_to !== userId || !emAberto(a.status)) continue
+      myOpen++
+
+      // A fatia do período corta por QUANDO PEGUEI (`assigned_at`), não por
+      // quando a conversa teve atividade: o card responde "o que eu peguei
+      // nesse dia e não fechei".
+      if (!periodo || !a.assigned_at) continue
+      const pegoEm = new Date(a.assigned_at)
+      if (pegoEm < periodo.from || pegoEm > periodo.to) continue
+
+      // `assignmentsMap` é chaveado por `aparelho|contato`; o resumo dá o nome.
+      // Corta no PRIMEIRO `|` porque o aparelho é UUID (nunca tem `|`) e o lado
+      // do contato pode ser qualquer JID — um `split` cru perderia o resto.
+      const corte = chave.indexOf('|')
+      const device_id = chave.slice(0, corte)
+      const remote_sender = chave.slice(corte + 1)
+      naoFinalizados.push({
+        device_id,
+        remote_sender,
+        sender_name:
+          allSummaries.find((s) => s.device_id === device_id && s.remote_sender === remote_sender)
+            ?.sender_name ?? null,
+        assigned_at: a.assigned_at,
+      })
     }
   }
+
+  // Mais recente primeiro: o que peguei por último é o que ainda está fresco.
+  naoFinalizados.sort(
+    (a, b) => new Date(b.assigned_at).getTime() - new Date(a.assigned_at).getTime(),
+  )
 
   return {
     unread: allSummaries.reduce((sum, s) => sum + (s.unread_count || 0), 0),
     unreadConversations: naoLidas.length,
-    pendingReplies: pendentes.length,
-    pendingList: pendentes,
     unreadList: naoLidas,
     myOpen,
-    myToday,
+    naoFinalizadosPeriodo: naoFinalizados.length,
+    naoFinalizadosList: naoFinalizados,
   }
 }

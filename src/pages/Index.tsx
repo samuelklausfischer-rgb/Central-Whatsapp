@@ -287,13 +287,12 @@ export default function Index() {
   const [convMetrics, setConvMetrics] = useState<ConversationMetrics>({
     unread: 0,
     unreadConversations: 0,
-    pendingReplies: 0,
-    pendingList: [],
     unreadList: [],
     myOpen: 0,
-    myToday: 0,
+    naoFinalizadosPeriodo: 0,
+    naoFinalizadosList: [],
   })
-  const [painelPendentes, setPainelPendentes] = useState(false)
+  const [painelNaoFinalizados, setPainelNaoFinalizados] = useState(false)
   const [painelNaoLidas, setPainelNaoLidas] = useState(false)
   const [contatos, setContatos] = useState<ContactMetrics>({ pessoas: 0, perguntas: 0, respondidas: 0, medianaSegundos: null })
   const [carregandoContatos, setCarregandoContatos] = useState(true)
@@ -376,12 +375,17 @@ export default function Index() {
       .finally(() => setCarregandoContatos(false))
   }, [devices, selectedDeviceId, period])
 
-  // Load real unread + pending replies metrics
+  // Não lidas + o que está na minha mão.
+  //
+  // O período entrou aqui em 04/09: o cartão "Chat não finalizado" conta o que
+  // FOI PEGO na janela escolhida, então precisa refazer a busca a cada troca do
+  // seletor — daí `period` nas dependências. As outras métricas do mesmo
+  // retorno (não lidas, total em aberto) ignoram a janela de propósito.
   useEffect(() => {
     const deviceIds = selectedDeviceId ? [selectedDeviceId] : devices.map((d) => d.id)
     if (!deviceIds.length) return
-    getConversationMetrics(deviceIds).then(setConvMetrics)
-  }, [devices, selectedDeviceId, metricsRev])
+    getConversationMetrics(deviceIds, getDateRange(period)).then(setConvMetrics)
+  }, [devices, selectedDeviceId, metricsRev, period])
 
   // Load top conversations after devices are known
   useEffect(() => {
@@ -512,6 +516,11 @@ export default function Index() {
   const now = new Date()
   const dateLabel = now.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
   const periodLabel = PERIODS.find((p) => p.key === period)?.label.toLowerCase() || ''
+  // O rótulo do seletor cabe em título ("— 30 dias"), mas não dentro de uma
+  // frase: "que você pegou 30 dias" fica errado. "hoje" e "ontem" já são
+  // advérbios e entram crus; as janelas de dias ganham a preposição.
+  const periodoNaFrase =
+    period === 'today' || period === 'yesterday' ? periodLabel : `nos últimos ${periodLabel}`
 
   return (
     <div className="flex flex-col gap-5 pb-8">
@@ -587,16 +596,16 @@ export default function Index() {
           acento="esmeralda"
           trend="neutral"
         />
+        {/*
+          O contraponto do cartão de "chat não finalizado": aqui é a fila
+          inteira, sem recorte de data. A legenda diz isso em voz alta porque os
+          dois ficam lado a lado e, sem o aviso, o número maior pareceria erro do
+          filtro.
+        */}
         <KpiCard
-          label="Meus atendimentos"
+          label="Contatos não finalizados"
           value={convMetrics.myOpen}
-          sub={
-            convMetrics.myOpen === 0
-              ? 'nada na sua mão'
-              : convMetrics.myToday > 0
-                ? `${convMetrics.myToday} chegaram hoje`
-                : 'nada novo hoje'
-          }
+          sub={convMetrics.myOpen === 0 ? 'nada na sua mão' : 'total, sem filtro de período'}
           icon={<Inbox className="h-5 w-5" />}
           acento="violeta"
           trend={convMetrics.myOpen === 0 ? 'up' : convMetrics.myOpen > 10 ? 'down' : 'neutral'}
@@ -610,14 +619,31 @@ export default function Index() {
           trend={convMetrics.unreadConversations === 0 ? 'up' : convMetrics.unreadConversations > 20 ? 'down' : 'neutral'}
           onClick={convMetrics.unreadConversations > 0 ? () => setPainelNaoLidas(true) : undefined}
         />
+        {/*
+          O rótulo segue o seletor (`periodLabel`) em vez de dizer "hoje" fixo:
+          com o filtro em "ontem" o título mentiria, já que o número passa a ser
+          o do dia anterior.
+        */}
         <KpiCard
-          label="Não respondidas hoje"
-          value={convMetrics.pendingReplies}
-          sub={convMetrics.pendingReplies === 0 ? 'Todas respondidas' : 'clique para ver quem'}
+          label={`Chat não finalizado — ${periodLabel}`}
+          value={convMetrics.naoFinalizadosPeriodo}
+          sub={
+            convMetrics.naoFinalizadosPeriodo === 0
+              ? 'nada em aberto no período'
+              : 'clique para ver quem'
+          }
           icon={<Clock className="h-5 w-5" />}
           acento="rosa"
-          trend={convMetrics.pendingReplies === 0 ? 'up' : convMetrics.pendingReplies > 10 ? 'down' : 'neutral'}
-          onClick={convMetrics.pendingReplies > 0 ? () => setPainelPendentes(true) : undefined}
+          trend={
+            convMetrics.naoFinalizadosPeriodo === 0
+              ? 'up'
+              : convMetrics.naoFinalizadosPeriodo > 10
+                ? 'down'
+                : 'neutral'
+          }
+          onClick={
+            convMetrics.naoFinalizadosPeriodo > 0 ? () => setPainelNaoFinalizados(true) : undefined
+          }
         />
       </div>
 
@@ -1072,23 +1098,27 @@ export default function Index() {
       </div>
 
       {/*
-        Quem está esperando resposta hoje. O número sozinho dizia que havia fila,
-        mas não quem estava nela — e chegar até a pessoa exigia procurar na mão,
-        conversa por conversa.
+        Quem você pegou no período e ainda não finalizou. O número sozinho dizia
+        que havia fila, mas não quem estava nela — e chegar até a pessoa exigia
+        procurar na mão, conversa por conversa.
+
+        A hora mostrada é a de QUANDO A CONVERSA FOI PEGA (`assigned_at`), não a
+        da última mensagem: é esse instante que decide se ela entra ou não na
+        janela do filtro, então mostrar outro faria a lista parecer errada.
       */}
-      <Dialog open={painelPendentes} onOpenChange={setPainelPendentes}>
+      <Dialog open={painelNaoFinalizados} onOpenChange={setPainelNaoFinalizados}>
         <DialogContent className="sm:max-w-[520px]">
           <DialogHeader>
-            <DialogTitle>Aguardando resposta hoje</DialogTitle>
+            <DialogTitle>Chat não finalizado — {periodLabel}</DialogTitle>
             <DialogDescription>
-              {convMetrics.pendingReplies === 1
-                ? '1 pessoa escreveu hoje e ainda não teve resposta.'
-                : `${convMetrics.pendingReplies} pessoas escreveram hoje e ainda não tiveram resposta.`}
+              {convMetrics.naoFinalizadosPeriodo === 1
+                ? `1 conversa que você pegou ${periodoNaFrase} e ainda não finalizou.`
+                : `${convMetrics.naoFinalizadosPeriodo} conversas que você pegou ${periodoNaFrase} e ainda não finalizou.`}
             </DialogDescription>
           </DialogHeader>
 
           <div className="max-h-[55vh] overflow-y-auto space-y-1.5 -mx-1 px-1">
-            {convMetrics.pendingList.map((p) => (
+            {convMetrics.naoFinalizadosList.map((p) => (
               <button
                 key={`${p.device_id}:${p.remote_sender}`}
                 onClick={() => {
@@ -1104,7 +1134,9 @@ export default function Index() {
                     {p.sender_name || p.remote_sender}
                   </p>
                   <span className="text-[11px] text-muted-foreground flex-shrink-0 tabular-nums">
-                    {new Date(p.last_message_created_at).toLocaleTimeString('pt-BR', {
+                    {new Date(p.assigned_at).toLocaleString('pt-BR', {
+                      day: '2-digit',
+                      month: '2-digit',
                       hour: '2-digit',
                       minute: '2-digit',
                     })}
@@ -1112,7 +1144,7 @@ export default function Index() {
                 </div>
                 <div className="flex items-center justify-between gap-2 mt-0.5">
                   <p className="text-xs text-muted-foreground truncate flex-1">
-                    {p.last_message_content || 'sem prévia'}
+                    pega por você, ainda em aberto
                   </p>
                   <span className="text-[10px] text-muted-foreground/70 flex-shrink-0">
                     {deviceNameMap[p.device_id] ?? ''}
