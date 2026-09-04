@@ -1,6 +1,5 @@
 import {
-  LayoutDashboard,
-  MessageSquare,
+  Home,
   Mail,
   ListTodo,
   StickyNote,
@@ -22,7 +21,12 @@ import {
   Send,
   ShieldAlert,
   Settings,
+  Sun,
+  Moon,
+  Sparkles,
 } from 'lucide-react'
+import { IconeWhatsApp } from '@/components/ui/icone-whatsapp'
+import { getBundleVersion } from '@/lib/app-info'
 import { canAccessFinanceiroTools, canAccessGestaoMedica } from '@/lib/permissions'
 import type { Profile } from '@/lib/supabase/types'
 
@@ -43,14 +47,24 @@ export interface DestinoNav {
   description: string
   icon: React.ElementType
   url: string
+  /**
+   * Renderiza só o ícone na barra do DESKTOP, sem rótulo. Usado no Painel, que
+   * vira uma casinha de "início" — o ícone sozinho já é convenção universal e
+   * devolve espaço na barra.
+   *
+   * As abas do rodapé do celular IGNORAM isto de propósito: lá não há tooltip
+   * ao passar o mouse, e uma aba muda no meio de outras rotuladas viraria
+   * adivinhação. Quem lê a bandeira é só o `Header`.
+   */
+  soIcone?: boolean
 }
 
-/** Itens de ação (abrem diálogo em vez de navegar). */
+/** Itens de ação (abrem diálogo/alternam algo em vez de navegar). */
 export interface AcaoNav {
   title: string
   description: string
   icon: React.ElementType
-  action: 'notifications' | 'tour'
+  action: 'notifications' | 'tour' | 'tema' | 'novidades'
 }
 
 export type ItemDeFerramenta = DestinoNav | AcaoNav
@@ -65,8 +79,10 @@ export function ehAcao(item: ItemDeFerramenta): item is AcaoNav {
  * computador e no celular não deveria ter que reaprender onde as coisas ficam.
  */
 export const DESTINOS_PRINCIPAIS: DestinoNav[] = [
-  { title: 'Painel', description: 'Visão geral', icon: LayoutDashboard, url: '/dashboard' },
-  { title: 'Conversas', description: 'WhatsApp', icon: MessageSquare, url: '/chat' },
+  { title: 'Painel', description: 'Visão geral', icon: Home, url: '/dashboard', soIcone: true },
+  // O ícone é o glifo do WhatsApp desenhado à mão (`ui/icone-whatsapp`): o
+  // lucide não tem logos de marca e não havia SVG nenhum no projeto.
+  { title: 'Whats', description: 'WhatsApp', icon: IconeWhatsApp, url: '/chat' },
   { title: 'Email', description: 'Caixa de entrada', icon: Mail, url: '/email' },
   /*
     ITEM 1: "deve ser um botão ao lado de emails e ferramentas" — é literalmente
@@ -107,8 +123,10 @@ const FERRAMENTAS_DO_APP: DestinoNav[] = [
 ]
 
 const ANALISE_PRN: DestinoNav = {
-  title: 'Análise PRN',
-  description: 'Cockpit financeiro',
+  // Renomeada em 04/09: "Análise PRN" não dizia o que a ferramenta faz. Ela
+  // cruza registros de meses/fontes diferentes e aponta duplicidade.
+  title: 'Cruzar Contas',
+  description: 'Cruzamento e duplicidade',
   icon: BarChart3,
   url: '/ferramentas/analise-prn',
 }
@@ -153,8 +171,8 @@ const CONTROLE_MENSAGENS: DestinoNav = {
 
 /** Apps externos embutidos em iframe, com a sessão do Central Whats. */
 const RELATORIOS: DestinoNav = {
-  title: 'Relatórios',
-  description: 'Relatório semanal',
+  title: 'Gestor de Tarefas',
+  description: 'Tarefas e relatórios',
   icon: FileText,
   url: '/ferramentas/relatorios',
 }
@@ -176,7 +194,7 @@ const LICITACOES: DestinoNav = {
  * por `public.tool_access`, como Licitações — hoje só para quem cuida da fila.
  */
 const PRN_HUB: DestinoNav = {
-  title: 'PRN Hub',
+  title: 'PRN Hub Dev',
   description: 'Fila de melhorias',
   icon: ClipboardList,
   url: '/ferramentas/prn-hub',
@@ -281,8 +299,24 @@ export function gruposDeFerramentas(
  * é o que é; no meio das ferramentas era mais um item competindo por atenção.
  * Por causa dela o retorno é `ItemDeFerramenta[]`, e não `DestinoNav[]` — quem
  * renderiza precisa desviar por `ehAcao`.
+ *
+ * **Tema e Últimas atualizações entraram aqui em 04/09**, saindo dos botões
+ * soltos da barra do desktop. A barra estava virando um paliteiro de ícones sem
+ * rótulo, e as duas são coisas que se mexe uma vez por semana, não a cada
+ * atendimento. Como o celular já tinha as duas escritas à mão na folha "Mais",
+ * elas foram REMOVIDAS de lá — agora as duas cascas leem esta lista, que é o
+ * ponto desta função existir.
+ *
+ * `temaEscuro` entra por parâmetro para o item de tema poder trocar rótulo e
+ * ícone (Sol/"Modo claro" quando está escuro, e vice-versa) sem que Header e
+ * folha do celular precisem cada um repetir esse `if`. É opcional: quem não
+ * passar recebe o rótulo do modo escuro, que é o padrão do app.
  */
-export function itensDeConta(user: UsuarioDeNav | null | undefined): ItemDeFerramenta[] {
+export function itensDeConta(
+  user: UsuarioDeNav | null | undefined,
+  opcoes?: { temaEscuro?: boolean },
+): ItemDeFerramenta[] {
+  const escuro = opcoes?.temaEscuro ?? true
   return [
     ...(user?.is_admin
       ? [
@@ -301,6 +335,24 @@ export function itensDeConta(user: UsuarioDeNav | null | undefined): ItemDeFerra
       de onde ninguém abre por engano no meio do atendimento.
     */
     { title: 'Tour do app', description: 'Rever a apresentação', icon: Compass, action: 'tour' },
+    {
+      // Rótulo e ícone dizem PARA ONDE vai, não onde está: com o tema escuro
+      // ligado, mostra sol e "Modo claro". É o mesmo comportamento do botão que
+      // vivia solto na barra.
+      title: escuro ? 'Modo claro' : 'Modo escuro',
+      description: 'Aparência do app',
+      icon: escuro ? Sun : Moon,
+      action: 'tema',
+    },
+    {
+      title: 'Últimas atualizações',
+      // A versão fica na descrição porque a folha do celular já mostrava assim,
+      // e é o único lugar do app onde dá para conferir em que build você está.
+      // O menu do desktop não renderiza descrição, então lá isso é inócuo.
+      description: `Versão ${getBundleVersion() ?? '—'}`,
+      icon: Sparkles,
+      action: 'novidades',
+    },
     {
       title: 'Configurações',
       description: 'Preferências do app',

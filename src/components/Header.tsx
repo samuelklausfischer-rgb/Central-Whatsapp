@@ -1,7 +1,5 @@
 import {
   LogOut,
-  Sun,
-  Moon,
   LayoutGrid,
   ChevronDown,
   RefreshCw,
@@ -11,7 +9,6 @@ import {
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { useState } from 'react'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -123,9 +120,11 @@ export function Header() {
   // Notificações saiu do menu de ferramentas e virou item de conta, então o
   // diálogo passa a ser aberto daqui.
   const [notifOpen, setNotifOpen] = useState(false)
+  // O diálogo de novidades passou a ser aberto pelo menu do perfil, então o
+  // estado vive aqui — antes o próprio `ReleaseNotesDialog` cuidava disso, com
+  // um botão-gatilho embutido na barra.
+  const [notasAbertas, setNotasAbertas] = useState(false)
 
-  const avatarUrl = user?.avatar_url || undefined
-  const userInitials = (user?.name?.[0] || user?.username?.[0] || 'U').toUpperCase()
   const isDark = resolvedTheme === 'dark'
 
   // Mesmos destinos que viram as abas do rodapé no celular.
@@ -151,10 +150,17 @@ export function Header() {
                 // com o mesmo valor, então o tour acha o destino em qualquer
                 // uma das duas cascas sem saber qual está montada.
                 data-tour={item.url}
+                // `title`/`aria-label` sempre, não só no `soIcone`: o rótulo já
+                // sumia em tela estreita (`hidden sm:block`), então sem eles o
+                // ícone ficava mudo para leitor de tela e sem dica no hover.
+                title={item.title}
+                aria-label={item.title}
                 className={`flex items-center gap-2 px-3 py-2 rounded-full text-sm font-medium transition-all duration-200 ${isActive ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent'}`}
               >
                 <item.icon className="h-4 w-4" />
-                <span className="hidden sm:block">{item.title}</span>
+                {/* `soIcone` é do Painel: casinha sozinha, sem rótulo. As abas
+                    do celular ignoram a bandeira e mantêm o texto. */}
+                {!item.soIcone && <span className="hidden sm:block">{item.title}</span>}
               </Link>
             )
           })}
@@ -163,7 +169,11 @@ export function Header() {
 
         {/* Right side */}
         <div className="ml-auto flex items-center gap-2">
-          <ReleaseNotesDialog />
+          {/*
+            `ReleaseNotesDialog` saiu daqui: sem props ele desenha o próprio
+            botão-gatilho na barra. Agora é montado no modo CONTROLADO lá
+            embaixo, aberto pelo item "Últimas atualizações" do menu do perfil.
+          */}
           <ReportarProblemaDialog />
 
           {isElectron &&
@@ -250,16 +260,13 @@ export function Header() {
             </Popover>
           )}
 
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setTheme(isDark ? 'light' : 'dark')}
-            className="rounded-full text-muted-foreground hover:text-foreground hover:bg-accent"
-            title={isDark ? 'Modo claro' : 'Modo escuro'}
-          >
-            {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-          </Button>
-
+          {/*
+            O botão de tema saiu daqui em 04/09 e virou item do menu do perfil
+            (`itensDeConta`, em lib/navegacao) — junto com "Últimas
+            atualizações". A barra estava virando um paliteiro de ícones sem
+            rótulo, e as duas são coisas de mexer uma vez por semana, não a cada
+            atendimento.
+          */}
           <SinoDeNotificacoes className="rounded-full text-muted-foreground hover:bg-accent hover:text-foreground" />
 
           <DropdownMenu>
@@ -267,15 +274,23 @@ export function Header() {
               <Button
                 variant="ghost"
                 data-tour="conta"
-                className="rounded-full h-10 pl-2 pr-4 gap-2 hover:bg-accent border border-border transition-all duration-200"
+                className="rounded-full h-10 px-4 gap-2 hover:bg-accent border border-border transition-all duration-200"
               >
-                <Avatar className="h-7 w-7 border-2 border-border">
-                  <AvatarImage src={avatarUrl} alt={user?.name || 'User'} />
-                  <AvatarFallback className="bg-primary/20 text-primary text-xs font-medium">
-                    {userInitials}
-                  </AvatarFallback>
-                </Avatar>
-                <span className="text-sm font-medium text-foreground hidden sm:block">
+                {/*
+                  O círculo com a inicial saiu daqui em 04/09 (pedido do Samuel,
+                  apontando exatamente para ele): não há foto de perfil em uso no
+                  app, e a bolinha só ocupava espaço sem dizer nada que o nome ao
+                  lado já não diga.
+
+                  O `pl-2` virou `px-4`: o padding menor à esquerda existia para
+                  o avatar encostar na borda do botão; sem ele, o nome ficaria
+                  torto.
+
+                  ⚠️ No CELULAR o avatar CONTINUA (`MobileHeader`): lá não há
+                  nome ao lado, o círculo é o próprio botão que abre a folha
+                  "Mais" — tirá-lo deixaria a navegação sem alvo visível.
+                */}
+                <span className="text-sm font-medium text-foreground">
                   {user?.name || user?.username || 'Admin'}
                 </span>
               </Button>
@@ -300,19 +315,23 @@ export function Header() {
               "Notificações" aparecer nos dois lugares sem ser adicionada duas
               vezes — e o gate de admin ser uma decisão só.
             */}
-              {itensDeConta(user).map((item) =>
+              {itensDeConta(user, { temaEscuro: isDark }).map((item) =>
                 ehAcao(item) ? (
                   <DropdownMenuItem
                     key={item.title}
                     // `preventDefault` segura o foco: sem ele o menu devolve o foco
                     // ao avatar no mesmo instante em que o diálogo tenta pegá-lo, e
-                    // o diálogo abre sem foco.
-                    // Despacha pela AÇÃO, e não assumindo que toda ação é
-                    // notificações — desde o ITEM 5 existe mais de uma.
+                    // o diálogo abre sem foco. Vale igual para o de novidades.
+                    // Despacha pela AÇÃO, com todos os casos explícitos: o
+                    // `else` genérico de antes mandava qualquer ação nova para
+                    // notificações, o que quebraria em silêncio ao acrescentar
+                    // uma (foi o que aconteceria com tema/novidades em 04/09).
                     onSelect={(e) => {
                       e.preventDefault()
                       if (item.action === 'tour') iniciarTour()
-                      else setNotifOpen(true)
+                      else if (item.action === 'tema') setTheme(isDark ? 'light' : 'dark')
+                      else if (item.action === 'novidades') setNotasAbertas(true)
+                      else if (item.action === 'notifications') setNotifOpen(true)
                     }}
                     className="focus:bg-accent focus:text-accent-foreground cursor-pointer"
                   >
@@ -386,6 +405,9 @@ export function Header() {
       </header>
 
       <NotificationsDialog open={notifOpen} onOpenChange={setNotifOpen} />
+      {/* Modo controlado: sem `open`/`onOpenChange` ele desenharia o próprio
+          botão na barra, que é justamente o que saiu daqui. */}
+      <ReleaseNotesDialog open={notasAbertas} onOpenChange={setNotasAbertas} />
     </>
   )
 }

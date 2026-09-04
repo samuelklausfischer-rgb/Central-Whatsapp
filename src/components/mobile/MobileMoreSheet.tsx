@@ -2,16 +2,13 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   LogOut,
-  Sun,
-  Moon,
-  Sparkles,
   MessageSquarePlus,
   ChevronRight,
   Download,
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { useAuth } from '@/hooks/use-auth'
 import { useToolAccess } from '@/hooks/use-tool-access'
 import { useInstalarPwa } from '@/hooks/use-instalar-pwa'
@@ -21,7 +18,6 @@ import { iniciarTour } from '@/components/TourDoApp'
 import { NotificationsDialog } from '@/components/NotificationsDialog'
 import { ReleaseNotesDialog } from '@/components/ReleaseNotesDialog'
 import { ReportarProblemaDialog } from '@/components/ReportarProblemaDialog'
-import { getBundleVersion } from '@/lib/app-info'
 
 /**
  * Tudo que não cabe nas abas do rodapé.
@@ -52,7 +48,7 @@ export function MobileMoreSheet({
 
   const escuro = resolvedTheme === 'dark'
   const grupos = gruposDeFerramentas(user, useToolAccess())
-  const conta = itensDeConta(user)
+  const conta = itensDeConta(user, { temaEscuro: escuro })
   const iniciais = (user?.name?.[0] || user?.username?.[0] || 'U').toUpperCase()
 
   function irPara(url: string) {
@@ -62,16 +58,27 @@ export function MobileMoreSheet({
 
   function acionar(item: ItemDeFerramenta) {
     if (ehAcao(item)) {
+      // Tema é o ÚNICO que não fecha a folha: é ajuste visual, e a pessoa
+      // costuma querer alternar e conferir ali mesmo. Fechar tiraria o
+      // contexto — e era o comportamento de antes, quando ele era uma linha
+      // solta aqui em vez de item da lista compartilhada.
+      if (item.action === 'tema') {
+        setTheme(escuro ? 'light' : 'dark')
+        return
+      }
       // Fecha a folha ANTES de abrir o diálogo: duas camadas empilhadas fazem o
       // voltar do Android fechar as duas de uma vez.
       onAbrirChange(false)
-      // Despacha pela AÇÃO: desde o ITEM 5 há mais de uma, e assumir
-      // notificações abriria o diálogo errado ao pedir o tour.
+      // Despacha pela AÇÃO, com todos os casos explícitos: o `else` genérico
+      // de antes mandava qualquer ação nova para notificações — o que quebraria
+      // em silêncio ao acrescentar tema/novidades (04/09).
       if (item.action === 'tour') {
         // Espera a folha fechar: com ela aberta, os alvos do tour (barra de
         // abas, botão Mais) estão cobertos e o recorte apontaria para o nada.
         requestAnimationFrame(() => requestAnimationFrame(iniciarTour))
-      } else {
+      } else if (item.action === 'novidades') {
+        setNotasAberto(true)
+      } else if (item.action === 'notifications') {
         setNotifAberto(true)
       }
       return
@@ -89,7 +96,7 @@ export function MobileMoreSheet({
           <SheetHeader className="px-4 pt-4 pb-3 border-b border-border shrink-0">
             <SheetTitle className="flex items-center gap-3 text-left">
               <Avatar className="h-10 w-10 border border-border">
-                <AvatarImage src={user?.avatar_url || undefined} alt={user?.name || 'Usuário'} />
+                {/* Sem foto, só iniciais — pedido de 04/09. */}
                 <AvatarFallback className="bg-primary/20 text-primary text-sm">
                   {iniciais}
                 </AvatarFallback>
@@ -137,13 +144,11 @@ export function MobileMoreSheet({
                   onClick={() => acionar(item)}
                 />
               ))}
-              <Linha
-                icone={escuro ? Sun : Moon}
-                titulo={escuro ? 'Modo claro' : 'Modo escuro'}
-                descricao="Aparência do app"
-                onClick={() => setTheme(escuro ? 'light' : 'dark')}
-                mantemAberta
-              />
+              {/* A linha de tema que ficava aqui virou item de `itensDeConta`
+                  (04/09) e já é renderizada pelo `conta.map` acima — mantê-la
+                  faria o tema aparecer DUAS vezes nesta folha. O `acionar`
+                  cuida de não fechar a folha nesse caso, como o
+                  `mantemAberta` fazia. */}
               {/*
                 No Chrome/Android `podeInstalar` liga quando o navegador
                 oferece o `beforeinstallprompt`; no Safari/iOS esse evento não
@@ -175,15 +180,11 @@ export function MobileMoreSheet({
             </Secao>
 
             <Secao titulo="Sobre">
-              <Linha
-                icone={Sparkles}
-                titulo="Últimas atualizações"
-                descricao={`Versão ${getBundleVersion() ?? '—'}`}
-                onClick={() => {
-                  onAbrirChange(false)
-                  setNotasAberto(true)
-                }}
-              />
+              {/* "Últimas atualizações" saiu daqui (04/09): virou item de
+                  `itensDeConta` e agora aparece na seção Conta, junto do tema —
+                  as duas mudaram de lugar juntas para o menu do perfil no
+                  desktop. A versão do app continua visível, na descrição do
+                  item lá em cima. */}
               <Linha
                 icone={MessageSquarePlus}
                 titulo="Reportar problema"

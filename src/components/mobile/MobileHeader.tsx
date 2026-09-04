@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { SinoDeNotificacoes } from '@/components/notificacoes/SinoDeNotificacoes'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { useAuth } from '@/hooks/use-auth'
 import { BrandLogo } from '@/components/BrandLogo'
 
@@ -35,7 +35,8 @@ export function MobileHeader({ onAbrirMais }: { onAbrirMais: () => void }) {
           className="flex h-10 w-10 items-center justify-center rounded-full active:bg-accent"
         >
           <Avatar className="h-8 w-8 border border-border">
-            <AvatarImage src={user?.avatar_url || undefined} alt={user?.name || 'Usuário'} />
+            {/* Sem foto, só iniciais — pedido de 04/09. O círculo fica porque
+                é ele que abre a folha "Mais". */}
             <AvatarFallback className="bg-primary/20 text-xs text-primary">{iniciais}</AvatarFallback>
           </Avatar>
         </button>
