@@ -28,12 +28,10 @@ const OBRIGATORIAS = [
 /**
  * Opcionais de propósito — NÃO entram em OBRIGATORIAS.
  *
- * O serviço de render da Proposta Comercial ainda não está publicado. Enquanto
- * `VITE_PROPOSTA_RENDER_URL` vier vazia, a ferramenta cai no caminho antigo
- * (monta o PDF localmente), então buildar sem ela é intencional e não deve
- * quebrar. Quando o serviço subir, defina-a (e, se houver, a chave) no EasyPanel.
+ * Enquanto `VITE_PROPOSTA_RENDER_URL` vier vazia, a ferramenta cai no caminho
+ * antigo (monta o PDF localmente), então buildar sem ela é intencional e não
+ * deve quebrar. O serviço é aberto — não há chave nem login.
  *   - VITE_PROPOSTA_RENDER_URL — base do serviço de proposta (PDF/Word/Excel/ZIP)
- *   - VITE_PROPOSTA_API_KEY    — chave opcional (header X-API-Key)
  */
 
 const modo = process.env.NODE_ENV || 'production'

@@ -48,8 +48,8 @@ async function pedir(endpoint: Endpoint, dados: DadosProposta): Promise<ArquivoP
     throw new Error('Serviço de proposta não configurado (VITE_PROPOSTA_RENDER_URL).')
   }
 
+  // O serviço é aberto: não há chave nem login (decisão do dono do projeto).
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (appEnv.VITE_PROPOSTA_API_KEY) headers['X-API-Key'] = appEnv.VITE_PROPOSTA_API_KEY
 
   const url = `${baseUrl.replace(/\/+$/, '')}/api/${endpoint}`
 
@@ -60,7 +60,7 @@ async function pedir(endpoint: Endpoint, dados: DadosProposta): Promise<ArquivoP
     throw new Error('Não consegui falar com o serviço de proposta. Verifique a conexão.')
   }
 
-  // O serviço devolve `{ ok:false, erro }` com status 400/401/500 — tentar ler o
+  // O serviço devolve `{ ok:false, erro }` com status 400/500 — tentar ler o
   // JSON dá uma mensagem melhor do que só o código HTTP.
   let json: RespostaRender | null = null
   try {
@@ -71,7 +71,6 @@ async function pedir(endpoint: Endpoint, dados: DadosProposta): Promise<ArquivoP
 
   if (!res.ok || !json?.ok) {
     const motivo = json?.erro || `serviço respondeu HTTP ${res.status}`
-    if (res.status === 401) throw new Error(`Acesso negado ao serviço de proposta (${motivo}).`)
     throw new Error(`Não consegui gerar a proposta: ${motivo}.`)
   }
 

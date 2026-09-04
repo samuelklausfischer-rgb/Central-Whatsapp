@@ -7,7 +7,6 @@ type AppRuntimeConfig = {
   VITE_PRN_HUB_APP_URL?: string
   VITE_GESTAO_MEDICA_APP_URL?: string
   VITE_PROPOSTA_RENDER_URL?: string
-  VITE_PROPOSTA_API_KEY?: string
 }
 
 /**
@@ -96,7 +95,4 @@ export const appEnv = {
   // do serviço ser publicado. Quando setada, vira o caminho primário.
   VITE_PROPOSTA_RENDER_URL:
     runtimeConfig?.VITE_PROPOSTA_RENDER_URL || import.meta.env.VITE_PROPOSTA_RENDER_URL || '',
-  // Chave opcional do serviço acima (header `X-API-Key`). Vazia = sem header.
-  VITE_PROPOSTA_API_KEY:
-    runtimeConfig?.VITE_PROPOSTA_API_KEY || import.meta.env.VITE_PROPOSTA_API_KEY || '',
 }
