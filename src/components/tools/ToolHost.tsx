@@ -39,7 +39,12 @@ interface FerramentaHospedavel {
  * divergirem a ferramenta abre em branco, então ambos usam a mesma string.
  */
 export const FERRAMENTAS_HOSPEDADAS: Record<string, FerramentaHospedavel> = {
-  'analise-prn': { titulo: 'Análise PRN', url: '/ferramentas/analise-prn', Componente: AnalisePrn },
+  // Os títulos aqui têm que bater com os do menu (`lib/navegacao.ts`): eles
+  // aparecem no cartão de erro da ferramenta e, desde 08/09, também no
+  // "Reportar problema", que diz de onde a pessoa está reportando. Três ficaram
+  // para trás do renome de 04/09 e diziam o nome antigo — "Análise PRN" onde o
+  // menu já dizia "Cruzar Contas".
+  'analise-prn': { titulo: 'Cruzar Contas', url: '/ferramentas/analise-prn', Componente: AnalisePrn },
   'rateio-mobilemed': { titulo: 'Rateio', url: '/ferramentas/rateio-mobilemed', Componente: RateioMobilemed },
   'relatorio-app': { titulo: 'Relatório App', url: '/ferramentas/relatorio-app', Componente: RelatorioApp },
   // Nativa, então SEM `telaCheia`: recebe o respiro e a largura máxima do painel,
@@ -49,11 +54,11 @@ export const FERRAMENTAS_HOSPEDADAS: Record<string, FerramentaHospedavel> = {
     url: '/ferramentas/controle-mensagens',
     Componente: ControleMensagens,
   },
-  relatorios: { titulo: 'Relatórios', url: '/ferramentas/relatorios', Componente: Relatorios, telaCheia: true },
+  relatorios: { titulo: 'Gestor de Tarefas', url: '/ferramentas/relatorios', Componente: Relatorios, telaCheia: true },
   licitacoes: { titulo: 'Licitações', url: '/ferramentas/licitacoes', Componente: Licitacoes, telaCheia: true },
   // ITEM 2. `telaCheia` como as outras embutidas por iframe: o app filho cuida
   // da própria altura, e o respiro do painel daria barra de rolagem dupla.
-  'prn-hub': { titulo: 'PRN Hub', url: '/ferramentas/prn-hub', Componente: PrnHub, telaCheia: true },
+  'prn-hub': { titulo: 'PRN Hub Dev', url: '/ferramentas/prn-hub', Componente: PrnHub, telaCheia: true },
   // `telaCheia` como as outras embutidas por iframe: o app filho tem barra
   // lateral própria e cuida da própria altura.
   'gestao-medica': {

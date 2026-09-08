@@ -1165,6 +1165,52 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const [attachments, setAttachments] = useState<File[]>([])
 
   /**
+   * Miniatura de cada anexo de imagem, antes de enviar.
+   *
+   * CHAVEADO PELO PRÓPRIO `File`, e não pela posição na lista. A lista renderiza
+   * com `key={index}`, e guardar a URL por índice quebraria ao remover o
+   * primeiro item: todos os outros deslocam e cada miniatura passaria a mostrar
+   * a imagem do vizinho. O objeto `File` é estável enquanto ele estiver na
+   * lista, então a busca por identidade não erra.
+   *
+   * `URL.createObjectURL` e não `FileReader`: não carrega o arquivo inteiro em
+   * memória como base64 faria, e é o padrão já dominante no projeto (áudio,
+   * download, exportação).
+   */
+  const miniaturasRef = useRef(new Map<File, string>())
+  const [miniaturas, setMiniaturas] = useState<Map<File, string>>(new Map())
+
+  /*
+    Cria o que entrou e REVOGA o que saiu, num efeito só.
+
+    Isso cobre de uma vez as três saídas que vazariam memória: remover um anexo,
+    enviar com sucesso (`setAttachments([])`) e trocar de conversa. Uma quarta —
+    desmontar o componente — fica no efeito logo abaixo, porque neste aqui a
+    limpeza rodaria a cada mudança da lista.
+  */
+  useEffect(() => {
+    const anterior = miniaturasRef.current
+    const novo = new Map<File, string>()
+    for (const arquivo of attachments) {
+      if (!arquivo.type.startsWith('image/')) continue
+      novo.set(arquivo, anterior.get(arquivo) ?? URL.createObjectURL(arquivo))
+    }
+    for (const [arquivo, url] of anterior) {
+      if (!novo.has(arquivo)) URL.revokeObjectURL(url)
+    }
+    miniaturasRef.current = novo
+    setMiniaturas(novo)
+  }, [attachments])
+
+  useEffect(() => {
+    // Molde do áudio, logo abaixo: a URL viva não pode sobreviver ao componente.
+    return () => {
+      for (const url of miniaturasRef.current.values()) URL.revokeObjectURL(url)
+      miniaturasRef.current = new Map()
+    }
+  }, [])
+
+  /**
    * Colagem que veio com imagem E texto ao mesmo tempo — o caso do Excel, que
    * põe no clipboard o TSV das células e um bitmap do recorte. Enquanto não
    * for `null`, o diálogo de escolha está aberto segurando as duas versões.
@@ -5616,27 +5662,62 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
             </div>
           )}
           {attachments.length > 0 && (
-            <div className="flex flex-wrap gap-2 px-3 py-2 bg-chat-panel border border-chat-border rounded-xl">
-              {attachments.map((file, index) => (
-                <div
-                  key={index}
-                  className="flex items-center gap-2 bg-chat-hover rounded-md px-2.5 py-1.5 text-xs text-chat-text"
-                >
-                  {file.type.startsWith('image/') ? (
-                    <ImageIcon className="h-3 w-3 opacity-70" />
-                  ) : (
-                    <FileIcon className="h-3 w-3 opacity-70" />
-                  )}
-                  <span className="truncate max-w-[120px]">{file.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => removeAttachment(index)}
-                    className="text-chat-muted hover:text-red-400 ml-1 transition-colors"
+            <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-chat-panel border border-chat-border rounded-xl">
+              {attachments.map((file, index) => {
+                const miniatura = miniaturas.get(file)
+                /*
+                  Imagem vira MINIATURA e abre no visualizador ao clicar; o resto
+                  continua pílula com ícone e nome. Antes toda imagem era um
+                  ícone genérico — a pessoa não via o que estava prestes a
+                  mandar, que é justamente quando o engano ainda dá para desfazer.
+
+                  O visualizador é o `MediaViewer` que já está montado nesta tela
+                  para as mensagens enviadas: ele aceita `blob:` sem alteração
+                  nenhuma, e o padrão da casa é ter um só.
+                */
+                if (miniatura) {
+                  return (
+                    <div key={index} className="group relative">
+                      <button
+                        type="button"
+                        onClick={() => setMediaView({ url: miniatura, type: 'image', name: file.name })}
+                        title={`Ver ${file.name}`}
+                        className="block h-16 w-16 overflow-hidden rounded-lg border border-chat-border bg-chat-hover transition-opacity hover:opacity-90"
+                      >
+                        <img src={miniatura} alt={file.name} className="h-full w-full object-cover" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeAttachment(index)}
+                        aria-label={`Tirar ${file.name}`}
+                        className="absolute -right-1.5 -top-1.5 rounded-full bg-chat-panel p-0.5 text-chat-muted shadow ring-1 ring-chat-border transition-colors hover:text-red-400"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )
+                }
+                return (
+                  <div
+                    key={index}
+                    className="flex items-center gap-2 bg-chat-hover rounded-md px-2.5 py-1.5 text-xs text-chat-text"
                   >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))}
+                    {file.type.startsWith('image/') ? (
+                      <ImageIcon className="h-3 w-3 opacity-70" />
+                    ) : (
+                      <FileIcon className="h-3 w-3 opacity-70" />
+                    )}
+                    <span className="truncate max-w-[120px]">{file.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(index)}
+                      className="text-chat-muted hover:text-red-400 ml-1 transition-colors"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )
+              })}
             </div>
           )}
           {(replyingTo || editingMessageId) && (

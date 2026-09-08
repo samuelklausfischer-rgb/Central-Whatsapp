@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useSyncExternalStore } from 'react'
+import { useLocation } from 'react-router-dom'
 import { MessageSquarePlus, MessageSquareWarning, Lightbulb } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -11,6 +12,8 @@ import { useToast } from '@/hooks/use-toast'
 import { enviarHubReport, type HubReportTipo } from '@/services/hub_reports'
 import { releaseNotes } from '@/data/release-notes'
 import { MeusHubReports } from '@/components/MeusHubReports'
+import { subscreverFerramentas, lerFerramentas } from '@/stores/ferramentasVivas'
+import { descobrirOndeEstou, NOME_DO_PROJETO } from '@/lib/hub/onde-estou'
 
 const tipos: { value: HubReportTipo; label: string; icon: React.ElementType; hint: string }[] = [
   { value: 'problema', label: 'Problema', icon: MessageSquareWarning, hint: 'Algo não está funcionando' },
@@ -28,6 +31,16 @@ export function ReportarProblemaDialog({
   open: openExterno,
   onOpenChange,
 }: { open?: boolean; onOpenChange?: (v: boolean) => void } = {}) {
+  /*
+    De onde a pessoa está reportando.
+
+    `ativa` da store, e nunca `vivas[0]`: até três ferramentas ficam montadas ao
+    mesmo tempo, e só `ativa` responde "onde estou agora". O `pathname` cobre as
+    telas que não são ferramenta.
+  */
+  const { ativa } = useSyncExternalStore(subscreverFerramentas, lerFerramentas, lerFerramentas)
+  const { pathname } = useLocation()
+  const onde = descobrirOndeEstou(ativa, pathname)
   const { user } = useAuth()
   const { toast } = useToast()
   const [openInterno, setOpenInterno] = useState(false)
@@ -68,13 +81,21 @@ export function ReportarProblemaDialog({
       await enviarHubReport({
         tipo,
         titulo: tituloLimpo,
-        descricao: descricaoLimpa,
+        // A linha de contexto vai no CORPO, não só nos metadados: quem lê a fila
+        // no Hub vê a descrição, e raramente abre o json.
+        descricao: `${descricaoLimpa}
+
+— Reportado de: ${onde.lugar}
+— Página: ${window.location.href}`,
         reportadoPor,
+        projetoSlug: onde.projeto,
         metadata: {
           user_id: user!.id,
           user_email: user!.email,
           app_version: releaseNotes[0]?.version ?? null,
           user_agent: navigator.userAgent,
+          ferramenta_slug: onde.ferramentaSlug,
+          ferramenta_titulo: onde.lugar,
         },
       })
       toast({ title: tipo === 'ideia' ? 'Ideia enviada. Obrigado!' : 'Problema reportado. Obrigado!' })
@@ -182,8 +203,21 @@ export function ReportarProblemaDialog({
             {enviando ? 'Enviando...' : 'Enviar'}
           </Button>
 
-          <p className="text-center text-[11px] text-muted-foreground">
-            Enviado como <span className="text-foreground">{nome}</span> para a fila do PRN Hub
+          {/*
+            O DESTINO PRECISA APARECER ANTES DE ENVIAR.
+
+            Até 08/09 isto dizia só "para a fila do PRN Hub", e todo relato caía
+            no projeto Central Whats — inclusive os escritos de dentro do PRN Hub
+            Dev ou da Proposta, que têm fila própria. Agora o destino é escolhido
+            sozinho, e mostrar qual é permite a pessoa perceber quando estiver
+            errado, em vez de descobrir dias depois na fila de outro projeto.
+          */}
+          <p className="text-center text-[11px] leading-relaxed text-muted-foreground">
+            Enviado como <span className="text-foreground">{nome}</span>, de{' '}
+            <span className="text-foreground">{onde.lugar}</span>
+            <br />
+            Vai para a fila de{' '}
+            <span className="font-medium text-foreground">{NOME_DO_PROJETO[onde.projeto]}</span>
           </p>
           </TabsContent>
 

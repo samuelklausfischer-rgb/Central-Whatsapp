@@ -17,8 +17,15 @@ const HUB_SUPABASE_URL = 'https://apps-supabase.srofjl.easypanel.host'
 const HUB_SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzUyNzAwMDAwLCJleHAiOjIzODQ1MDAwMDB9.Gseqw0-_o6Nmwmz3mCWvgxjjCfJB1LhVgTV83uJe-F4'
 
-// Slug do projeto "Central Whats" cadastrado em `hub_projetos`.
-const PROJETO_SLUG = 'central-whats'
+/**
+ * Projeto padrão quando ninguém disser de onde veio.
+ *
+ * Deixou de ser o ÚNICO destino em 08/09/2026: até então todo relato caía aqui,
+ * inclusive os escritos de dentro do PRN Hub Dev ou da Proposta Comercial, que
+ * têm fila própria — 26 relatos medidos no banco, todos para `central-whats`.
+ * Quem decide o destino agora é `lib/hub/onde-estou.ts`.
+ */
+const PROJETO_PADRAO = 'central-whats'
 
 const hubHeaders = {
   'Content-Type': 'application/json',
@@ -33,6 +40,8 @@ export interface EnviarHubReportInput {
   titulo: string
   descricao: string
   reportadoPor: string
+  /** Slug do projeto no Hub. Omitido = Central Whats. */
+  projetoSlug?: string
   metadata?: Record<string, unknown>
 }
 
@@ -41,21 +50,23 @@ export const enviarHubReport = async ({
   titulo,
   descricao,
   reportadoPor,
+  projetoSlug,
   metadata,
 }: EnviarHubReportInput) => {
+  const slug = projetoSlug || PROJETO_PADRAO
   // `hub_projetos` é fechada para `anon`; a RPC (SECURITY DEFINER) devolve
   // só o id daquele slug, sem expor mais nada do projeto.
   const rpcRes = await fetch(`${HUB_SUPABASE_URL}/rest/v1/rpc/hub_projeto_id_by_slug`, {
     method: 'POST',
     headers: hubHeaders,
-    body: JSON.stringify({ slug_input: PROJETO_SLUG }),
+    body: JSON.stringify({ slug_input: slug }),
   })
   if (!rpcRes.ok) {
     throw new Error(`Não foi possível conectar ao PRN Hub agora (erro ${rpcRes.status}). Tente de novo em instantes.`)
   }
 
   const projetoId = await rpcRes.json()
-  if (!projetoId) throw new Error(`Projeto "${PROJETO_SLUG}" não está cadastrado no PRN Hub.`)
+  if (!projetoId) throw new Error(`Projeto "${slug}" não está cadastrado no PRN Hub.`)
 
   // `status` e `prioridade` são omitidos de propósito: os defaults da tabela
   // ('novo' / 'media') são exatamente o que a policy de insert exige.
@@ -70,7 +81,7 @@ export const enviarHubReport = async ({
       reportado_por: reportadoPor,
       origem: 'widget',
       pagina_url: window.location.href,
-      metadata: { projeto_slug: PROJETO_SLUG, ...metadata },
+      metadata: { projeto_slug: slug, ...metadata },
     }),
   })
 
