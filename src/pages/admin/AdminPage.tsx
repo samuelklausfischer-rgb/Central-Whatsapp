@@ -4,7 +4,6 @@ import {
   CheckCircle2,
   DownloadCloud,
   Edit,
-  Gavel,
   Mail,
   Plus,
   RefreshCw,
@@ -15,6 +14,11 @@ import {
 } from 'lucide-react'
 import { getUsers, createUser, updateUser, deleteUser, type ManagedUser } from '@/services/users'
 import { getToolUserIds, setToolAccess } from '@/services/tool_access'
+import {
+  CATALOGO_DE_FERRAMENTAS,
+  FERRAMENTAS_POR_PESSOA,
+  ROTULO_DA_LIBERACAO,
+} from '@/lib/ferramentas/catalogo'
 import { getDevices, updateDevice } from '@/services/devices'
 import {
   configureEvolutionWebhooks,
@@ -77,8 +81,28 @@ export default function AdminPage() {
   // Liberações que vivem em public.tool_access, e não em profiles: uma coluna em
   // profiles seria auto-atribuível — a policy users_update_own_profile só trava
   // `is_admin` no WITH CHECK.
-  const [licitacaoUserIds, setLicitacaoUserIds] = useState<Set<string>>(new Set())
-  const [propostaUserIds, setPropostaUserIds] = useState<Set<string>>(new Set())
+  /*
+    Quem tem cada ferramenta, por chave de `tool_access`.
+
+    Eram dois `Set` chumbados (Licitações e Proposta) — e por isso só essas duas
+    tinham caixa na tela, enquanto `prn-hub` e `controle-mensagens` já
+    funcionavam por liberação pessoa a pessoa e **só podiam ser liberadas por
+    SQL**. Agora a lista sai do catálogo, e acrescentar ferramenta não pede
+    mudança aqui.
+  */
+  const [acessoPorFerramenta, setAcessoPorFerramenta] = useState<Record<string, Set<string>>>({})
+  /**
+   * A leitura de quem tem o quê chegou mesmo?
+   *
+   * Sem isto, uma falha de rede em `loadData` deixaria todas as caixas
+   * desmarcadas — e salvar o cadastro RETIRARIA a ferramenta de todo mundo que
+   * a tinha, porque o laço de gravação manda `false` para as não marcadas.
+   *
+   * Não é hipótese: esta mesma tela já apagou os aparelhos de um admin
+   * exatamente assim, e o conserto de 20/08/2026 foi um sinalizador explícito
+   * (`devices_explicit`) em vez de deduzir da lista vazia.
+   */
+  const [ferramentasCarregadas, setFerramentasCarregadas] = useState(false)
 
   const [formData, setFormData] = useState({
     name: '',
@@ -87,8 +111,8 @@ export default function AdminPage() {
     password: '',
     department: '',
     is_admin: false,
-    licitacoes_access: false,
-    proposta_comercial_access: false,
+    /** Marcações por chave de `tool_access`. */
+    ferramentas: {} as Record<string, boolean>,
     allowed_devices: [] as string[],
   })
 
@@ -126,16 +150,20 @@ export default function AdminPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [uData, dData, licitacaoIds, propostaIds] = await Promise.all([
+      const [uData, dData, ...listas] = await Promise.all([
         getUsers(),
         getDevices(),
-        getToolUserIds('licitacoes'),
-        getToolUserIds('proposta-comercial'),
+        ...FERRAMENTAS_POR_PESSOA.map((f) => getToolUserIds(f.chave)),
       ])
+      // Marca que a leitura FOI feita. Ver a trava em `handleSave`.
+      setFerramentasCarregadas(true)
       setUsers(uData)
       setDevices(dData)
-      setLicitacaoUserIds(new Set(licitacaoIds))
-      setPropostaUserIds(new Set(propostaIds))
+      setAcessoPorFerramenta(
+        Object.fromEntries(
+          FERRAMENTAS_POR_PESSOA.map((f, i) => [f.chave, new Set(listas[i] as string[])]),
+        ),
+      )
     } catch (e) {
       console.error(e)
       toast({ title: 'Erro ao carregar equipe', variant: 'destructive' })
@@ -160,8 +188,7 @@ export default function AdminPage() {
       password: '',
       department: '',
       is_admin: false,
-      licitacoes_access: false,
-      proposta_comercial_access: false,
+      ferramentas: {},
       allowed_devices: [],
     })
     setIsDialogOpen(true)
@@ -176,8 +203,9 @@ export default function AdminPage() {
       password: '',
       department: user.department || '',
       is_admin: user.is_admin || false,
-      licitacoes_access: licitacaoUserIds.has(user.id),
-      proposta_comercial_access: propostaUserIds.has(user.id),
+      ferramentas: Object.fromEntries(
+        FERRAMENTAS_POR_PESSOA.map((f) => [f.chave, acessoPorFerramenta[f.chave]?.has(user.id) ?? false]),
+      ),
       allowed_devices: user.allowed_devices || [],
     })
     setIsDialogOpen(true)
@@ -336,17 +364,27 @@ export default function AdminPage() {
 
       if (editingUser) {
         await updateUser(editingUser.id, dataToSave)
-        await setToolAccess(editingUser.id, 'licitacoes', formData.licitacoes_access)
-        await setToolAccess(editingUser.id, 'proposta-comercial', formData.proposta_comercial_access)
+        if (ferramentasCarregadas) {
+          for (const f of FERRAMENTAS_POR_PESSOA) {
+            await setToolAccess(editingUser.id, f.chave, formData.ferramentas[f.chave] ?? false)
+          }
+        } else {
+          // O cadastro foi salvo; as ferramentas ficaram como estavam, de
+          // propósito. Gravar aqui apagaria acesso que ninguém pediu para tirar.
+          toast({
+            title: 'Ferramentas não foram alteradas',
+            description: 'A lista de acessos não chegou a carregar. Recarregue a página e tente de novo.',
+            variant: 'destructive',
+          })
+        }
         toast({ title: 'Usuário atualizado com sucesso' })
       } else {
         const created = await createUser(dataToSave)
         // As liberações são gravadas depois do usuário existir: tool_access.user_id
         // tem FK para auth.users, então antes disso o insert seria rejeitado.
         if (created?.id) {
-          if (formData.licitacoes_access) await setToolAccess(created.id, 'licitacoes', true)
-          if (formData.proposta_comercial_access) {
-            await setToolAccess(created.id, 'proposta-comercial', true)
+          for (const f of FERRAMENTAS_POR_PESSOA) {
+            if (formData.ferramentas[f.chave]) await setToolAccess(created.id, f.chave, true)
           }
         }
         toast({ title: 'Usuário criado com sucesso' })
@@ -506,14 +544,23 @@ export default function AdminPage() {
                             <ShieldAlert className="h-3 w-3" /> Admin
                           </Badge>
                         )}
-                        {licitacaoUserIds.has(user.id) && (
+                        {/*
+                          Uma etiqueta por ferramenta liberada, e não só a de
+                          Licitações: com quatro ferramentas liberáveis, mostrar
+                          uma só escondia as outras três e dava a impressão de
+                          que ninguém tinha acesso a elas.
+                        */}
+                        {FERRAMENTAS_POR_PESSOA.filter((f) =>
+                          acessoPorFerramenta[f.chave]?.has(user.id),
+                        ).map((f) => (
                           <Badge
+                            key={f.chave}
                             variant="outline"
-                            className="border-amber-500/30 text-amber-500 bg-amber-500/10 gap-1"
+                            className="border-amber-500/30 bg-amber-500/10 text-amber-500"
                           >
-                            <Gavel className="h-3 w-3" /> Licitações
+                            {f.titulo}
                           </Badge>
-                        )}
+                        ))}
                       </div>
                     </div>
                   </CardHeader>
@@ -699,44 +746,72 @@ export default function AdminPage() {
               </Label>
             </div>
 
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="licitacoes_access"
-                checked={formData.licitacoes_access}
-                onCheckedChange={(checked) =>
-                  setFormData((prev) => ({ ...prev, licitacoes_access: checked as boolean }))
-                }
-              />
-              <Label htmlFor="licitacoes_access" className="font-medium">
-                Acesso ao Licitações
-              </Label>
-            </div>
-            <p className="-mt-1 text-xs text-muted-foreground">
-              Libera a ferramenta Licitações e cria a conta da pessoa lá no primeiro acesso. Não
-              depende de ser administrador.
-            </p>
+            {/*
+              TODAS as ferramentas, e como cada uma é liberada.
 
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="proposta_comercial_access"
-                checked={formData.proposta_comercial_access}
-                onCheckedChange={(checked) =>
-                  setFormData((prev) => ({ ...prev, proposta_comercial_access: checked as boolean }))
-                }
-              />
-              <Label htmlFor="proposta_comercial_access" className="font-medium">
-                Acesso à Proposta Comercial
-              </Label>
+              Antes havia duas caixas chumbadas aqui. `prn-hub` e
+              `controle-mensagens` já funcionavam por liberação pessoa a pessoa e
+              **só podiam ser liberadas por SQL** — ninguém tinha criado o botão.
+              Agora a lista sai de `lib/ferramentas/catalogo.ts`.
+
+              As que NÃO são pessoa a pessoa aparecem assim mesmo, só que sem
+              caixa e com a explicação. Mostrar o quadro inteiro evita a pergunta
+              "cadê a Gestão Médica?" — e marcar uma caixa ali abriria o menu
+              para uma tela que negaria, porque a regra dela vive no banco.
+            */}
+            <div className="space-y-1 pt-1">
+              <Label className="font-medium">Ferramentas</Label>
+              {CATALOGO_DE_FERRAMENTAS.map((f) => {
+                const marcavel = f.liberacao === 'pessoa' && f.chave
+                return (
+                  <div
+                    key={f.slug}
+                    className="flex items-start gap-2.5 rounded-lg px-1 py-1.5"
+                  >
+                    {marcavel ? (
+                      <Checkbox
+                        id={`ferramenta-${f.slug}`}
+                        className="mt-0.5"
+                        checked={formData.ferramentas[f.chave!] ?? false}
+                        onCheckedChange={(checked) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            ferramentas: { ...prev.ferramentas, [f.chave!]: checked as boolean },
+                          }))
+                        }
+                      />
+                    ) : (
+                      <span className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <Label
+                        htmlFor={marcavel ? `ferramenta-${f.slug}` : undefined}
+                        className={marcavel ? 'font-medium' : 'font-medium text-muted-foreground'}
+                      >
+                        {f.titulo}
+                      </Label>
+                      {!marcavel && (
+                        <Badge variant="outline" className="ml-2 text-[10px] font-normal">
+                          {ROTULO_DA_LIBERACAO[f.liberacao]}
+                        </Badge>
+                      )}
+                      {f.explicacao && (
+                        <p className="text-xs leading-relaxed text-muted-foreground">
+                          {f.explicacao}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+              {/*
+                Sem isto, marcar a caixa de um super-admin e ver "nada mudou" faz
+                a pessoa achar que a tela está quebrada.
+              */}
+              <p className="pt-1 text-xs text-muted-foreground">
+                Quem é super-administrador enxerga todas as ferramentas, marcadas ou não.
+              </p>
             </div>
-            {/* A frase sobre "histórico da equipe" saiu em 04/09/2026: ela
-                descrevia a tabela `pdf_proposta_comercial`, lida pela página
-                nativa que foi aposentada. O gerador agora é o app publicado,
-                embutido, com histórico próprio — e ele gera PDF, Word, Excel e
-                ZIP, não só PDF. */}
-            <p className="-mt-1 text-xs text-muted-foreground">
-              Libera o gerador de proposta comercial (PDF, Word, Excel e ZIP), com o histórico
-              de propostas do próprio sistema.
-            </p>
 
             {/* A seção aparece TAMBÉM para admin. Escondê-la fazia o cadastro
                 salvar sem nenhum aparelho, e quem não tem aparelho marcado não
