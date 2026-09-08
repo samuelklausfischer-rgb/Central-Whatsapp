@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Copy, Download, Loader2, MousePointerClick } from 'lucide-react'
+import { Copy, Download, Loader2, Mail, MousePointerClick } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { CardContent } from '@/components/ui/card'
@@ -17,6 +17,7 @@ import {
   AccordionTrigger,
 } from '@/components/ui/accordion'
 import { useToast } from '@/hooks/use-toast'
+import { useAuth } from '@/hooks/use-auth'
 import { cn } from '@/lib/utils'
 
 import { carregarAssets, type AssetsAssinatura } from '@/lib/assinaturas/assets'
@@ -24,6 +25,8 @@ import { montarSVG } from '@/lib/assinaturas/conceitos'
 import { htmlClicavel, htmlDaImagem } from '@/lib/assinaturas/html-clicavel'
 import { baixar, copiarHTML, rasterizar } from '@/lib/assinaturas/rasterizar'
 import { nomeDoArquivo, semAcento, type DadosAssinatura } from '@/lib/assinaturas/comuns'
+import { extrairImagensEmbutidas } from '@/lib/email/assinatura-embutida'
+import { getEmailPrefs, salvarEmailPrefs } from '@/services/email_prefs'
 import {
   APELIDOS_MARCA,
   CHAVES_MARCA,
@@ -60,6 +63,7 @@ function Preview({ svg, className }: { svg: string; className?: string }) {
 
 export default function Assinaturas() {
   const { toast } = useToast()
+  const { user } = useAuth()
   const [assets, setAssets] = useState<AssetsAssinatura | null>(null)
   const [erroAssets, setErroAssets] = useState<string | null>(null)
 
@@ -87,6 +91,29 @@ export default function Assinaturas() {
       .then(setAssets)
       .catch((e: Error) => setErroAssets(e.message))
   }, [])
+
+  /*
+    Os campos nascem com os SEUS dados.
+
+    Antes começavam num exemplo fixo ("Renata Albuquerque"), o que fazia sentido
+    quando a ferramenta só servia para montar a assinatura de outra pessoa. Desde
+    que existe "Usar no meu email", o caso mais comum é configurar a própria — e
+    apagar o exemplo campo a campo antes de começar era trabalho à toa.
+
+    Roda UMA VEZ, e só enquanto ninguém tocou no e-mail: quem já começou a
+    digitar não pode ver o que escreveu ser substituído.
+  */
+  const jaPreencheu = useRef(false)
+  useEffect(() => {
+    if (jaPreencheu.current || !user?.name || emailTocado.current) return
+    jaPreencheu.current = true
+    setNome(user.name)
+    if (user.email) {
+      setEmail(user.email)
+      emailTocado.current = true
+    }
+    if (user.department) setCargo(user.department)
+  }, [user])
 
   const dados = useMemo<DadosAssinatura>(
     () => ({
@@ -150,6 +177,47 @@ export default function Assinaturas() {
       const { url } = await rasterizar(montarSVG(d, assets!))
       baixar(url, nomeDoArquivo(d.nome))
     }, 'PNG baixado.')
+
+  /**
+   * Grava a assinatura de e-mail de quem está logado — a IMAGEM, igual à do lado.
+   *
+   * Começou usando a versão clicável, que é mais funcional. Trocamos em
+   * 08/09/2026 depois de ver as duas lado a lado: a clicável é 24% mais estreita,
+   * sem sombra e com fonte de sistema, e a diferença incomodou. Preço da
+   * fidelidade: telefone e e-mail viram pixel e ninguém copia.
+   *
+   * JPEG, NÃO PNG. O PNG em 2× desta assinatura dá 729 KB em base64 e viajaria em
+   * todo e-mail enviado — 20% do teto de anexo. Medido pixel a pixel, o JPEG q92
+   * fica em 106 KB com erro médio de 0,93 em 255. Ver `rasterizar.ts`.
+   *
+   * A imagem sai daqui como `data:` e vira `cid:`, porque Gmail remove imagem
+   * `data:` e o Outlook de mesa a bloqueia. Ver `lib/email/assinatura-embutida.ts`.
+   */
+  const usarNoMeuEmail = () =>
+    executar(async () => {
+      if (!user?.id) throw new Error('Sessão expirada. Entre no app de novo.')
+      const atuais = await getEmailPrefs(user.id)
+      if (
+        atuais.assinatura_html &&
+        !window.confirm('Você já tem uma assinatura de e-mail. Substituir por esta?')
+      ) {
+        return
+      }
+      const { url, largura } = await rasterizar(montarSVG(dados, assets!), 2, 'image/jpeg', 0.92)
+      // O `alt` é a única coisa que sobra se o cliente do destinatário bloquear
+      // imagens: vai o contato inteiro, não só o nome.
+      const alt = [dados.nome, MARCAS[dados.marca].nome, dados.telefone, dados.email]
+        .filter(Boolean)
+        .join(' — ')
+      const { html, imagens } = extrairImagensEmbutidas(
+        htmlDaImagem(url, largura, dados, MARCAS[dados.marca].nome, alt),
+      )
+      await salvarEmailPrefs(user.id, {
+        assinatura_html: html,
+        assinatura_imagens: imagens,
+        assinatura_origem: 'gerador',
+      })
+    }, 'Pronto: esta é a sua assinatura de e-mail.')
 
   const copiarClicavel = () =>
     executar(
@@ -325,11 +393,17 @@ export default function Assinaturas() {
                     <MousePointerClick className="h-4 w-4" />
                     Copiar versão clicável
                   </Button>
+                  <Button variant="secondary" onClick={usarNoMeuEmail} disabled={ocupado}>
+                    <Mail className="h-4 w-4" />
+                    Usar no meu email
+                  </Button>
                 </div>
                 <p className="text-xs text-muted-foreground leading-relaxed">
                   <b>Copiar assinatura</b> leva a imagem exatamente como aparece ao lado. A{' '}
                   <b>versão clicável</b> troca por texto de verdade com links — mais funcional, porém
-                  sem sombra e sem a fonte Poppins, que o Outlook não carrega.
+                  sem sombra e sem a fonte Poppins, que o Outlook não carrega.{' '}
+                  <b>Usar no meu email</b> guarda a imagem — esta mesma do lado — como sua
+                  assinatura no Email Hub: ela passa a sair sozinha em tudo que você enviar por lá.
                 </p>
               </CardContent>
             </GlassCard>

@@ -15,6 +15,15 @@ export interface Profile {
    * entre desktop, web e PWA — ver `hooks/use-notification-prefs.ts`.
    */
   notification_prefs?: Record<string, { sound: boolean; background: boolean }>
+  /**
+   * Ajustes pessoais do Email Hub. Hoje só a assinatura.
+   *
+   * ⚠️ `signature`, logo acima, é OUTRA COISA: é a do WhatsApp, texto puro,
+   * aplicada dentro da RPC `send_whatsapp_message`. Esta é HTML e vale só para
+   * e-mail. Não mora em `email_accounts.signature` porque aquela linha é
+   * compartilhada pelo setor inteiro e só admin escreve nela.
+   */
+  email_prefs?: { assinatura_html?: string }
   created_at: string
   updated_at: string
 }

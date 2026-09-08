@@ -19,6 +19,15 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
  *   authorize    — devolve a URL de consentimento da Microsoft
  *   callback     — retorno do consentimento (o navegador vem parar AQUI)
  *   desconectar  — apaga a caixa e o token
+ *   pastas       — espelha a árvore de pastas do Outlook
+ *   importar     — carga inicial dos últimos N dias
+ *   sincronizar  — varredura delta (pg_cron, 15 min)
+ *   assinar      — cria o aviso em tempo real da Microsoft
+ *   renovar      — renova os avisos que vão vencer (pg_cron, 6h)
+ *   avisar       — a Microsoft chama AQUI quando algo muda
+ *   anexo        — devolve o binário de um anexo, sob demanda
+ *   enviar       — envia, responde, responde a todos e encaminha (08/09/2026)
+ *   marcar       — lido/não lido e estrela, com efeito no Outlook (08/09/2026)
  */
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || ''
@@ -467,13 +476,157 @@ async function marcarPastasDeSistema(accountId: string, token: string, erros: st
   }
 }
 
-/** graph_id da pasta -> id da nossa linha. */
-async function mapaDePastas(accountId: string): Promise<Map<string, string>> {
+/** O que sabemos de uma pasta a partir do `parentFolderId` que o Graph manda. */
+interface PastaConhecida {
+  id: string
+  /** `inbox`, `sentitems`, `drafts`… — nulo em pasta criada pela pessoa. */
+  apelido: string | null
+}
+
+/**
+ * graph_id da pasta -> nossa linha.
+ *
+ * O `apelido` entrou em 08/09/2026 e existe por um motivo só: descobrir se a
+ * mensagem está em Itens Enviados. Antes disso a classificação comparava
+ * `msg.parentFolderId === 'sentitems'` — e o Graph manda um ID OPACO ali, nunca
+ * o apelido, então a comparação nunca era verdadeira. Resultado medido no banco:
+ * os 39 e-mails da pasta Itens Enviados estavam todos marcados como `inbound`,
+ * ou seja, o que a pessoa mandou aparecia como se tivessem mandado para ela.
+ */
+async function mapaDePastas(accountId: string): Promise<Map<string, PastaConhecida>> {
   const r = await rest(`email_folders?account_id=eq.${encodeURIComponent(accountId)}&select=id,graph_id,well_known_name`)
-  const mapa = new Map<string, string>()
+  const mapa = new Map<string, PastaConhecida>()
   if (!r.ok) return mapa
-  for (const f of await r.json()) if (f.graph_id) mapa.set(f.graph_id, f.id)
+  for (const f of await r.json()) {
+    if (f.graph_id) mapa.set(f.graph_id, { id: f.id, apelido: f.well_known_name ?? null })
+  }
   return mapa
+}
+
+/**
+ * O endereço da própria caixa, usado só para classificar entrada/saída.
+ *
+ * Existe porque a pasta nem sempre está no mapa: hoje 3 das 5 contas ativas têm
+ * ZERO pastas sincronizadas (a rota `pastas` não tem gatilho no app nem no cron)
+ * e 804 dos 1.455 e-mails estão com `folder_id` nulo. Nesses casos o apelido da
+ * pasta não responde nada, e o remetente é o que sobra de confiável.
+ */
+async function enderecoDaConta(accountId: string): Promise<string | null> {
+  const r = await rest(`email_accounts?id=eq.${encodeURIComponent(accountId)}&select=email`)
+  if (!r.ok) return null
+  const linhas = await r.json()
+  const e = Array.isArray(linhas) ? linhas[0]?.email : null
+  return typeof e === 'string' ? e.toLowerCase() : null
+}
+
+/**
+ * Cola a assinatura PESSOAL de quem está enviando no fim do corpo.
+ *
+ * Acontece no SERVIDOR, e não no navegador, pelo mesmo motivo que a assinatura
+ * do WhatsApp é aplicada dentro da RPC `send_whatsapp_message`: assim ela não
+ * depende de o cliente lembrar, e ninguém consegue enviar em nome de outra
+ * pessoa com a assinatura dela.
+ *
+ * A assinatura vem de `profiles.email_prefs`, do usuário da requisição — nunca
+ * de `email_accounts.signature`, que é uma linha só compartilhada pelo setor
+ * inteiro e faria todo mundo assinar igual.
+ *
+ * Em resposta e encaminhamento, o Graph acrescenta a citação do original DEPOIS
+ * do que mandamos — então a assinatura cai no lugar certo sozinha: abaixo do
+ * texto da pessoa e acima do histórico.
+ *
+ * Falha de leitura devolve o corpo intacto de propósito. E-mail sem assinatura
+ * incomoda; e-mail que não sai por causa da assinatura é muito pior.
+ */
+async function comAssinatura(
+  corpoHtml: string,
+  userId: string | null,
+): Promise<{ corpo: string; embutidas: Record<string, unknown>[] }> {
+  const semAssinatura = { corpo: corpoHtml, embutidas: [] as Record<string, unknown>[] }
+  if (!userId) return semAssinatura
+  try {
+    const r = await rest(`profiles?id=eq.${encodeURIComponent(userId)}&select=email_prefs`)
+    if (!r.ok) return semAssinatura
+    const linhas = await r.json()
+    const prefs = (Array.isArray(linhas) ? linhas[0]?.email_prefs : null) ?? {}
+    const assinatura = String(prefs.assinatura_html ?? '').trim()
+    if (!assinatura) return semAssinatura
+
+    /*
+      As imagens da assinatura vão como anexo EMBUTIDO.
+
+      O corpo guardado já referencia `cid:`, nunca `data:` — Gmail remove imagem
+      `data:` e o Outlook de mesa a bloqueia. `isInline` + `contentId` é o mesmo
+      caminho que o próprio Outlook usa, e é o que faz o logotipo aparecer sem o
+      destinatário precisar clicar em "exibir imagens".
+    */
+    const imagens = Array.isArray(prefs.assinatura_imagens) ? prefs.assinatura_imagens : []
+    const embutidas = imagens
+      .filter((i: any) => i?.cid && i?.base64)
+      .map((i: any) => ({
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        name: String(i.nome ?? `${i.cid}.png`),
+        contentType: String(i.tipo ?? 'image/png'),
+        contentBytes: String(i.base64),
+        isInline: true,
+        contentId: String(i.cid),
+      }))
+
+    // Sem `<hr>`: a assinatura já traz a própria separação, e uma régua nossa por
+    // cima aparece como risco solto no cliente de quem recebe.
+    return { corpo: `${corpoHtml}<br><br>${assinatura}`, embutidas }
+  } catch {
+    return semAssinatura
+  }
+}
+
+function ehDaPropriaCaixa(remetente: unknown, enderecoDaCaixa: string | null): boolean {
+  if (!enderecoDaCaixa || typeof remetente !== 'string') return false
+  return remetente.toLowerCase() === enderecoDaCaixa
+}
+
+/**
+ * Teto do anexo em UMA requisição ao Graph.
+ *
+ * O limite real da chamada é ~4 MB de corpo, e base64 infla o binário em ~33%.
+ * 3 MB de arquivo original chegam a ~4 MB codificados — por isso o teto é sobre
+ * o tamanho JÁ codificado, que é o que de fato viaja. Acima disso a Microsoft
+ * exige sessão de upload, que ficou fora desta entrega: melhor recusar com uma
+ * frase clara do que estourar com erro cru da Microsoft.
+ */
+const TETO_ANEXOS_B64 = 3.5 * 1024 * 1024
+
+function montarAnexos(
+  lista: unknown[],
+  /**
+   * Bytes já ocupados antes de contar os anexos da pessoa — hoje, a assinatura.
+   * Sem somá-los, um arquivo de 2,9 MB passaria aqui e só estouraria depois, no
+   * Graph, com erro cru e sem explicação.
+   */
+  jaOcupado = 0,
+): { lista: Record<string, unknown>[]; erro?: string } {
+  const saida: Record<string, unknown>[] = []
+  let total = jaOcupado
+  for (const a of lista) {
+    const item = a as Record<string, unknown>
+    const nome = String(item?.nome ?? '').trim()
+    const conteudo = String(item?.base64 ?? '')
+    if (!nome || !conteudo) return { lista: [], erro: 'Anexo sem nome ou sem conteúdo.' }
+    total += conteudo.length
+    if (total > TETO_ANEXOS_B64) {
+      return {
+        lista: [],
+        erro: 'Os anexos passam de 3 MB no total. Envie um arquivo menor ou mande um link.',
+      }
+    }
+    saida.push({
+      '@odata.type': '#microsoft.graph.fileAttachment',
+      name: nome,
+      contentType: String(item?.tipo ?? 'application/octet-stream'),
+      contentBytes: conteudo,
+    })
+  }
+  return { lista: saida }
 }
 
 function enderecos(lista: unknown): string[] {
@@ -494,9 +647,12 @@ function enderecos(lista: unknown): string[] {
 async function gravarMensagem(
   accountId: string,
   msg: Record<string, any>,
-  pastas: Map<string, string>,
+  pastas: Map<string, PastaConhecida>,
+  /** Endereço da própria caixa — só para decidir entrada/saída. Ver `ehDaPropriaCaixa`. */
+  enderecoDaCaixa: string | null,
 ): Promise<{ id: string | null; novo: boolean }> {
-  const folderId = msg.parentFolderId ? pastas.get(msg.parentFolderId) ?? null : null
+  const pasta = msg.parentFolderId ? pastas.get(msg.parentFolderId) ?? null : null
+  const folderId = pasta?.id ?? null
   const de = msg.from?.emailAddress ?? msg.sender?.emailAddress ?? {}
   const ehHtml = msg.body?.contentType === 'html'
 
@@ -509,7 +665,16 @@ async function gravarMensagem(
     conversation_id: msg.conversationId ?? null,
     thread_id: msg.conversationId ?? null,
     // Rascunho e enviado saem daqui; todo o resto chegou.
-    direction: msg.isDraft || msg.parentFolderId === 'sentitems' ? 'outbound' : 'inbound',
+    //
+    // A pasta é conferida pelo APELIDO da nossa linha, não pelo `parentFolderId`
+    // cru: o Graph manda um ID opaco, então o `=== 'sentitems'` que existia aqui
+    // nunca era verdadeiro e todo e-mail enviado entrava como recebido.
+    // Quando a pasta é desconhecida (mensagem que chegou antes do mapa existir),
+    // o remetente decide — é o que resta de confiável.
+    direction:
+      msg.isDraft || pasta?.apelido === 'sentitems' || ehDaPropriaCaixa(de.address, enderecoDaCaixa)
+        ? 'outbound'
+        : 'inbound',
     from_email: de.address ?? '(desconhecido)',
     from_name: de.name ?? null,
     to_emails: enderecos(msg.toRecipients),
@@ -610,6 +775,7 @@ async function jaEstaRodando(accountId: string): Promise<boolean> {
 async function importarHistorico(accountId: string, token: string, dias: number) {
   const desde = new Date(Date.now() - dias * 86_400_000).toISOString()
   const pastas = await mapaDePastas(accountId)
+  const meuEndereco = await enderecoDaConta(accountId)
   let novos = 0
 
   for (const [graphFolderId] of pastas) {
@@ -625,7 +791,7 @@ async function importarHistorico(accountId: string, token: string, dias: number)
       const { ok, dados } = await graph(token, url)
       if (!ok) break
       for (const msg of dados.value ?? []) {
-        const { id } = await gravarMensagem(accountId, msg, pastas)
+        const { id } = await gravarMensagem(accountId, msg, pastas, meuEndereco)
         if (id) {
           novos++
           if (msg.hasAttachments) await registrarAnexos(id, msg.id, token)
@@ -665,6 +831,7 @@ async function varrerDelta(accountId: string, token: string) {
   )
   if (!r.ok) return 0
   const pastas = await mapaDePastas(accountId)
+  const meuEndereco = await enderecoDaConta(accountId)
   let mudou = 0
 
   for (const f of await r.json()) {
@@ -684,7 +851,7 @@ async function varrerDelta(accountId: string, token: string) {
           mudou++
           continue
         }
-        const { id } = await gravarMensagem(accountId, msg, pastas)
+        const { id } = await gravarMensagem(accountId, msg, pastas, meuEndereco)
         if (id) {
           mudou++
           if (msg.hasAttachments) await registrarAnexos(id, msg.id, token)
@@ -867,6 +1034,7 @@ Deno.serve(async (req) => {
       if (!token) continue
 
       const pastas = await mapaDePastas(accountId)
+  const meuEndereco = await enderecoDaConta(accountId)
       const corrida = await abrirCorrida(accountId, 'aviso')
       let novos = 0
       for (const idMsg of ids.slice(0, 50)) {
@@ -875,7 +1043,7 @@ Deno.serve(async (req) => {
           `${GRAPH}/me/messages/${idMsg}?$select=${CAMPOS_DA_MENSAGEM}`,
         )
         if (!ok) continue
-        const { id } = await gravarMensagem(accountId, dados, pastas)
+        const { id } = await gravarMensagem(accountId, dados, pastas, meuEndereco)
         if (id) {
           novos++
           if (dados.hasAttachments) await registrarAnexos(id, dados.id, token)
@@ -1153,6 +1321,247 @@ Deno.serve(async (req) => {
    * É o outro lado da decisão de não guardar anexo: nada ocupa disco, e o
    * conteúdo é sempre o que está no Outlook agora.
    */
+  /**
+   * ENVIAR — email novo, resposta, resposta a todos e encaminhamento.
+   *
+   * Nasceu em 08/09/2026 para substituir a edge function `email-send`, que
+   * **nunca enviou um e-mail**: ela usa SMTP e recusa com 400 quando a conta não
+   * tem `smtp_host` (`email-send/index.ts:123`) — e NENHUMA das contas tem, porque
+   * o fluxo OAuth não preenche esse campo e não existe tela para isso. Ela ainda
+   * lê `imap_password_enc` e `oauth_access_token`, colunas apagadas do banco na
+   * migration `20260826124852`. Medição que fechou o diagnóstico: os 104 e-mails
+   * de saída no banco têm todos `graph_id`, ou seja, vieram do Graph; nenhum saiu
+   * do app.
+   *
+   * Mora AQUI, e não numa função nova, porque é aqui que já vivem as duas coisas
+   * que a `email-send` não tinha: a renovação de token (`tokenValido`) e a
+   * checagem de acesso à caixa (`podeVerConta`). A `email-send` decodificava o
+   * JWT SEM VERIFICAR e nunca conferia acesso — só não vazou porque falhava antes.
+   *
+   * POR QUE `reply`/`replyAll`/`forward` EM VEZ DE MONTAR TUDO NA MÃO: o Graph
+   * costura a conversa sozinho (`In-Reply-To`/`References`/`conversationId`), o
+   * `replyAll` acerta os destinatários incluindo Cc, e o `forward` **leva os
+   * anexos do original**. Fazer isso à mão seria reimplementar RFC 5322 para
+   * chegar num resultado pior.
+   *
+   * NÃO gravamos cópia local do enviado. `saveToSentItems` põe a mensagem em
+   * Itens Enviados e ela volta pelo aviso em tempo real com o `graph_id` de
+   * verdade; inserir aqui também produziria a mesma mensagem duas vezes na lista,
+   * porque o upsert casa por `(account_id, graph_id)` e nós não temos o id no
+   * momento do envio — o Graph responde 202 sem corpo.
+   */
+  if (rota === 'enviar') {
+    const c = await corpoJson()
+    const accountId = String(c.account_id ?? '').trim()
+    if (!accountId) return json({ error: 'Falta dizer de qual caixa.' }, 400)
+    if (!(await podeVerConta(accountId))) {
+      return json({ error: 'Você não tem acesso a esta caixa.' }, 403)
+    }
+
+    const token = await tokenValido(accountId, s)
+    if (!token) return json({ error: 'Conexão expirada — reconecte a caixa.' }, 401)
+
+    const modo = String(c.modo ?? 'novo') as 'novo' | 'responder' | 'responder_todos' | 'encaminhar'
+    const { corpo: corpoHtml, embutidas } = await comAssinatura(String(c.body_html ?? ''), usuario)
+    const destinatarios = (Array.isArray(c.to) ? c.to : []).map(String).filter(Boolean)
+    const copia = (Array.isArray(c.cc) ? c.cc : []).map(String).filter(Boolean)
+    const copiaOculta = (Array.isArray(c.bcc) ? c.bcc : []).map(String).filter(Boolean)
+
+    const pesoDaAssinatura = embutidas.reduce(
+      (t, a) => t + String(a.contentBytes ?? '').length,
+      0,
+    )
+    const anexos = montarAnexos(Array.isArray(c.anexos) ? c.anexos : [], pesoDaAssinatura)
+    if (anexos.erro) return json({ error: anexos.erro }, 400)
+    // As imagens da assinatura entram na MESMA lista dos anexos da pessoa: para o
+    // Graph é tudo `attachments`; o que as separa é o `isInline`.
+    const todosOsAnexos = [...anexos.lista, ...embutidas]
+
+    // Nas três ações sobre um e-mail existente, o Graph precisa do `graph_id`
+    // dele — que é nosso ponteiro para a mensagem na Microsoft.
+    let graphIdOriginal: string | null = null
+    if (modo !== 'novo') {
+      const idOriginal = String(c.reply_to_email_id ?? '').trim()
+      if (!idOriginal) return json({ error: 'Falta dizer a qual e-mail responder.' }, 400)
+      const r = await rest(`emails?id=eq.${encodeURIComponent(idOriginal)}&select=graph_id,account_id`)
+      const orig = r.ok ? (await r.json())[0] : null
+      if (!orig?.graph_id) return json({ error: 'E-mail original não encontrado na Microsoft.' }, 404)
+      if (orig.account_id !== accountId) {
+        return json({ error: 'O e-mail original é de outra caixa.' }, 400)
+      }
+      graphIdOriginal = String(orig.graph_id)
+    }
+
+    const paraGraph = (e: string) => ({ emailAddress: { address: e } })
+    const mensagem: Record<string, unknown> = {
+      body: { contentType: 'HTML', content: corpoHtml },
+      ...(destinatarios.length ? { toRecipients: destinatarios.map(paraGraph) } : {}),
+      ...(copia.length ? { ccRecipients: copia.map(paraGraph) } : {}),
+      ...(copiaOculta.length ? { bccRecipients: copiaOculta.map(paraGraph) } : {}),
+      ...(todosOsAnexos.length ? { attachments: todosOsAnexos } : {}),
+    }
+
+    /**
+     * Marca o original como respondido — estado NOSSO, que não existe no Graph e
+     * por isso não corre risco de eco. Falhar aqui não desfaz o envio, que já
+     * aconteceu; daí o erro ser engolido de propósito.
+     */
+    const marcarRespondido = async () => {
+      if (!graphIdOriginal || modo === 'encaminhar') return
+      const idOriginal = String(c.reply_to_email_id ?? '')
+      await rest(`email_states?email_id=eq.${encodeURIComponent(idOriginal)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          status: 'replied',
+          responded_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }),
+      }).catch(() => {})
+    }
+
+    const post = (u: string, corpo: unknown) =>
+      fetch(u, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(corpo),
+      })
+    const recusa = async (r: Response) =>
+      json(
+        {
+          error: 'A Microsoft recusou o envio.',
+          detalhe: (await r.text().catch(() => '')).slice(0, 300),
+          status: r.status,
+        },
+        502,
+      )
+
+    /*
+      ANEXO EM RESPOSTA/ENCAMINHAMENTO VAI PELO CAMINHO DO RASCUNHO.
+
+      A chamada de uma tacada só (`/reply`, `/replyAll`, `/forward`) aceita um
+      objeto `message`, mas o campo `attachments` dentro dele é tratado de forma
+      inconsistente — em parte das contas o e-mail sai SEM o arquivo, e sem erro
+      nenhum. Enviar em silêncio um "segue o documento" sem o documento é o pior
+      defeito possível numa ferramenta de e-mail.
+
+      Com `createReply`/`createReplyAll`/`createForward` ganhamos o id do
+      rascunho, penduramos os anexos um a um e só então mandamos. São três idas
+      em vez de uma, e por isso só pagamos esse preço quando há anexo.
+
+      ATENÇÃO AO CUSTO, que mudou em 08/09/2026: a assinatura gerada traz
+      imagens embutidas (o painel da marca e os ícones), e elas contam como
+      anexo. Ou seja, quem tem assinatura com imagem faz estas três idas em TODA
+      resposta, não só quando manda arquivo. É o preço de a imagem chegar
+      inteira — e é o mesmo caminho que o Outlook percorre.
+    */
+    if (modo !== 'novo' && todosOsAnexos.length > 0) {
+      const criar = modo === 'encaminhar'
+        ? 'createForward'
+        : modo === 'responder_todos'
+          ? 'createReplyAll'
+          : 'createReply'
+      const { toRecipients: _semDestino, attachments: _semAnexos, ...corpoSemAnexo } = mensagem
+      const rascunho = await post(`${GRAPH}/me/messages/${graphIdOriginal}/${criar}`, {
+        message: modo === 'responder_todos' ? corpoSemAnexo : { ...corpoSemAnexo, ...(destinatarios.length ? { toRecipients: destinatarios.map(paraGraph) } : {}) },
+      })
+      if (!rascunho.ok) return await recusa(rascunho)
+      const draftId = String(((await rascunho.json()) as Record<string, unknown>).id ?? '')
+      if (!draftId) return json({ error: 'A Microsoft não devolveu o rascunho.' }, 502)
+
+      for (const anexo of todosOsAnexos) {
+        const r = await post(`${GRAPH}/me/messages/${draftId}/attachments`, anexo)
+        if (!r.ok) return await recusa(r)
+      }
+      const enviado = await post(`${GRAPH}/me/messages/${draftId}/send`, {})
+      if (!enviado.ok) return await recusa(enviado)
+      await marcarRespondido()
+      return json({ ok: true })
+    }
+
+    let alvo: string
+    let carga: Record<string, unknown>
+    if (modo === 'novo') {
+      if (!destinatarios.length) return json({ error: 'Sem destinatário.' }, 400)
+      const assunto = String(c.subject ?? '').trim()
+      if (!assunto) return json({ error: 'Sem assunto.' }, 400)
+      alvo = `${GRAPH}/me/sendMail`
+      carga = { message: { ...mensagem, subject: assunto }, saveToSentItems: true }
+    } else if (modo === 'encaminhar') {
+      if (!destinatarios.length) return json({ error: 'Sem destinatário.' }, 400)
+      alvo = `${GRAPH}/me/messages/${graphIdOriginal}/forward`
+      carga = { message: mensagem, comment: '' }
+    } else {
+      // `reply` e `replyAll`: o Graph resolve destinatário e assunto. Mandar
+      // `toRecipients` no `replyAll` seria discordar dele — deixamos a mensagem
+      // com o corpo e os anexos, e nada mais.
+      alvo = `${GRAPH}/me/messages/${graphIdOriginal}/${modo === 'responder_todos' ? 'replyAll' : 'reply'}`
+      const { toRecipients: _ignorado, ...semDestinatarios } = mensagem
+      carga = { message: modo === 'responder_todos' ? semDestinatarios : mensagem, comment: '' }
+    }
+
+    const envio = await post(alvo, carga)
+    if (!envio.ok) return await recusa(envio)
+
+    await marcarRespondido()
+    return json({ ok: true })
+  }
+
+  /**
+   * MARCAR — lido/não lido e estrela, com efeito NA MICROSOFT.
+   *
+   * Antes disto `markEmailRead` só fazia `UPDATE emails` local, e a varredura
+   * delta seguinte sobrescrevia com o valor do Outlook (`gravarMensagem` grava
+   * `is_read: Boolean(msg.isRead)`). Na prática: a pessoa lia trinta e-mails e a
+   * caixa voltava a dizer trinta não lidos. O contador da pasta nem chegava a
+   * baixar — ele vem de `email_folders.unread_count`, que é o número do Outlook.
+   *
+   * O `PATCH` no Graph resolve os dois de uma vez: a marcação sobrevive ao delta
+   * porque vira a verdade lá também, e o contador da pasta acompanha.
+   */
+  if (rota === 'marcar') {
+    const c = await corpoJson()
+    const emailId = String(c.email_id ?? '').trim()
+    if (!emailId) return json({ error: 'Falta dizer qual e-mail.' }, 400)
+
+    const r = await rest(`emails?id=eq.${encodeURIComponent(emailId)}&select=graph_id,account_id`)
+    const alvo = r.ok ? (await r.json())[0] : null
+    if (!alvo) return json({ error: 'E-mail não encontrado.' }, 404)
+    if (!(await podeVerConta(alvo.account_id))) return json({ error: 'Sem acesso.' }, 403)
+
+    const mudanca: Record<string, unknown> = {}
+    if (typeof c.is_read === 'boolean') mudanca.isRead = c.is_read
+    if (typeof c.is_starred === 'boolean') {
+      mudanca.flag = { flagStatus: c.is_starred ? 'flagged' : 'notFlagged' }
+    }
+    if (Object.keys(mudanca).length === 0) return json({ error: 'Nada para mudar.' }, 400)
+
+    // Sem `graph_id` a mensagem não existe na Microsoft (só pode ser uma linha
+    // antiga): grava só aqui em vez de recusar, que é o que a pessoa espera.
+    if (alvo.graph_id) {
+      const token = await tokenValido(alvo.account_id, s)
+      if (!token) return json({ error: 'Conexão expirada — reconecte a caixa.' }, 401)
+      const p = await fetch(`${GRAPH}/me/messages/${alvo.graph_id}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(mudanca),
+      })
+      if (!p.ok) {
+        const detalhe = (await p.text().catch(() => '')).slice(0, 200)
+        return json({ error: 'A Microsoft recusou a marcação.', detalhe }, 502)
+      }
+    }
+
+    const local: Record<string, unknown> = {}
+    if (typeof c.is_read === 'boolean') local.is_read = c.is_read
+    if (typeof c.is_starred === 'boolean') local.is_starred = c.is_starred
+    await rest(`emails?id=eq.${encodeURIComponent(emailId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(local),
+    })
+
+    return json({ ok: true })
+  }
+
   if (rota === 'anexo') {
     const anexoId = url.searchParams.get('id') || ''
     if (!anexoId) return json({ error: 'Falta o anexo.' }, 400)

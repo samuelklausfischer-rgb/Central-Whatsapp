@@ -61,8 +61,25 @@ export function htmlClicavel(d: DadosAssinatura, a: AssetsAssinatura): string {
  </tr></table>`
 }
 
-/** A assinatura como imagem — o que "Copiar assinatura" põe no e-mail. */
-export function htmlDaImagem(dataUrl: string, largura: number, d: DadosAssinatura, nomeMarca: string): string {
-  return `<img src="${dataUrl}" width="${largura}" alt="${esc(d.nome)} — ${esc(nomeMarca)}"
+/**
+ * A assinatura como imagem — o que "Copiar assinatura" põe no e-mail.
+ *
+ * `alt` é opcional e o padrão continua sendo "Nome — Marca". A assinatura de
+ * e-mail passa um texto mais completo: quando o destinatário bloqueia imagens,
+ * o `alt` é a ÚNICA coisa que sobra da assinatura inteira, e um nome solto não
+ * diz telefone nem endereço.
+ *
+ * Repare que não há `height`: só `width` e `max-width:100%`. É o que faz a
+ * imagem encolher proporcionalmente em tela estreita, em vez de achatar.
+ */
+export function htmlDaImagem(
+  dataUrl: string,
+  largura: number,
+  d: DadosAssinatura,
+  nomeMarca: string,
+  alt?: string,
+): string {
+  const texto = alt ?? `${d.nome} — ${nomeMarca}`
+  return `<img src="${dataUrl}" width="${largura}" alt="${esc(texto)}"
     style="display:block;width:${largura}px;max-width:100%;border:0;">`
 }

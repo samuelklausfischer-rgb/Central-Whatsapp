@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase/client'
 import type { Email, EmailFilters } from '@/lib/supabase/email-types'
+import { appEnv } from '@/lib/env'
 
 /**
  * Colunas da LISTA — de propósito sem `body_html` e `body_text`.
@@ -127,20 +128,47 @@ export async function getThreadEmails(thread_id: string): Promise<Email[]> {
   return data ?? []
 }
 
+/**
+ * Chama uma rota da edge function `email-microsoft`.
+ *
+ * Envio e marcação passam por lá desde 08/09/2026 porque é onde moram o token da
+ * Microsoft e a checagem de acesso à caixa. O navegador nunca vê o token.
+ */
+async function chamarEmailMicrosoft(
+  rota: 'enviar' | 'marcar',
+  corpo: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) throw new Error('Sessão expirada. Entre no app de novo.')
+
+  const resp = await fetch(`${appEnv.VITE_SUPABASE_URL}/functions/v1/email-microsoft/${rota}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify(corpo),
+  })
+  const resultado = await resp.json().catch(() => ({}))
+  if (!resp.ok) throw new Error(String(resultado.error || 'A Microsoft não respondeu.'))
+  return resultado
+}
+
+/**
+ * Marcar como lido, DE VERDADE.
+ *
+ * Antes isto era um `update` direto na tabela, e não durava: a varredura delta
+ * seguinte trazia o valor do Outlook por cima. A pessoa lia trinta e-mails e a
+ * caixa voltava a dizer trinta. Agora o `PATCH` vai primeiro para a Microsoft —
+ * e é por isso que o contador da pasta finalmente baixa, já que ele é o número
+ * dela, não o nosso.
+ */
 export async function markEmailRead(id: string, is_read: boolean): Promise<void> {
-  const { error } = await supabase
-    .from('emails')
-    .update({ is_read })
-    .eq('id', id)
-  if (error) throw error
+  await chamarEmailMicrosoft('marcar', { email_id: id, is_read })
 }
 
 export async function markEmailStarred(id: string, is_starred: boolean): Promise<void> {
-  const { error } = await supabase
-    .from('emails')
-    .update({ is_starred })
-    .eq('id', id)
-  if (error) throw error
+  await chamarEmailMicrosoft('marcar', { email_id: id, is_starred })
 }
 
 export async function archiveEmail(id: string): Promise<void> {
@@ -170,74 +198,43 @@ export async function getUnreadCount(account_id: string): Promise<number> {
   return count ?? 0
 }
 
-// Envia email via Edge Function email-send
+/** Um anexo já lido do disco, pronto para viajar. */
+export interface AnexoParaEnviar {
+  nome: string
+  tipo: string
+  /** Conteúdo em base64, SEM o prefixo `data:`. */
+  base64: string
+}
+
+export type ModoDeEnvio = 'novo' | 'responder' | 'responder_todos' | 'encaminhar'
+
+/**
+ * Envia um e-mail pela caixa da Microsoft.
+ *
+ * Trocou a edge function `email-send` em 08/09/2026. Aquela usava SMTP e recusava
+ * toda conta sem `smtp_host` — que é TODA conta, porque o OAuth da Microsoft não
+ * preenche esse campo. Na prática o botão Enviar nunca funcionou uma vez.
+ *
+ * `modo` decide a chamada do lado de lá, e a escolha não é cosmética:
+ *  - `responder` / `responder_todos` mantêm a conversa costurada pelo Outlook,
+ *    sem precisarmos montar `In-Reply-To`/`References` na mão;
+ *  - `responder_todos` acerta os destinatários incluindo quem estava em cópia,
+ *    que a versão antiga simplesmente descartava;
+ *  - `encaminhar` leva os anexos do original junto — antes eles se perdiam.
+ *
+ * Não devolve o e-mail enviado: o Graph responde 202 sem corpo. A cópia aparece
+ * sozinha em Itens Enviados e chega aqui pelo aviso em tempo real.
+ */
 export async function sendEmail(payload: {
   account_id: string
-  to: string[]
+  modo?: ModoDeEnvio
+  to?: string[]
   cc?: string[]
   bcc?: string[]
-  subject: string
+  subject?: string
   body_html: string
-  body_text?: string
   reply_to_email_id?: string
-  scheduled_message_id?: string
-}): Promise<Email> {
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session) throw new Error('Usuário não autenticado')
-
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-  const resp = await fetch(`${supabaseUrl}/functions/v1/email-send`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${session.access_token}`,
-    },
-    body: JSON.stringify(payload),
-  })
-
-  const result = await resp.json()
-  if (!resp.ok) {
-    throw new Error(result.error || 'Falha ao enviar email')
-  }
-
-  return result.email as Email
-}
-
-/*
-  Etiquetas do e-mail.
-
-  Estas três funções gravavam em `contact_tags` + `labels`, que são do WhatsApp
-  — a coluna `contact_tags.email_id` existe justamente para isso. Nunca chegou a
-  ser usada (0 vínculos de e-mail em 26/08/2026), e a separação foi feita
-  porque as 4 etiquetas de lá são de conversa: `MEDICO`, `TÉCNICO CUIABÁ`,
-  `UN. KETLIN`. Elas apareceriam como opção ao etiquetar um boleto, e as de
-  e-mail poluiriam a tela de conversas.
-
-  Agora apontam para `email_etiquetas` / `email_etiqueta_itens`. A lógica mais
-  rica (definir a lista inteira de uma vez, criar etiqueta) mora em
-  `services/email_organizacao.ts`.
-*/
-export async function applyEmailLabel(email_id: string, etiqueta_id: string): Promise<void> {
-  const { error } = await supabase
-    .from('email_etiqueta_itens')
-    .insert({ email_id, etiqueta_id })
-  if (error && error.code !== '23505') throw error // ignora duplicata
-}
-
-export async function removeEmailLabel(email_id: string, etiqueta_id: string): Promise<void> {
-  const { error } = await supabase
-    .from('email_etiqueta_itens')
-    .delete()
-    .eq('email_id', email_id)
-    .eq('etiqueta_id', etiqueta_id)
-  if (error) throw error
-}
-
-export async function getEmailLabels(email_id: string) {
-  const { data, error } = await supabase
-    .from('email_etiqueta_itens')
-    .select('etiqueta_id, email_etiquetas(id, nome, cor)')
-    .eq('email_id', email_id)
-  if (error) throw error
-  return data ?? []
+  anexos?: AnexoParaEnviar[]
+}): Promise<void> {
+  await chamarEmailMicrosoft('enviar', { modo: 'novo', ...payload })
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Mail, PenSquare, PanelLeftClose, PanelLeftOpen, Megaphone } from 'lucide-react'
+import { Mail, PenSquare, PanelLeftClose, PanelLeftOpen, Megaphone, Settings2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { AccountSwitcher } from '@/components/email/AccountSwitcher'
@@ -7,6 +7,7 @@ import { FolderTree } from '@/components/email/FolderTree'
 import { EmailList } from '@/components/email/EmailList'
 import { EmailReader } from '@/components/email/EmailReader'
 import { EmailComposer } from '@/components/email/EmailComposer'
+import { MeusAjustesDialog } from '@/components/email/MeusAjustesDialog'
 import { getEmailAccounts } from '@/services/email_accounts'
 import { getFolders } from '@/services/email_folders'
 import { getEmails, getEmail, searchEmails, markEmailRead, archiveEmail, markEmailStarred } from '@/services/emails'
@@ -103,6 +104,7 @@ export default function EmailHub() {
   const [replyToEmail, setReplyToEmail] = useState<Email | null>(null)
   const [forwardFromEmail, setForwardFromEmail] = useState<Email | null>(null)
   const [composerInitialBody, setComposerInitialBody] = useState('')
+  const [ajustesAbertos, setAjustesAbertos] = useState(false)
 
   // Resize panels
   const [sidebarW, setSidebarW] = useState(() =>
@@ -167,10 +169,23 @@ export default function EmailHub() {
   useEffect(() => {
     if (!selectedAccountId) return
     sessionStorage.setItem('emailSelectedAccountId', selectedAccountId)
-    getFolders(selectedAccountId).then(setFolders)
+    // Limpa AGORA e escolhe a pasta quando a lista chegar: sem o zerar imediato,
+    // a pasta da conta anterior continuaria selecionada durante a busca e a lista
+    // apareceria filtrada por uma pasta que não é desta caixa.
     setSelectedFolderId(null)
     setSelectedEmailId(null)
     setSelectedEmail(null)
+    getFolders(selectedAccountId).then((lista) => {
+      setFolders(lista)
+      // Abrir na CAIXA DE ENTRADA, não em "nada selecionado".
+      //
+      // Sem isto o hub abria com `folder_id = null`, que o serviço traduz para
+      // `.is('folder_id', null)` — ou seja, a lista de e-mails SEM PASTA. Hoje
+      // são 804 dos 1.455 no banco, uma mistura sem sentido nenhum para quem
+      // abre a tela, e nada parecido com uma caixa de entrada.
+      const entrada = lista.find((f) => f.well_known_name === 'inbox')
+      setSelectedFolderId(entrada?.id ?? null)
+    })
   }, [selectedAccountId])
 
   // Carregar emails ao mudar filtros
@@ -179,7 +194,12 @@ export default function EmailHub() {
     setIsLoadingEmails(true)
     try {
       const filters: EmailFilters = {
-        folder_id: selectedFolderId,
+        // `undefined` e `null` querem dizer coisas DIFERENTES no serviço:
+        // `undefined` não filtra por pasta, `null` pede as que não têm pasta.
+        // Aqui "nenhuma pasta escolhida" precisa ser o primeiro caso — inclusive
+        // porque 3 das 5 contas ativas ainda não têm pasta nenhuma espelhada, e
+        // filtrar por pasta nelas devolveria uma tela vazia.
+        folder_id: selectedFolderId ?? undefined,
       }
       const data = await getEmails(selectedAccountId, filters)
       setEmails(data)
@@ -454,6 +474,18 @@ export default function EmailHub() {
             >
               <PenSquare className="h-4 w-4" />
             </Button>
+            {/* Gêmeo do "Meus ajustes" do rodapé: sem ele, recolher as pastas
+                faria a assinatura sumir do alcance. */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setAjustesAbertos(true)}
+              title="Meus ajustes"
+              aria-label="Meus ajustes"
+              className="text-muted-foreground"
+            >
+              <Settings2 className="h-4 w-4" />
+            </Button>
           </div>
         ) : (
           <>
@@ -517,6 +549,26 @@ export default function EmailHub() {
                   <p>Nenhuma conta configurada</p>
                 </div>
               )}
+            </div>
+
+            {/*
+              Rodapé da barra de pastas, FORA da rolagem.
+
+              É onde o Outlook e o Gmail põem a engrenagem, e aqui era espaço
+              virgem: a árvore ia até o fim do painel e não havia nada abaixo.
+              Ficar fora do `overflow-y-auto` importa — numa caixa com trinta
+              pastas, um botão dentro da rolagem só aparece depois de rolar tudo.
+            */}
+            <div className="border-t border-border/60 p-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setAjustesAbertos(true)}
+                className="w-full justify-start gap-2 text-muted-foreground hover:text-foreground"
+              >
+                <Settings2 className="h-4 w-4" />
+                Meus ajustes
+              </Button>
             </div>
           </>
         )}
@@ -593,10 +645,19 @@ export default function EmailHub() {
         replyTo={replyToEmail}
         forwardFrom={forwardFromEmail}
         initialBody={composerInitialBody}
-        onSent={(email) => {
-          setEmails((prev) => [email, ...prev])
-        }}
+        /*
+          Nada de inserir o enviado na lista à mão.
+
+          O Graph responde 202 sem corpo, então não temos o `graph_id` da
+          mensagem no momento do envio — e é ele que casa o upsert. A cópia entra
+          em Itens Enviados e chega aqui pelo aviso em tempo real, com o id certo.
+          Inserir aqui produziria a mesma mensagem duas vezes, e ainda no topo da
+          pasta errada (a que estivesse aberta).
+        */
+        onSent={() => {}}
       />
+
+      <MeusAjustesDialog aberto={ajustesAbertos} onOpenChange={setAjustesAbertos} />
     </div>
   )
 }
