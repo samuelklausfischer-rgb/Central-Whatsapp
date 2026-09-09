@@ -98,8 +98,13 @@ export const DESTINOS_PRINCIPAIS: DestinoNav[] = [
  * Assinaturas entra no grupo pelo mesmo critério — não é uma tela de WhatsApp,
  * mas é interna, não depende de sistema nenhum e todo funcionário precisa dela
  * para montar a própria assinatura de e-mail.
+ *
+ * Exportada desde 08/09 para o `lib/hub/onde-estou.ts` ler os NOMES daqui em vez
+ * de repetir os cinco à mão. O relato do "Reportar problema" agora leva o nome da
+ * tela na frente do título (`[Anotações] ...`), e um nome copiado envelheceria —
+ * foi exatamente o que aconteceu com "Análise PRN" depois do renome de 04/09.
  */
-const FERRAMENTAS_DO_APP: DestinoNav[] = [
+export const FERRAMENTAS_DO_APP: DestinoNav[] = [
   { title: 'Tarefas', description: 'Kanban interno', icon: ListTodo, url: '/crm' },
   { title: 'Anotações', description: 'Notas rápidas', icon: StickyNote, url: '/notes' },
   {

@@ -13,7 +13,7 @@ import { enviarHubReport, type HubReportTipo } from '@/services/hub_reports'
 import { releaseNotes } from '@/data/release-notes'
 import { MeusHubReports } from '@/components/MeusHubReports'
 import { subscreverFerramentas, lerFerramentas } from '@/stores/ferramentasVivas'
-import { descobrirOndeEstou, NOME_DO_PROJETO } from '@/lib/hub/onde-estou'
+import { descobrirOndeEstou, comEtiqueta, NOME_DO_PROJETO } from '@/lib/hub/onde-estou'
 
 const tipos: { value: HubReportTipo; label: string; icon: React.ElementType; hint: string }[] = [
   { value: 'problema', label: 'Problema', icon: MessageSquareWarning, hint: 'Algo não está funcionando' },
@@ -60,6 +60,10 @@ export function ReportarProblemaDialog({
   const nome = user.name || user.username || 'Usuário sem nome'
   const reportadoPor = user.email ? `${nome} (${user.email})` : nome
 
+  // Mesma condição que `comEtiqueta` aplica no envio — quem já escreveu a
+  // própria etiqueta não ganha uma segunda, e o selo some para mostrar isso.
+  const selo = onde.etiqueta && !titulo.trim().startsWith('[') ? onde.etiqueta : null
+
   function resetar() {
     setTipo('problema')
     setTitulo('')
@@ -80,7 +84,9 @@ export function ReportarProblemaDialog({
     try {
       await enviarHubReport({
         tipo,
-        titulo: tituloLimpo,
+        // `[Agenda] não consigo criar evento`. A mesma função monta o selo que
+        // aparece ao lado do campo, para prévia e envio não divergirem.
+        titulo: comEtiqueta(tituloLimpo, onde),
         // A linha de contexto vai no CORPO, não só nos metadados: quem lê a fila
         // no Hub vê a descrição, e raramente abre o json.
         descricao: `${descricaoLimpa}
@@ -175,13 +181,31 @@ export function ReportarProblemaDialog({
 
           <div className="space-y-1.5">
             <Label htmlFor="report-titulo">Título</Label>
-            <Input
-              id="report-titulo"
-              value={titulo}
-              onChange={(e) => setTitulo(e.target.value)}
-              maxLength={200}
-              placeholder="Resumo em uma linha"
-            />
+            {/*
+              O SELO APARECE ANTES DE ENVIAR, pelo mesmo motivo do destino logo
+              abaixo: a fila do Central Whats mistura Agenda, Whats, Tarefas,
+              Assinaturas e mais — sem o nome na frente, o título chega solto e
+              só o link diz de onde veio. Vendo o selo, a pessoa percebe na hora
+              quando ele estiver errado.
+            */}
+            <div className="flex items-center gap-2">
+              {selo && (
+                <span
+                  title={`Este relato vai para a fila com "[${selo}]" na frente do título`}
+                  className="shrink-0 max-w-[45%] truncate rounded-md border border-primary/30 bg-primary/10 px-2 py-1.5 text-xs font-medium text-foreground"
+                >
+                  [{selo}]
+                </span>
+              )}
+              <Input
+                id="report-titulo"
+                value={titulo}
+                onChange={(e) => setTitulo(e.target.value)}
+                maxLength={200}
+                placeholder="Resumo em uma linha"
+                className="flex-1"
+              />
+            </div>
           </div>
 
           <div className="space-y-1.5">
@@ -211,6 +235,9 @@ export function ReportarProblemaDialog({
             Dev ou da Proposta, que têm fila própria. Agora o destino é escolhido
             sozinho, e mostrar qual é permite a pessoa perceber quando estiver
             errado, em vez de descobrir dias depois na fila de outro projeto.
+
+            "De" mudou de sentido na mesma tarde: antes só quatro telas eram
+            reconhecidas e o resto do app aparecia aqui como "Central Whats".
           */}
           <p className="text-center text-[11px] leading-relaxed text-muted-foreground">
             Enviado como <span className="text-foreground">{nome}</span>, de{' '}
