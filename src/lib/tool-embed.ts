@@ -82,11 +82,82 @@ export interface EmbedThemeMessage {
   theme: 'dark' | 'light'
 }
 
+/**
+ * filho -> pai: "leve a pessoa para OUTRA ferramenta, nesta rota".
+ *
+ * Existe para o Licitações mandar um edital para o quadro do Gestor de Tarefas
+ * (`/licitacao?novo=1&titulo=...`): são apps diferentes, em bancos diferentes, e
+ * o único elo entre eles é este pai.
+ *
+ * ⚠️ É a ÚNICA mensagem em que um filho manda o pai fazer algo fora do iframe.
+ * Por isso `pedidoDeAberturaValido` abaixo é obrigatório, e o `ToolFrame` já
+ * confere `event.source === iframe.contentWindow` antes de olhar o conteúdo.
+ */
+export interface EmbedOpenToolMessage {
+  source: typeof EMBED_PROTOCOL
+  type: 'open-tool'
+  slug: string
+  /** Rota DENTRO do app de destino, sempre relativa (ex.: `/licitacao?novo=1`). */
+  path: string
+}
+
+/**
+ * pai -> filho: "vá para esta rota", sem recarregar.
+ *
+ * Recarregar seria o caminho óbvio (trocar o `src` do iframe), mas as
+ * ferramentas ficam MONTADAS de propósito para não refazer o handshake — ver
+ * `stores/ferramentasVivas.ts`. Além disso um `src` com a rota dentro seria
+ * reaplicado se a ferramenta remontasse, reabrindo o mesmo formulário.
+ *
+ * ADITIVA, como o `theme`: quem não conhece este tipo ignora.
+ */
+export interface EmbedNavigateMessage {
+  source: typeof EMBED_PROTOCOL
+  type: 'navigate'
+  path: string
+}
+
 export type EmbedMessage =
   | EmbedReadyMessage
   | EmbedCredentialMessage
   | EmbedErrorMessage
   | EmbedThemeMessage
+  | EmbedOpenToolMessage
+  | EmbedNavigateMessage
+
+/**
+ * Ferramentas que OUTRA ferramenta pode pedir para abrir.
+ *
+ * Deliberadamente curta: hoje o único caminho que existe é o Licitações mandando
+ * um edital para o quadro do Gestor de Tarefas. Crescer esta lista é decisão
+ * consciente, não consequência de alguém ter mandado um slug novo.
+ */
+export const SLUGS_ABRIVEIS = ['relatorios'] as const
+
+/**
+ * O pedido de abertura, se for confiável — senão `null`.
+ *
+ * O que se defende aqui: um app filho comprometido (ou uma página que ele tenha
+ * embutido) pedindo ao Central Whats que navegue para onde quiser. `slug` tem de
+ * estar na lista de quem chama, e `path` tem de ser rota interna:
+ *
+ *   - `//outro-host/x`  → o navegador leria como protocolo-relativo e sairia daqui
+ *   - `http://…`        → outra origem
+ *   - `javascript:…`    → execução
+ *   - `\\servidor`      → alguns navegadores normalizam a barra invertida
+ */
+export function pedidoDeAberturaValido(
+  data: unknown,
+  slugsPermitidos: readonly string[],
+): { slug: string; path: string } | null {
+  if (!isEmbedMessage(data) || data.type !== 'open-tool') return null
+  const { slug, path } = data as EmbedOpenToolMessage
+  if (typeof slug !== 'string' || !slugsPermitidos.includes(slug)) return null
+  if (typeof path !== 'string' || path.length > 2000) return null
+  if (!path.startsWith('/') || path.startsWith('//') || path.startsWith('/\\')) return null
+  if (path.includes('\\')) return null
+  return { slug, path }
+}
 
 export function isEmbedMessage(data: unknown): data is EmbedMessage {
   return (
