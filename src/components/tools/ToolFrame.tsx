@@ -1,11 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useTheme } from 'next-themes'
+import { ativarFerramenta } from '@/stores/ferramentasVivas'
+import { lerRotasPendentes, limparRota, pedirRota, subscreverRotasPendentes } from '@/stores/rotasPendentes'
 import { AlertCircle, Download, ExternalLink, Loader2, RefreshCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   buildEmbedUrl,
   isEmbedMessage,
+  pedidoDeAberturaValido,
   EMBED_PROTOCOL,
+  SLUGS_ABRIVEIS,
   type EmbedCredential,
 } from '@/lib/tool-embed'
 import { useToolVersion } from '@/hooks/use-tool-version'
@@ -23,6 +28,12 @@ interface ToolFrameComum {
    * ferramenta sem tocar no hook — ex.: um app que publica com mais frequência.
    */
   versionCheckIntervalMs?: number
+  /**
+   * O slug desta ferramenta. Só é preciso em quem pode ser ABERTA por outra
+   * (hoje `relatorios`): é assim que este quadro sabe que uma rota pendente é
+   * para ele. Mandar um pedido não depende disto — qualquer filho pode pedir.
+   */
+  slug?: string
 }
 
 /**
@@ -69,7 +80,15 @@ export function ToolFrame({
   watch,
   versionCheckIntervalMs,
   prontidao,
+  slug,
 }: ToolFrameProps) {
+  const navigate = useNavigate()
+  const rotasPendentes = useSyncExternalStore(
+    subscreverRotasPendentes,
+    lerRotasPendentes,
+    lerRotasPendentes,
+  )
+  const rotaPendente = slug ? rotasPendentes[slug] : undefined
   const semHandshake = prontidao === 'ao-carregar'
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const { resolvedTheme } = useTheme()
@@ -163,6 +182,8 @@ export function ToolFrame({
   getCredentialRef.current = getCredential
   const watchRef = useRef(watch)
   watchRef.current = watch
+  const navigateRef = useRef(navigate)
+  navigateRef.current = navigate
 
   const send = useCallback(
     (credential: EmbedCredential) => {
@@ -202,6 +223,22 @@ export function ToolFrame({
         return
       }
 
+      // Único caso em que o filho manda o pai agir fora do iframe: a validação
+      // do slug e da rota é obrigatória e mora em `pedidoDeAberturaValido`.
+      if (event.data.type === 'open-tool') {
+        const pedido = pedidoDeAberturaValido(event.data, SLUGS_ABRIVEIS)
+        if (!pedido) return
+        // A rota fica guardada até o destino ficar pronto; se ele ainda nem
+        // existia, `ativarFerramenta` monta e o handshake acontece antes.
+        pedirRota(pedido.slug, pedido.path)
+        ativarFerramenta(pedido.slug)
+        // `/ferramentas/<slug>` é a rota de toda ferramenta hospedada. Montada
+        // aqui, e não lida de FERRAMENTAS_HOSPEDADAS, para não criar import
+        // circular com o ToolHost — o slug já passou pela allowlist.
+        navigateRef.current(`/ferramentas/${pedido.slug}`)
+        return
+      }
+
       if (event.data.type !== 'ready') return
       if (entregando) return
       entregando = true
@@ -230,6 +267,27 @@ export function ToolFrame({
       window.removeEventListener('message', onMessage)
     }
   }, [send, target, title, semHandshake])
+
+  /**
+   * A rota pedida por outra ferramenta, entregue quando ESTE filho está pronto.
+   *
+   * Espera o `ready` porque um `postMessage` mandado antes do app montar o
+   * listener se perde em silêncio — é a mesma armadilha que o `ready` repetido a
+   * cada 400 ms resolve do outro lado. Se a ferramenta ainda não existia, ela
+   * monta, faz o handshake e só então recebe.
+   *
+   * Avisa `onRotaEntregue` logo depois: sem isso a rota seria reaplicada a cada
+   * `ready` (um retry, por exemplo) e o formulário do outro lado reabriria
+   * sozinho, criando card repetido.
+   */
+  useEffect(() => {
+    if (status !== 'ready' || !target || !rotaPendente) return
+    iframeRef.current?.contentWindow?.postMessage(
+      { source: EMBED_PROTOCOL, type: 'navigate', path: rotaPendente },
+      target.origin, // exato, como na credencial
+    )
+    if (slug) limparRota(slug)
+  }, [status, target, rotaPendente, slug])
 
   /**
    * O TEMA VIAJA PARA O FILHO, e mora aqui e não em cada ferramenta de propósito:

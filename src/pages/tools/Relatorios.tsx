@@ -55,6 +55,8 @@ export default function Relatorios() {
       envVarName="VITE_RELATORIOS_APP_URL"
       getCredential={getCredential}
       watch={watch}
+      // Recebe os editais mandados pelo Licitações — ver `stores/rotasPendentes.ts`.
+      slug="relatorios"
     />
   )
 }
