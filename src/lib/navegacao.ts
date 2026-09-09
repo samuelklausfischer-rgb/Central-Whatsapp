@@ -27,7 +27,7 @@ import {
 } from 'lucide-react'
 import { IconeWhatsApp } from '@/components/ui/icone-whatsapp'
 import { getBundleVersion } from '@/lib/app-info'
-import { canAccessFinanceiroTools, canAccessGestaoMedica } from '@/lib/permissions'
+import { podeVerRota } from '@/lib/ferramentas/catalogo'
 import type { Profile } from '@/lib/supabase/types'
 
 /**
@@ -78,6 +78,12 @@ export function ehAcao(item: ItemDeFerramenta): item is AcaoNav {
  * os links da barra. A ORDEM é a mesma nos dois de propósito — quem usa o app no
  * computador e no celular não deveria ter que reaprender onde as coisas ficam.
  */
+/**
+ * ⚠️ LISTA CRUA, sem filtro de permissão. Quem monta menu usa
+ * `destinosPrincipais(acesso)` logo abaixo; esta aqui existe inteira porque o
+ * `lib/hub/onde-estou.ts` precisa nomear qualquer tela, inclusive uma que a
+ * pessoa não possa mais abrir.
+ */
 export const DESTINOS_PRINCIPAIS: DestinoNav[] = [
   { title: 'Painel', description: 'Visão geral', icon: Home, url: '/dashboard', soIcone: true },
   // O ícone é o glifo do WhatsApp desenhado à mão (`ui/icone-whatsapp`): o
@@ -93,8 +99,18 @@ export const DESTINOS_PRINCIPAIS: DestinoNav[] = [
 ]
 
 /**
- * O que roda DENTRO do app e não tem o que liberar: quem entrou no PRN Hub já
- * pode usar todas. A maioria mexe nas conversas, nas tarefas e nas notas daqui;
+ * Os destinos do topo que ESTA pessoa pode ver.
+ *
+ * O Painel nunca some — é a casa do app e o destino de todo bloqueio, então
+ * `podeVerRota` devolve `true` para ele por não haver chave no catálogo.
+ */
+export function destinosPrincipais(acesso?: AcessoFerramentasExternas): DestinoNav[] {
+  return DESTINOS_PRINCIPAIS.filter((d) => podeVerRota(d.url, acesso?.podeUsar ?? {}))
+}
+
+/**
+ * O que roda DENTRO do app: Tarefas, Anotações, Atalhos, Agendamentos e
+ * Assinaturas. A maioria mexe nas conversas, nas tarefas e nas notas daqui;
  * Assinaturas entra no grupo pelo mesmo critério — não é uma tela de WhatsApp,
  * mas é interna, não depende de sistema nenhum e todo funcionário precisa dela
  * para montar a própria assinatura de e-mail.
@@ -144,9 +160,10 @@ const RATEIO: DestinoNav = {
 }
 
 /**
- * Gestão Médica: cadastro de médicos, contratos e documentos. Liberado pelo
- * SETOR (Administrativo), como Análise PRN e Rateio são pelo Financeiro — e não
- * pessoa a pessoa via `tool_access`, como Licitações e PRN Hub.
+ * Gestão Médica: cadastro de médicos, contratos e documentos. Padrão pelo SETOR
+ * (Administrativo), como Cruzar Contas e Rateio são pelo Financeiro — mas desde
+ * 09/09/2026 aceita exceção pessoa a pessoa por cima do setor, e a regra está
+ * espelhada em `gestao_medica._pode_usar()`, no banco.
  *
  * Embutido por iframe, mas no mesmo projeto Supabase (schema `gestao_medica`),
  * então a sessão atravessa direto — ver `pages/tools/GestaoMedica.tsx`.
@@ -158,7 +175,7 @@ const GESTAO_MEDICA: DestinoNav = {
   url: '/ferramentas/gestao-medica',
 }
 
-/** Só super-admin. Ver a explicação em `SuperAdminRoute` (App.tsx). */
+/** Padrão: só super-admin. A razão de ser tão fechado está em `lib/ferramentas/catalogo.ts`. */
 const RELATORIO_APP: DestinoNav = {
   title: 'Relatório App',
   description: 'Uso por usuário',
@@ -166,7 +183,11 @@ const RELATORIO_APP: DestinoNav = {
   url: '/ferramentas/relatorio-app',
 }
 
-/** Só super-admin, mesmo gate do Relatório App. */
+/**
+ * Liberado pessoa a pessoa por `public.tool_access` desde 26/08/2026 — este
+ * comentário dizia "só super-admin, mesmo gate do Relatório App", que deixou de
+ * ser verdade naquele dia e ficou para trás até 09/09.
+ */
 const CONTROLE_MENSAGENS: DestinoNav = {
   title: 'Controle de Mensagens',
   description: 'Tempo de resposta',
@@ -228,23 +249,18 @@ const DISPARADOR_EM_MASSA: DestinoNav = {
 type UsuarioDeNav = Pick<Profile, 'is_admin' | 'department'> & { is_super_admin?: boolean | null }
 
 /**
- * Liberação das ferramentas externas. Não sai do `profile` como as outras: mora
- * no banco (`public.tool_access` e `relatorios.profiles`) e chega por
- * `useToolAccess()`. Opcional para que quem só monta menu estático continue
- * chamando `gruposDeFerramentas(user)` sem mudar nada.
+ * Quem pode usar cada ferramenta, POR SLUG. Chega de `useToolAccess()`.
+ *
+ * Era uma interface com um campo por ferramenta até 09/09/2026. Virou registro
+ * porque a mesma informação vivia em três lugares — aqui, no hook e na união do
+ * guard de rota —, e foi assim que `prn-hub` e `controle-mensagens` acabaram
+ * funcionando sem ninguém conseguir liberá-los pela tela.
+ *
+ * Opcional para que quem só monta menu estático continue chamando
+ * `gruposDeFerramentas(user)` sem mudar nada.
  */
 export interface AcessoFerramentasExternas {
-  relatorios: boolean
-  licitacoes: boolean
-  propostaComercial: boolean
-  prnHub: boolean
-  /**
-   * Entrou em 26/08/2026 no lugar do `disparador`, que saiu. As duas
-   * ferramentas trocaram de lado: o Disparador em massa perdeu o porteiro e
-   * virou de todo mundo; o Controle de Mensagens saiu de super-admin e passou a
-   * ser liberado pessoa a pessoa.
-   */
-  controleMensagens: boolean
+  podeUsar: Record<string, boolean>
 }
 
 export interface GrupoDeFerramentas {
@@ -263,35 +279,48 @@ export interface GrupoDeFerramentas {
  * Grupo VAZIO é descartado: quem não tem nenhum sistema liberado veria só um
  * título "Sistemas PRN" solto, prometendo algo que não está ali.
  *
- * As rotas já são protegidas em `App.tsx` (`FinanceiroToolRoute`,
- * `SuperAdminRoute`, `ExternalToolRoute`); esconder aqui é para não oferecer
- * porta que bate na cara.
+ * A rota já é protegida em `App.tsx` (`FerramentaRoute`, um só desde 09/09);
+ * esconder aqui é para não oferecer porta que bate na cara.
+ *
+ * ⚠️ TODAS passam pelo mesmo `podeUsar` agora, inclusive as que saíam do setor.
+ * O `user` continua no parâmetro porque quem calcula `podeUsar` é o hook, que
+ * já leu o perfil — aqui ele serve só para o menu funcionar sem o hook (menu
+ * estático), caso em que só o Disparador aparece.
  */
 export function gruposDeFerramentas(
-  user: UsuarioDeNav | null | undefined,
   externas?: AcessoFerramentasExternas,
 ): GrupoDeFerramentas[] {
+  const pode = (slug: string) => Boolean(externas?.podeUsar[slug])
   const sistemas: DestinoNav[] = [
-    ...(canAccessFinanceiroTools(user) ? [ANALISE_PRN, RATEIO] : []),
-    ...(canAccessGestaoMedica(user) ? [GESTAO_MEDICA] : []),
-    ...(externas?.propostaComercial ? [PROPOSTA_COMERCIAL] : []),
-    ...(externas?.relatorios ? [RELATORIOS] : []),
-    ...(externas?.licitacoes ? [LICITACOES] : []),
-    ...(externas?.prnHub ? [PRN_HUB] : []),
-    // SEM PORTEIRO desde 26/08/2026: o Disparador em massa é de todo mundo. Não
-    // é "liberado para os 19" — é sem gate mesmo, para que quem entrar na equipe
-    // amanhã já tenha, sem ninguém precisar lembrar de liberar.
-    DISPARADOR_EM_MASSA,
-    ...(externas?.controleMensagens ? [CONTROLE_MENSAGENS] : []),
-    // O RELATÓRIO APP CONTINUA SÓ SUPER-ADMIN, e agora sozinho nesta linha.
-    // Ele dividia a linha com o Controle de Mensagens, que saiu para liberação
-    // pessoa a pessoa; o Relatório App fica onde estava porque lê a atividade da
-    // equipe inteira — a razão está no comentário do `SuperAdminRoute`.
-    ...(user?.is_super_admin ? [RELATORIO_APP] : []),
+    ...(pode('analise-prn') ? [ANALISE_PRN] : []),
+    ...(pode('rateio-mobilemed') ? [RATEIO] : []),
+    ...(pode('gestao-medica') ? [GESTAO_MEDICA] : []),
+    ...(pode('proposta-comercial') ? [PROPOSTA_COMERCIAL] : []),
+    ...(pode('relatorios') ? [RELATORIOS] : []),
+    ...(pode('licitacoes') ? [LICITACOES] : []),
+    ...(pode('prn-hub') ? [PRN_HUB] : []),
+    // De todo mundo POR PADRÃO, como desde 26/08/2026 — quem entrar na equipe
+    // amanhã já tem, sem ninguém precisar lembrar de liberar. A diferença desde
+    // 09/09 é que dá para bloquear uma pessoa, e por isso ele passa por `pode`.
+    ...(pode('disparador-em-massa') ? [DISPARADOR_EM_MASSA] : []),
+    ...(pode('controle-mensagens') ? [CONTROLE_MENSAGENS] : []),
+    // O RELATÓRIO APP CONTINUA SÓ SUPER-ADMIN POR PADRÃO — a diferença desde
+    // 09/09 é que dá para abrir exceção sem promover ninguém a super-admin. A
+    // razão de ser tão fechado está no catálogo, junto do padrão dele.
+    ...(pode('relatorio-app') ? [RELATORIO_APP] : []),
   ]
 
   return [
-    { titulo: 'Do app', itens: FERRAMENTAS_DO_APP },
+    /*
+      O filtro é feito aqui, e não na lista: `FERRAMENTAS_DO_APP` também é lida
+      pelo `lib/hub/onde-estou.ts` para descobrir o NOME da tela, e lá ela
+      precisa estar inteira — quem foi bloqueado no Whats continua reportando
+      problema com `[Whats]` na frente, se chegar lá por outro caminho.
+    */
+    {
+      titulo: 'Do app',
+      itens: FERRAMENTAS_DO_APP.filter((item) => podeVerRota(item.url, externas?.podeUsar ?? {})),
+    },
     { titulo: 'Sistemas PRN', itens: sistemas },
   ].filter((grupo) => grupo.itens.length > 0)
 }

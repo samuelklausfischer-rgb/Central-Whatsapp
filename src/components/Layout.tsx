@@ -14,6 +14,7 @@ import { ToolHost } from '@/components/tools/ToolHost'
 import { useAppHeartbeat } from '@/hooks/use-app-heartbeat'
 import { useNotificacoesDeMensagem } from '@/hooks/use-notificacoes-de-mensagem'
 import { useNotificacoes } from '@/hooks/use-notificacoes'
+import { useToolAccess } from '@/hooks/use-tool-access'
 import { useAndroidBack } from '@/hooks/use-android-back'
 import { useAndroidShell } from '@/hooks/use-android-shell'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -25,6 +26,7 @@ const naAndroid = isNativeAndroid()
 
 export default function Layout() {
   const location = useLocation()
+  const { podeUsar } = useToolAccess()
   // Telas que gerenciam a própria rolagem e precisam da altura toda. As
   // ferramentas embutidas entram aqui porque o iframe herda a altura do pai:
   // dentro do container com padding e max-w-7xl o app filho ficaria espremido
@@ -69,13 +71,15 @@ export default function Layout() {
    * uma ferramenta deixava a pessoa sem aviso nenhum. Mesmo motivo do
    * `BroadcastListener` logo abaixo.
    */
-  useNotificacoesDeMensagem()
+  // Silenciadas para quem tem a tela bloqueada: som e pop-up de algo que a
+  // pessoa não pode abrir é só estorvo.
+  useNotificacoesDeMensagem(podeUsar['tela-chat'])
   /*
     A caixa de notificações do app (agenda por ora). Mora AQUI pelo mesmo motivo
     da linha acima: precisa valer em qualquer tela, e os dois cabeçalhos —
     `Header` e `MobileHeader` — apenas leem a store que este hook alimenta.
   */
-  useNotificacoes()
+  useNotificacoes(podeUsar['tela-agenda'])
   // Botão voltar do Android. Fora do APK, não faz nada.
   useAndroidBack()
   // Barra de status e teclado. Idem.

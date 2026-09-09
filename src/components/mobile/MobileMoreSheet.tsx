@@ -47,7 +47,7 @@ export function MobileMoreSheet({
   const [problemaAberto, setProblemaAberto] = useState(false)
 
   const escuro = resolvedTheme === 'dark'
-  const grupos = gruposDeFerramentas(user, useToolAccess())
+  const grupos = gruposDeFerramentas(useToolAccess())
   const conta = itensDeConta(user, { temaEscuro: escuro })
   const iniciais = (user?.name?.[0] || user?.username?.[0] || 'U').toUpperCase()
 

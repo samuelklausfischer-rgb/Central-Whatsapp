@@ -90,7 +90,13 @@ function maisRecente(candidato: string, atual: string | null): boolean {
   return a > b
 }
 
-export function useNotificacoesDeMensagem() {
+/**
+ * @param ativo `false` quando a pessoa tem a tela do Whats bloqueada. O hook
+ *   continua sendo chamado — hook não pode ser condicional —, mas não assina
+ *   nada e não toca nada. Avisar sobre mensagem que a pessoa não pode abrir é
+ *   defeito, não recurso.
+ */
+export function useNotificacoesDeMensagem(ativo = true) {
   const { user, allowedDevices } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
@@ -358,7 +364,7 @@ export function useNotificacoesDeMensagem() {
         `${nomeDoRemetente(e.record.sender_name as string | null, remoteSender)}: ${previaDaMensagem(e.record.content as string | null)}`,
       )
     },
-    !!user?.id,
+    !!user?.id && ativo,
     undefined,
     aoAssinar,
   )

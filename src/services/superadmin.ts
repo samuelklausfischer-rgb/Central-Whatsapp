@@ -1,17 +1,14 @@
 import supabase from '@/lib/supabase/client'
 
-/**
- * Concede/revoga o acesso de um usuário a uma instância (device) específica.
- * Só super-admin (a função SQL valida _is_super_admin()).
+/*
+ * `setUserDeviceAccess` vivia aqui e foi removida em 09/09/2026, junto com o
+ * card "Acesso ao WhatsApp por usuário" que era seu único chamador. Quem grava
+ * a lista de aparelhos agora é o popup de cadastro, pela edge function
+ * `manage-user` — que tem o sinalizador `devices_explicit`, sem o qual uma
+ * lista vazia seria confundida com "não escolhi nada".
+ *
+ * A RPC `set_user_device_access` continua existindo no banco.
  */
-export const setUserDeviceAccess = async (userId: string, deviceId: string, allowed: boolean) => {
-  const { error } = await supabase.rpc('set_user_device_access', {
-    p_user_id: userId,
-    p_device_id: deviceId,
-    p_allowed: allowed,
-  })
-  if (error) throw new Error(error.message)
-}
 
 /**
  * Liga/desliga a restrição de acesso de um usuário (inclusive admins). Só super-admin.

@@ -35,7 +35,6 @@ import { ToolAccessProvider, useToolAccess } from './hooks/use-tool-access'
 import { FerramentaHospedada } from './components/tools/FerramentaHospedada'
 import { UpdateGate } from './components/UpdateGate'
 import { ErrorBoundary } from './components/ErrorBoundary'
-import { canAccessFinanceiroTools, canAccessGestaoMedica } from './lib/permissions'
 
 const Index = lazy(() => import('./pages/Index'))
 const ChatHub = lazy(() => import('./pages/ChatHub'))
@@ -84,44 +83,29 @@ const AdminRoute = () => {
   return user?.is_admin ? <Outlet /> : <Navigate to="/dashboard" replace />
 }
 
-// Mais restrito que AdminRoute de propósito: `is_admin` não considera
-// `devices_restricted`, então admins com acesso deliberadamente limitado ainda
-// leriam a atividade da equipe inteira pelo Relatório App.
-const SuperAdminRoute = () => {
-  const { user } = useAuth()
-  return user?.is_super_admin ? <Outlet /> : <Navigate to="/dashboard" replace />
-}
-
-const FinanceiroToolRoute = () => {
-  const { user } = useAuth()
-  return canAccessFinanceiroTools(user) ? <Outlet /> : <Navigate to="/dashboard" replace />
-}
-
-// Gate por SETOR, como o financeiro — e não por `tool_access` como Licitações e
-// PRN Hub. Não precisa esperar consulta ao banco: `department` já vem no perfil
-// carregado, então não há o "false inicial" que obriga o ExternalToolRoute a
-// segurar a tela em "Carregando...".
-const AdministrativoToolRoute = () => {
-  const { user } = useAuth()
-  return canAccessGestaoMedica(user) ? <Outlet /> : <Navigate to="/dashboard" replace />
-}
-
-// A liberação das ferramentas externas vem do banco, não do perfil já carregado.
-// Enquanto ela não chega, esperar: redirecionar no `false` inicial jogaria para
-// o dashboard todo mundo que abre a rota direto (link salvo, F5 na própria tela).
-const ExternalToolRoute = ({
-  tool,
-}: {
-  tool: 'relatorios' | 'licitacoes' | 'propostaComercial' | 'prnHub' | 'controleMensagens'
-}) => {
-  const access = useToolAccess()
-  if (access.loading)
+/**
+ * O porteiro de TODA ferramenta E DE TODA TELA, por slug.
+ *
+ * Substituiu três guardas em 09/09/2026 — `FinanceiroToolRoute`,
+ * `AdministrativoToolRoute` e `ExternalToolRoute`. Os dois primeiros decidiam
+ * pelo setor no perfil e o terceiro pelo banco; agora a decisão é a mesma para
+ * todas, porque ferramenta de setor passou a aceitar exceção pessoa a pessoa e
+ * essa exceção mora no banco.
+ *
+ * ⚠️ CUSTO CONSCIENTE: Cruzar Contas, Rateio e Gestão Médica passam a esperar a
+ * consulta, como Licitações e Proposta sempre esperaram. Esperar é obrigatório —
+ * redirecionar no `false` inicial jogaria para o dashboard todo mundo que abre a
+ * rota direto (link salvo, F5 na própria tela).
+ */
+const FerramentaRoute = ({ slug }: { slug: string }) => {
+  const { podeUsar, loading } = useToolAccess()
+  if (loading)
     return (
       <div className="h-full w-full flex items-center justify-center text-muted-foreground">
         Carregando...
       </div>
     )
-  return access[tool] ? <Outlet /> : <Navigate to="/dashboard" replace />
+  return podeUsar[slug] ? <Outlet /> : <Navigate to="/dashboard" replace />
 }
 
 const App = () => {
@@ -155,18 +139,40 @@ const App = () => {
               <Route element={<Layout />}>
                 <Route path="/" element={<Navigate to="/dashboard" replace />} />
                 <Route path="/dashboard" element={<Index />} />
-                <Route path="/chat" element={<ChatHub />} />
-                <Route path="/email" element={<EmailHub />} />
+                {/*
+                  AS TELAS DO APP ganharam porteiro em 09/09/2026 — o mesmo
+                  `FerramentaRoute` das ferramentas, por slug. O `/dashboard`
+                  acima fica de FORA de propósito: é a âncora, e é para onde este
+                  guard redireciona. Dar guarda a ele criaria laço.
+                */}
+                <Route element={<FerramentaRoute slug="tela-chat" />}>
+                  <Route path="/chat" element={<ChatHub />} />
+                </Route>
+                <Route element={<FerramentaRoute slug="tela-email" />}>
+                  <Route path="/email" element={<EmailHub />} />
+                </Route>
                 {/* Disparo para listas. Rota irmã de `/email`, e não uma aba
                     dentro dele: o Hub é uma tela de três painéis com rolagem
                     própria, e a de campanhas é um formulário longo — as duas não
-                    cabem no mesmo esqueleto. */}
-                <Route path="/email/campanhas" element={<EmailCampanhas />} />
-                <Route path="/crm" element={<CRM />} />
-                <Route path="/agenda" element={<Agenda />} />
-                <Route path="/notes" element={<Notes />} />
-                <Route path="/triggers" element={<Triggers />} />
-                <Route path="/scheduled-messages" element={<ScheduledMessages />} />
+                    cabem no mesmo esqueleto. Por ser irmã, tem bloqueio próprio. */}
+                <Route element={<FerramentaRoute slug="tela-email-campanhas" />}>
+                  <Route path="/email/campanhas" element={<EmailCampanhas />} />
+                </Route>
+                <Route element={<FerramentaRoute slug="tela-crm" />}>
+                  <Route path="/crm" element={<CRM />} />
+                </Route>
+                <Route element={<FerramentaRoute slug="tela-agenda" />}>
+                  <Route path="/agenda" element={<Agenda />} />
+                </Route>
+                <Route element={<FerramentaRoute slug="tela-notes" />}>
+                  <Route path="/notes" element={<Notes />} />
+                </Route>
+                <Route element={<FerramentaRoute slug="tela-triggers" />}>
+                  <Route path="/triggers" element={<Triggers />} />
+                </Route>
+                <Route element={<FerramentaRoute slug="tela-scheduled-messages" />}>
+                  <Route path="/scheduled-messages" element={<ScheduledMessages />} />
+                </Route>
                 <Route element={<AdminRoute />}>
                   <Route path="/admin" element={<AdminPage />} />
                 </Route>
@@ -180,11 +186,19 @@ const App = () => {
                   As guardas ficam onde estavam: quem não tem permissão nem chega
                   a montar o registrador, logo a ferramenta nunca abre.
                 */}
-                <Route element={<FinanceiroToolRoute />}>
+                <Route element={<FerramentaRoute slug="analise-prn" />}>
                   <Route path="/ferramentas/analise-prn" element={<FerramentaHospedada slug="analise-prn" />} />
+                </Route>
+                <Route element={<FerramentaRoute slug="rateio-mobilemed" />}>
                   <Route path="/ferramentas/rateio-mobilemed" element={<FerramentaHospedada slug="rateio-mobilemed" />} />
                 </Route>
-                <Route element={<SuperAdminRoute />}>
+                {/*
+                  O Relatório App SAIU do `SuperAdminRoute` em 09/09/2026. Continua
+                  sendo só de super-admin por padrão — a diferença é que agora dá
+                  para liberar para outra pessoa sem torná-la super-admin, que era
+                  o único caminho antes.
+                */}
+                <Route element={<FerramentaRoute slug="relatorio-app" />}>
                   <Route path="/ferramentas/relatorio-app" element={<FerramentaHospedada slug="relatorio-app" />} />
                 </Route>
                 {/*
@@ -198,47 +212,53 @@ const App = () => {
                   da equipe inteira, e o motivo está no comentário do próprio
                   `SuperAdminRoute`.
                 */}
-                <Route element={<ExternalToolRoute tool="controleMensagens" />}>
+                <Route element={<FerramentaRoute slug="controle-mensagens" />}>
                   <Route path="/ferramentas/controle-mensagens" element={<FerramentaHospedada slug="controle-mensagens" />} />
                 </Route>
-                <Route element={<ExternalToolRoute tool="relatorios" />}>
+                <Route element={<FerramentaRoute slug="relatorios" />}>
                   <Route path="/ferramentas/relatorios" element={<FerramentaHospedada slug="relatorios" />} />
                 </Route>
-                <Route element={<ExternalToolRoute tool="licitacoes" />}>
+                <Route element={<FerramentaRoute slug="licitacoes" />}>
                   <Route path="/ferramentas/licitacoes" element={<FerramentaHospedada slug="licitacoes" />} />
                 </Route>
-                <Route element={<ExternalToolRoute tool="propostaComercial" />}>
+                <Route element={<FerramentaRoute slug="proposta-comercial" />}>
                   <Route
                     path="/ferramentas/proposta-comercial"
                     element={<FerramentaHospedada slug="proposta-comercial" />}
                   />
                 </Route>
-                <Route element={<ExternalToolRoute tool="prnHub" />}>
+                <Route element={<FerramentaRoute slug="prn-hub" />}>
                   <Route path="/ferramentas/prn-hub" element={<FerramentaHospedada slug="prn-hub" />} />
                 </Route>
                 {/*
-                  SEM PORTEIRO desde 26/08/2026: o Disparador em massa é de todo
-                  mundo, como Tarefas e Anotações. Fica direto sob o
-                  `ProtectedRoute` — basta estar logado.
-                  Quem decide o que cada um PODE DISPARAR continua sendo o banco:
-                  a `pode_disparar()` e a RLS das tabelas `disparo_*`. Isto aqui
-                  só abre a porta da tela.
+                  DE TODO MUNDO POR PADRÃO, mas agora com porteiro: desde
+                  09/09/2026 dá para bloquear uma pessoa específica. O padrão
+                  continua sendo "todos", como era desde 26/08.
+                  ⚠️ O banco concorda: `pode_disparar()` foi reescrita no mesmo
+                  dia e passou a respeitar o bloqueio. Antes ela era
+                  `is_admin OR linha`, mais RESTRITIVA que esta tela — os
+                  não-admins viam a ferramenta no menu e esbarravam na RLS.
                 */}
-                <Route
-                  path="/ferramentas/disparador-em-massa"
-                  element={<FerramentaHospedada slug="disparador-em-massa" />}
-                />
-                <Route element={<AdministrativoToolRoute />}>
+                <Route element={<FerramentaRoute slug="disparador-em-massa" />}>
+                  <Route
+                    path="/ferramentas/disparador-em-massa"
+                    element={<FerramentaHospedada slug="disparador-em-massa" />}
+                  />
+                </Route>
+                <Route element={<FerramentaRoute slug="gestao-medica" />}>
                   <Route
                     path="/ferramentas/gestao-medica"
                     element={<FerramentaHospedada slug="gestao-medica" />}
                   />
                 </Route>
                 {/*
-                  Assinaturas não tem guarda: é assinatura de e-mail, todo mundo
-                  que trabalha aqui precisa gerar a sua.
+                  Assinaturas é de todo mundo por padrão — quem trabalha aqui
+                  precisa gerar a sua. Ganhou porteiro em 09/09/2026 só para o
+                  caso de bloqueio pessoa a pessoa.
                 */}
-                <Route path="/ferramentas/assinaturas" element={<FerramentaHospedada slug="assinaturas" />} />
+                <Route element={<FerramentaRoute slug="assinaturas" />}>
+                  <Route path="/ferramentas/assinaturas" element={<FerramentaHospedada slug="assinaturas" />} />
+                </Route>
                 <Route path="/settings" element={<SettingsLayout />}>
                   <Route path="general" element={<GeneralSettings />} />
                   <Route path="labels" element={<LabelsSettings />} />

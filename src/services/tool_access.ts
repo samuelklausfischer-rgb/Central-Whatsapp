@@ -18,11 +18,55 @@ import supabase from '@/lib/supabase/client'
  * setor nem "todo admin": deixa de fora dois dos seis admins. Só liberação
  * pessoa a pessoa descreve isso.
  */
+/**
+ * As sete do fim entraram em 09/09/2026, quando TODA ferramenta passou a aceitar
+ * exceção pessoa a pessoa. Nelas a linha não quer dizer "tem acesso" e sim "o
+ * padrão foi contrariado" — ver a coluna `permitido` logo abaixo.
+ *
+ * As três últimas nem porteiro tinham: `relatorios` saía do cadastro em outro
+ * sistema, e Disparador e Assinaturas eram de todo mundo. Continuam sendo o
+ * padrão delas; a novidade é poder abrir exceção.
+ */
 export type ToolName =
   | 'licitacoes'
   | 'proposta-comercial'
   | 'prn-hub'
   | 'controle-mensagens'
+  | 'analise-prn'
+  | 'rateio-mobilemed'
+  | 'gestao-medica'
+  | 'relatorio-app'
+  | 'relatorios'
+  | 'disparador-em-massa'
+  | 'assinaturas'
+  /*
+    AS TELAS DO PRÓPRIO APP entraram em 09/09/2026: Whats, Email, Agenda e as
+    internas passaram a poder ser escondidas de uma pessoa, como as ferramentas.
+    O prefixo `tela-` não é enfeite — sem ele uma chave de tela poderia colidir
+    com o slug de uma ferramenta, hoje ou quando alguém criar a próxima.
+    O Painel não está aqui de propósito: é a âncora, para onde todo bloqueio
+    redireciona. Dar porteiro a ele criaria laço.
+  */
+  | 'tela-chat'
+  | 'tela-email'
+  | 'tela-email-campanhas'
+  | 'tela-agenda'
+  | 'tela-crm'
+  | 'tela-notes'
+  | 'tela-triggers'
+  | 'tela-scheduled-messages'
+
+/**
+ * Uma linha de `tool_access`.
+ *
+ * `permitido = false` é BLOQUEIO explícito, e vence o setor e o `is_admin`.
+ * Ausência de linha significa "vale o padrão da ferramenta". Quem interpreta os
+ * três casos é `podeUsarFerramenta`, em `lib/ferramentas/catalogo.ts`.
+ */
+export interface AcessoDeFerramenta {
+  tool: ToolName
+  permitido: boolean
+}
 
 /**
  * Ferramentas liberadas para o usuário logado.
@@ -33,17 +77,33 @@ export type ToolName =
  * admin veria o menu Licitações por causa da liberação de outra pessoa — e só
  * descobriria o engano ao tomar 403 da `licitacao-bridge`, que confere direito.
  */
-export const getMyTools = async (userId: string): Promise<ToolName[]> => {
-  const { data, error } = await supabase.from('tool_access').select('tool').eq('user_id', userId)
+export const getMyTools = async (userId: string): Promise<AcessoDeFerramenta[]> => {
+  const { data, error } = await supabase
+    .from('tool_access')
+    .select('tool, permitido')
+    .eq('user_id', userId)
   if (error) throw error
-  return ((data as { tool: ToolName }[]) || []).map((row) => row.tool)
+  return (data as AcessoDeFerramenta[]) || []
 }
 
-/** Usuários liberados para uma ferramenta (Gestão de Equipe — só admin enxerga). */
-export const getToolUserIds = async (tool: ToolName): Promise<string[]> => {
-  const { data, error } = await supabase.from('tool_access').select('user_id').eq('tool', tool)
+/**
+ * As exceções gravadas numa ferramenta (Gestão de Equipe — só admin enxerga).
+ *
+ * Devolve liberados E bloqueados: a tela precisa dos dois para desenhar o estado
+ * certo. Antes devolvia só ids, quando a presença da linha bastava para dizer
+ * "tem acesso".
+ */
+export const getAcessoDaFerramenta = async (
+  tool: ToolName,
+): Promise<Map<string, boolean>> => {
+  const { data, error } = await supabase
+    .from('tool_access')
+    .select('user_id, permitido')
+    .eq('tool', tool)
   if (error) throw error
-  return ((data as { user_id: string }[]) || []).map((row) => row.user_id)
+  return new Map(
+    ((data as { user_id: string; permitido: boolean }[]) || []).map((r) => [r.user_id, r.permitido]),
+  )
 }
 
 /**
@@ -62,13 +122,31 @@ export const hasRelatoriosProfile = async (userId: string): Promise<boolean> => 
   return data != null
 }
 
-export const setToolAccess = async (userId: string, tool: ToolName, enabled: boolean) => {
-  if (enabled) {
-    const { error } = await supabase.from('tool_access').upsert({ user_id: userId, tool })
+/**
+ * Grava o estado de uma pessoa numa ferramenta.
+ *
+ * `'padrao'` APAGA a linha — é a diferença que importa: nas ferramentas de
+ * setor, apagar devolve a pessoa à regra do setor, enquanto `'bloquear'` grava
+ * uma linha que contraria essa regra. Nas ferramentas sem padrão os dois dão no
+ * mesmo resultado, e a tela oferece só sim/não.
+ */
+export const setToolAccess = async (
+  userId: string,
+  tool: ToolName,
+  estado: 'padrao' | 'liberar' | 'bloquear',
+) => {
+  if (estado === 'padrao') {
+    const { error } = await supabase
+      .from('tool_access')
+      .delete()
+      .eq('user_id', userId)
+      .eq('tool', tool)
     if (error) throw error
     return
   }
 
-  const { error } = await supabase.from('tool_access').delete().eq('user_id', userId).eq('tool', tool)
+  const { error } = await supabase
+    .from('tool_access')
+    .upsert({ user_id: userId, tool, permitido: estado === 'liberar' })
   if (error) throw error
 }

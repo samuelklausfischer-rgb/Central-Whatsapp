@@ -17,6 +17,7 @@ import { getLabels } from '@/services/labels'
 import { getAiPrompts } from '@/services/ai_prompts'
 import { supabase } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/use-auth'
+import { useToolAccess } from '@/hooks/use-tool-access'
 import { useRealtime } from '@/hooks/use-realtime'
 import type { EmailAccount, EmailFolder, Email, EmailState, EmailFilters } from '@/lib/supabase/email-types'
 import type { Label, Contact, AiPrompt } from '@/lib/supabase/types'
@@ -77,6 +78,7 @@ function mesclarSemPerderCorpo(anterior: Email, evento: Email): Email {
 
 export default function EmailHub() {
   const { user } = useAuth()
+  const { podeUsar } = useToolAccess()
 
   // Contas e pastas
   const [accounts, setAccounts] = useState<EmailAccount[]>([])
@@ -524,12 +526,16 @@ export default function EmailHub() {
                 <PenSquare className="h-4 w-4" />
                 Novo email
               </Button>
-              <Button className="mt-2 w-full gap-2" size="sm" variant="outline" asChild>
-                <Link to="/email/campanhas">
-                  <Megaphone className="h-4 w-4" />
-                  Disparo em massa
-                </Link>
-              </Button>
+              {/* Campanhas tem bloqueio próprio: sem o `if`, sobraria um botão
+                  que devolve a pessoa para o Painel. */}
+              {podeUsar['tela-email-campanhas'] && (
+                <Button className="mt-2 w-full gap-2" size="sm" variant="outline" asChild>
+                  <Link to="/email/campanhas">
+                    <Megaphone className="h-4 w-4" />
+                    Disparo em massa
+                  </Link>
+                </Button>
+              )}
             </div>
 
             {/* Pastas e etiquetas */}

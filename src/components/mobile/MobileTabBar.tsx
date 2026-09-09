@@ -1,7 +1,8 @@
 import { Link, useLocation } from 'react-router-dom'
 import { MoreHorizontal } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { DESTINOS_PRINCIPAIS } from '@/lib/navegacao'
+import { destinosPrincipais } from '@/lib/navegacao'
+import { useToolAccess } from '@/hooks/use-tool-access'
 
 /**
  * Abas fixas no rodapé.
@@ -14,10 +15,13 @@ import { DESTINOS_PRINCIPAIS } from '@/lib/navegacao'
  */
 export function MobileTabBar({ onAbrirMais }: { onAbrirMais: () => void }) {
   const location = useLocation()
+  // A barra encolhe sozinha para quem tem telas escondidas: com Whats e Email
+  // bloqueados sobram Painel, Agenda e o botão "Mais".
+  const destinos = destinosPrincipais(useToolAccess())
 
   return (
     <nav className="relative z-30 flex shrink-0 items-stretch border-t border-border bg-background/95 backdrop-blur-xl">
-      {DESTINOS_PRINCIPAIS.map((item) => {
+      {destinos.map((item) => {
         const ativo = location.pathname.startsWith(item.url)
         return (
           <Link

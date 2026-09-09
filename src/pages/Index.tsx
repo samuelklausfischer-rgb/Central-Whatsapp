@@ -58,6 +58,7 @@ import {
 } from '@/services/dashboard'
 import { useRealtime } from '@/hooks/use-realtime'
 import { useAuth } from '@/hooks/use-auth'
+import { useToolAccess } from '@/hooks/use-tool-access'
 import type { Note } from '@/lib/supabase/types'
 import type { ScheduledMessageWithContact } from '@/services/scheduled_messages'
 
@@ -265,6 +266,7 @@ function DeviceSelect({
 export default function Index() {
   const navigate = useNavigate()
   const { user } = useAuth()
+  const { podeUsar } = useToolAccess()
 
   const [period, setPeriod] = useState<Period>('today')
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null)
@@ -939,9 +941,13 @@ export default function Index() {
               <CardTitle className="text-sm font-semibold text-foreground">
                 Conversas mais ativas — {periodLabel}
               </CardTitle>
-              <Link to="/chat" className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-0.5">
-                Chat <ChevronRight className="h-3 w-3" />
-              </Link>
+              {/* Sem este `if`, quem tem o Whats escondido veria um atalho que
+                  só devolve a pessoa para o Painel. */}
+              {podeUsar['tela-chat'] && (
+                <Link to="/chat" className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-0.5">
+                  Chat <ChevronRight className="h-3 w-3" />
+                </Link>
+              )}
             </div>
           </CardHeader>
           <CardContent className="pt-0">

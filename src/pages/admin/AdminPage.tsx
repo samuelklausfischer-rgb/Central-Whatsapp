@@ -13,13 +13,15 @@ import {
   User as UserIcon,
 } from 'lucide-react'
 import { getUsers, createUser, updateUser, deleteUser, type ManagedUser } from '@/services/users'
-import { getToolUserIds, setToolAccess } from '@/services/tool_access'
+import { getAcessoDaFerramenta, setToolAccess } from '@/services/tool_access'
 import {
   CATALOGO_DE_FERRAMENTAS,
-  FERRAMENTAS_POR_PESSOA,
+  FERRAMENTAS_CONTROLAVEIS,
   ROTULO_DA_LIBERACAO,
+  type EstadoDeAcesso,
 } from '@/lib/ferramentas/catalogo'
 import { getDevices, updateDevice } from '@/services/devices'
+import { setUserDevicesRestricted } from '@/services/superadmin'
 import {
   configureEvolutionWebhooks,
   fetchConnectedInstances,
@@ -41,6 +43,7 @@ import { GlassDialogContent } from '@/components/ui/glass-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
   Select,
   SelectContent,
@@ -90,7 +93,9 @@ export default function AdminPage() {
     SQL**. Agora a lista sai do catálogo, e acrescentar ferramenta não pede
     mudança aqui.
   */
-  const [acessoPorFerramenta, setAcessoPorFerramenta] = useState<Record<string, Set<string>>>({})
+  const [acessoPorFerramenta, setAcessoPorFerramenta] = useState<
+    Record<string, Map<string, boolean>>
+  >({})
   /**
    * A leitura de quem tem o quê chegou mesmo?
    *
@@ -111,9 +116,25 @@ export default function AdminPage() {
     password: '',
     department: '',
     is_admin: false,
-    /** Marcações por chave de `tool_access`. */
-    ferramentas: {} as Record<string, boolean>,
+    /**
+     * Estado por chave de `tool_access`.
+     *
+     * Deixou de ser booleano em 09/09/2026: nas ferramentas de setor a ausência
+     * de linha não quer dizer "não tem" e sim "vale o padrão", e apagar a linha
+     * é diferente de gravar um bloqueio.
+     */
+    ferramentas: {} as Record<string, EstadoDeAcesso>,
     allowed_devices: [] as string[],
+    /**
+     * ⚠️ SEMEADO DO USUÁRIO, nunca assumido.
+     *
+     * `false` significa "acesso total a todas as instâncias", e os 5 admins
+     * não-super estão todos com `true` hoje. Se este campo nascesse `false` por
+     * engano, salvar o cadastro de qualquer um deles daria acesso a TODAS as
+     * instâncias — sem ninguém pedir. Por isso a gravação também só acontece
+     * quando o valor muda (ver `handleSave`).
+     */
+    devices_restricted: false,
   })
 
   const departments = useMemo(() => {
@@ -153,7 +174,7 @@ export default function AdminPage() {
       const [uData, dData, ...listas] = await Promise.all([
         getUsers(),
         getDevices(),
-        ...FERRAMENTAS_POR_PESSOA.map((f) => getToolUserIds(f.chave)),
+        ...FERRAMENTAS_CONTROLAVEIS.map((f) => getAcessoDaFerramenta(f.chave)),
       ])
       // Marca que a leitura FOI feita. Ver a trava em `handleSave`.
       setFerramentasCarregadas(true)
@@ -161,7 +182,7 @@ export default function AdminPage() {
       setDevices(dData)
       setAcessoPorFerramenta(
         Object.fromEntries(
-          FERRAMENTAS_POR_PESSOA.map((f, i) => [f.chave, new Set(listas[i] as string[])]),
+          FERRAMENTAS_CONTROLAVEIS.map((f, i) => [f.chave, listas[i] as Map<string, boolean>]),
         ),
       )
     } catch (e) {
@@ -179,6 +200,20 @@ export default function AdminPage() {
     return devices.filter((device) => device.department === department).map((device) => device.id)
   }, [devices])
 
+  /**
+   * Pode ligar/desligar o "acesso total" de alguém?
+   *
+   * A RPC `set_user_devices_restricted` começa com
+   * `if not _is_super_admin() then raise exception 'forbidden'`, e este popup é
+   * aberto a QUALQUER admin — sem esta guarda, os outros veriam uma chave que
+   * só devolve erro.
+   *
+   * E nunca sobre si mesmo: o card que esta chave substituiu excluía o próprio
+   * super-admin da lista, justamente para ninguém se autotrancar.
+   */
+  const podeMexerNaRestricao =
+    Boolean(currentUser?.is_super_admin) && editingUser?.id !== currentUser?.id
+
   const openCreateDialog = () => {
     setEditingUser(null)
     setFormData({
@@ -190,6 +225,7 @@ export default function AdminPage() {
       is_admin: false,
       ferramentas: {},
       allowed_devices: [],
+      devices_restricted: false,
     })
     setIsDialogOpen(true)
   }
@@ -204,9 +240,14 @@ export default function AdminPage() {
       department: user.department || '',
       is_admin: user.is_admin || false,
       ferramentas: Object.fromEntries(
-        FERRAMENTAS_POR_PESSOA.map((f) => [f.chave, acessoPorFerramenta[f.chave]?.has(user.id) ?? false]),
+        FERRAMENTAS_CONTROLAVEIS.map((f) => {
+          const permitido = acessoPorFerramenta[f.chave]?.get(user.id)
+          // Sem linha = padrão. Com linha, ela diz se é liberação ou bloqueio.
+          return [f.chave, permitido === undefined ? 'padrao' : permitido ? 'liberar' : 'bloquear']
+        }),
       ),
       allowed_devices: user.allowed_devices || [],
+      devices_restricted: Boolean(user.devices_restricted),
     })
     setIsDialogOpen(true)
   }
@@ -365,8 +406,8 @@ export default function AdminPage() {
       if (editingUser) {
         await updateUser(editingUser.id, dataToSave)
         if (ferramentasCarregadas) {
-          for (const f of FERRAMENTAS_POR_PESSOA) {
-            await setToolAccess(editingUser.id, f.chave, formData.ferramentas[f.chave] ?? false)
+          for (const f of FERRAMENTAS_CONTROLAVEIS) {
+            await setToolAccess(editingUser.id, f.chave, formData.ferramentas[f.chave] ?? 'padrao')
           }
         } else {
           // O cadastro foi salvo; as ferramentas ficaram como estavam, de
@@ -377,14 +418,60 @@ export default function AdminPage() {
             variant: 'destructive',
           })
         }
+        /*
+          ⚠️ SÓ QUANDO MUDA, e por RPC à parte.
+
+          A edge function `manage-user` não conhece `devices_restricted` — ela
+          trata email, senha, nome, usuário, is_admin, setor e aparelhos. E os 5
+          admins não-super estão TODOS restritos hoje: uma gravação incondicional
+          com o valor errado daria a todos eles acesso a todas as instâncias.
+          Comparar com o cadastro carregado é o que faz editar nome ou setor não
+          encostar na restrição.
+        */
+        if (
+          podeMexerNaRestricao &&
+          formData.devices_restricted !== Boolean(editingUser.devices_restricted)
+        ) {
+          try {
+            await setUserDevicesRestricted(editingUser.id, formData.devices_restricted)
+          } catch (e) {
+            // O cadastro já foi salvo; avisar em vez de fingir que deu tudo certo.
+            toast({
+              title: 'Acesso às instâncias não foi alterado',
+              description: (e as Error).message,
+              variant: 'destructive',
+            })
+          }
+        }
         toast({ title: 'Usuário atualizado com sucesso' })
       } else {
         const created = await createUser(dataToSave)
         // As liberações são gravadas depois do usuário existir: tool_access.user_id
         // tem FK para auth.users, então antes disso o insert seria rejeitado.
         if (created?.id) {
-          for (const f of FERRAMENTAS_POR_PESSOA) {
-            if (formData.ferramentas[f.chave]) await setToolAccess(created.id, f.chave, true)
+          for (const f of FERRAMENTAS_CONTROLAVEIS) {
+            const estado = formData.ferramentas[f.chave] ?? 'padrao'
+            // `padrao` é a ausência de linha, e quem acabou de nascer já não tem
+            // nenhuma — gravar seria uma ida ao banco para não mudar nada.
+            if (estado !== 'padrao') await setToolAccess(created.id, f.chave, estado)
+          }
+
+          /*
+            Mesma lógica das ferramentas: a coluna nasce `false` (acesso total),
+            então só vale a ida ao banco se a chave foi DESMARCADA. Sem isto, um
+            super-admin que criasse um administrador já restrito veria a chave
+            não surtir efeito nenhum — ela só é gravada no ramo de edição.
+          */
+          if (podeMexerNaRestricao && formData.devices_restricted) {
+            try {
+              await setUserDevicesRestricted(created.id, true)
+            } catch (e) {
+              toast({
+                title: 'Usuário criado, mas sem a restrição de instâncias',
+                description: (e as Error).message,
+                variant: 'destructive',
+              })
+            }
           }
         }
         toast({ title: 'Usuário criado com sucesso' })
@@ -545,22 +632,34 @@ export default function AdminPage() {
                           </Badge>
                         )}
                         {/*
-                          Uma etiqueta por ferramenta liberada, e não só a de
-                          Licitações: com quatro ferramentas liberáveis, mostrar
-                          uma só escondia as outras três e dava a impressão de
-                          que ninguém tinha acesso a elas.
+                          Uma etiqueta por EXCEÇÃO gravada.
+
+                          Eram as ferramentas liberadas. Desde 09/09 as de setor
+                          entram na conta, e mostrar tudo encheria o cartão de
+                          quem é do Financeiro com duas etiquetas que só repetem
+                          o setor logo abaixo. O que vale ser visto é o que
+                          CONTRARIA o padrão — e para Licitações, Proposta, PRN
+                          Hub e Controle de Mensagens nada mudou, porque nelas
+                          liberar é a única exceção possível.
                         */}
-                        {FERRAMENTAS_POR_PESSOA.filter((f) =>
-                          acessoPorFerramenta[f.chave]?.has(user.id),
-                        ).map((f) => (
-                          <Badge
-                            key={f.chave}
-                            variant="outline"
-                            className="border-amber-500/30 bg-amber-500/10 text-amber-500"
-                          >
-                            {f.titulo}
-                          </Badge>
-                        ))}
+                        {FERRAMENTAS_CONTROLAVEIS.map((f) => ({
+                          f,
+                          permitido: acessoPorFerramenta[f.chave]?.get(user.id),
+                        }))
+                          .filter((x) => x.permitido !== undefined)
+                          .map(({ f, permitido }) => (
+                            <Badge
+                              key={f.chave}
+                              variant="outline"
+                              className={
+                                permitido
+                                  ? 'border-amber-500/30 bg-amber-500/10 text-amber-500'
+                                  : 'border-red-500/30 bg-red-500/10 text-red-400'
+                              }
+                            >
+                              {permitido ? f.titulo : `Sem ${f.titulo}`}
+                            </Badge>
+                          ))}
                       </div>
                     </div>
                   </CardHeader>
@@ -644,7 +743,7 @@ export default function AdminPage() {
             o próprio fundo (`bg-background/95` + blur) — deixar o antigo
             `bg-card` por cima anularia o vidro do modal (`className` do
             `cn()` vence por último). */}
-        <GlassDialogContent className="sm:max-w-lg">
+        <GlassDialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{editingUser ? 'Editar Usuário' : 'Novo Usuário'}</DialogTitle>
             <DialogDescription>
@@ -759,67 +858,230 @@ export default function AdminPage() {
               "cadê a Gestão Médica?" — e marcar uma caixa ali abriria o menu
               para uma tela que negaria, porque a regra dela vive no banco.
             */}
-            <div className="space-y-1 pt-1">
-              <Label className="font-medium">Ferramentas</Label>
-              {CATALOGO_DE_FERRAMENTAS.map((f) => {
-                const marcavel = f.liberacao === 'pessoa' && f.chave
-                return (
-                  <div
-                    key={f.slug}
-                    className="flex items-start gap-2.5 rounded-lg px-1 py-1.5"
-                  >
-                    {marcavel ? (
-                      <Checkbox
-                        id={`ferramenta-${f.slug}`}
-                        className="mt-0.5"
-                        checked={formData.ferramentas[f.chave!] ?? false}
-                        onCheckedChange={(checked) =>
-                          setFormData((prev) => ({
-                            ...prev,
-                            ferramentas: { ...prev.ferramentas, [f.chave!]: checked as boolean },
-                          }))
-                        }
-                      />
-                    ) : (
-                      <span className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden />
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <Label
-                        htmlFor={marcavel ? `ferramenta-${f.slug}` : undefined}
-                        className={marcavel ? 'font-medium' : 'font-medium text-muted-foreground'}
-                      >
-                        {f.titulo}
-                      </Label>
-                      {!marcavel && (
-                        <Badge variant="outline" className="ml-2 text-[10px] font-normal">
-                          {ROTULO_DA_LIBERACAO[f.liberacao]}
-                        </Badge>
-                      )}
-                      {f.explicacao && (
-                        <p className="text-xs leading-relaxed text-muted-foreground">
-                          {f.explicacao}
-                        </p>
-                      )}
-                    </div>
+            {/*
+              UMA FORMA DE LINHA SÓ.
+
+              Esta lista foi de 2 caixinhas para 20 itens ao longo de 09/09/2026,
+              e chegou ao fim do dia com TRÊS controles diferentes na mesma tela:
+              caixa de sim/não em quatro, três botões em quinze, e o Painel sem
+              controle. O `TipoDeLiberacao` perdeu o `'pessoa'` para que a
+              uniformidade viesse da origem, e não de um `if` aqui.
+
+              O seletor é o `ToggleGroup` que o app já usa nos filtros de
+              conversa — não um grupo de botões feito à mão.
+            */}
+            {(['tela', 'sistema'] as const).map((grupo) => {
+              const doGrupo = CATALOGO_DE_FERRAMENTAS.filter((f) => f.grupo === grupo)
+              const excecoes = doGrupo.filter(
+                (f) => f.chave && (formData.ferramentas[f.chave] ?? 'padrao') !== 'padrao',
+              ).length
+              return (
+                <div key={grupo} className="space-y-1.5 pt-1">
+                  <div className="flex items-baseline justify-between">
+                    <Label className="font-medium">
+                      {grupo === 'tela' ? 'Telas do app' : 'Sistemas e ferramentas'}
+                    </Label>
+                    {/*
+                      A contagem é o que se procura ao abrir o cadastro de
+                      alguém: "esta pessoa está no padrão ou tem ajuste?".
+                    */}
+                    <span className="text-[11px] text-muted-foreground">
+                      {excecoes === 0
+                        ? 'seguindo o padrão'
+                        : `${excecoes} ${excecoes === 1 ? 'exceção' : 'exceções'}`}
+                    </span>
                   </div>
-                )
-              })}
-              {/*
-                Sem isto, marcar a caixa de um super-admin e ver "nada mudou" faz
-                a pessoa achar que a tela está quebrada.
-              */}
-              <p className="pt-1 text-xs text-muted-foreground">
-                Quem é super-administrador enxerga todas as ferramentas, marcadas ou não.
-              </p>
-            </div>
+
+                  {/* Mesma moldura da lista de aparelhos, logo abaixo. */}
+                  <div className="max-h-64 space-y-0.5 overflow-y-auto pr-2">
+                    {doGrupo.map((f) => {
+                      const estado: EstadoDeAcesso = f.chave
+                        ? formData.ferramentas[f.chave] ?? 'padrao'
+                        : 'padrao'
+                      /*
+                        O padrão é calculado com o que está NO FORMULÁRIO, e não
+                        com o cadastro salvo: mudar o setor para Financeiro faz o
+                        rótulo virar "Padrão · tem" na hora, antes de salvar. Sem
+                        isso o botão diria uma coisa e o efeito seria outro.
+                      */
+                      const padraoDaPessoa = f.padrao?.({
+                        perfil: {
+                          is_admin: formData.is_admin,
+                          department: formData.department || null,
+                          is_super_admin: editingUser?.is_super_admin,
+                        },
+                        // Esta tela decide sobre OUTRA pessoa, e não tem como ler
+                        // o cadastro dela no Sistema de Relatórios.
+                        temPerfilRelatorios: null,
+                      })
+                      /*
+                        Descrição comprida vira tooltip, para as linhas terem
+                        todas a mesma altura — MENOS quando começa com ⚠️. Os dois
+                        avisos que importam ("liberar não cria a conta no outro
+                        sistema" e "bloquear não revoga os dados do WhatsApp")
+                        precisam ser lidos sem passar o mouse.
+                      */
+                      const alerta = f.explicacao?.includes('⚠️')
+                        ? f.explicacao.slice(f.explicacao.indexOf('⚠️'))
+                        : null
+
+                      return (
+                        <div key={f.slug} className="rounded-md px-1 py-1.5 hover:bg-accent/40">
+                          <div className="flex items-center gap-3">
+                            <div className="min-w-0 flex-1" title={f.explicacao}>
+                              <p className="truncate text-sm font-medium">{f.titulo}</p>
+                              <p className="truncate text-[11px] text-muted-foreground">
+                                {f.liberacao === 'fixa'
+                                  ? ROTULO_DA_LIBERACAO.fixa
+                                  : f.padraoDescricao}
+                              </p>
+                            </div>
+
+                            {f.chave ? (
+                              <ToggleGroup
+                                type="single"
+                                value={estado}
+                                // `v &&`: o ToggleGroup DESMARCA ao clicar no item
+                                // já ativo e devolve string vazia. Sem esta guarda,
+                                // o segundo clique apagaria o estado escolhido.
+                                onValueChange={(v) =>
+                                  v &&
+                                  setFormData((prev) => ({
+                                    ...prev,
+                                    ferramentas: {
+                                      ...prev.ferramentas,
+                                      [f.chave!]: v as EstadoDeAcesso,
+                                    },
+                                  }))
+                                }
+                                className="shrink-0 justify-end gap-1"
+                              >
+                                <ToggleGroupItem
+                                  value="padrao"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 w-[104px] px-2 text-[11px]"
+                                >
+                                  {f.padraoDependeDeOutroSistema
+                                    ? 'Padrão'
+                                    : `Padrão · ${padraoDaPessoa ? 'tem' : 'não'}`}
+                                </ToggleGroupItem>
+                                <ToggleGroupItem
+                                  value="liberar"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 w-[68px] px-2 text-[11px] data-[state=on]:border-primary/40 data-[state=on]:bg-primary/10"
+                                >
+                                  Liberar
+                                </ToggleGroupItem>
+                                <ToggleGroupItem
+                                  value="bloquear"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 w-[76px] px-2 text-[11px] data-[state=on]:border-red-500/40 data-[state=on]:bg-red-500/10 data-[state=on]:text-red-400"
+                                >
+                                  Bloquear
+                                </ToggleGroupItem>
+                              </ToggleGroup>
+                            ) : (
+                              // O Painel ocupa a mesma linha, sem seletor. Sumir
+                              // com ele traria de volta a pergunta "cadê o Painel?".
+                              <span className="w-[256px] shrink-0 text-right text-[11px] text-muted-foreground">
+                                —
+                              </span>
+                            )}
+                          </div>
+
+                          {alerta && (
+                            <p className="pt-1 text-[11px] leading-relaxed text-amber-500/90">
+                              {alerta}
+                            </p>
+                          )}
+
+                          {/*
+                            Bloquear o Whats de quem TEM aparelho designado deixa
+                            a pessoa sem conseguir atender, e ninguém percebe até
+                            alguém reclamar que as mensagens não são respondidas.
+                          */}
+                          {f.chave === 'tela-chat' &&
+                            estado === 'bloquear' &&
+                            formData.allowed_devices.length > 0 && (
+                              <p className="pt-1 text-[11px] leading-relaxed text-red-400">
+                                Esta pessoa tem {formData.allowed_devices.length}{' '}
+                                {formData.allowed_devices.length === 1 ? 'aparelho' : 'aparelhos'} designados
+                                e não vai mais conseguir atender. Desmarque os aparelhos abaixo se a
+                                intenção é tirá-la do atendimento.
+                              </p>
+                            )}
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {grupo === 'sistema' && (
+                    /*
+                      Sem isto, marcar algo para um super-admin e ver "nada mudou"
+                      faz a pessoa achar que a tela está quebrada. O bloqueio
+                      também não o alcança, de propósito: é a escotilha contra
+                      alguém se trancar para fora desta própria tela.
+                    */
+                    <p className="text-[11px] text-muted-foreground">
+                      Quem é super-administrador enxerga tudo, e não pode ser bloqueado.
+                    </p>
+                  )}
+                </div>
+              )
+            })}
+
 
             {/* A seção aparece TAMBÉM para admin. Escondê-la fazia o cadastro
                 salvar sem nenhum aparelho, e quem não tem aparelho marcado não
                 entra na lista de "Designar" de instância nenhuma. */}
             <div className="pt-4 border-t border-border">
               <Label className="mb-1 block">Acesso aos Celulares</Label>
+
+              {/*
+                A CHAVE VEIO DO PAINEL SUPER-ADMIN em 09/09/2026, quando o card
+                "Acesso ao WhatsApp por usuário" foi aposentado — ele duplicava
+                esta lista, mas era o ÚNICO lugar do app onde se ligava o
+                `devices_restricted`.
+
+                E ela decide de verdade: em `use-auth.tsx` a regra é
+                `is_super_admin || (is_admin && !devices_restricted)`. Sem
+                restrição, as caixas abaixo não restringem um admin — só definem
+                quem aparece no "Designar". Por isso a chave fica ACIMA da lista:
+                é ela que diz se o que vem depois vale.
+              */}
+              {formData.is_admin &&
+                (podeMexerNaRestricao ? (
+                  <label className="mb-3 flex items-center gap-2.5 rounded-md bg-accent/40 px-2.5 py-2">
+                    <Checkbox
+                      id="acesso-total"
+                      checked={!formData.devices_restricted}
+                      onCheckedChange={(checked) =>
+                        setFormData((prev) => ({ ...prev, devices_restricted: !checked }))
+                      }
+                    />
+                    <span className="text-sm">
+                      Acesso total a todas as instâncias
+                      <span className="block text-[11px] text-muted-foreground">
+                        Desmarque para restringir este administrador às instâncias marcadas abaixo.
+                      </span>
+                    </span>
+                  </label>
+                ) : (
+                  <p className="mb-3 rounded-md bg-accent/40 px-2.5 py-2 text-[11px] text-muted-foreground">
+                    {formData.devices_restricted
+                      ? 'Este administrador está restrito às instâncias marcadas abaixo.'
+                      : 'Este administrador tem acesso total a todas as instâncias.'}{' '}
+                    {editingUser?.id === currentUser?.id
+                      ? 'Você não altera a própria restrição.'
+                      : 'Só o super-administrador altera isto.'}
+                  </p>
+                ))}
+
               <p className="mb-3 text-xs text-muted-foreground">
-                {formData.is_admin
+                {formData.is_admin && !formData.devices_restricted
                   ? 'Administrador sem restrição enxerga todas as instâncias de qualquer jeito, mas é esta lista que faz a pessoa aparecer no "Designar" de cada uma.'
                   : 'Marque as instâncias que a pessoa pode abrir. É a mesma lista que a coloca no "Designar".'}
               </p>

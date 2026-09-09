@@ -89,7 +89,12 @@ export function useCaixaDeNotificacoes() {
  * MONTAR NO `Layout`, uma vez só. Se morasse numa rota, desmontaria ao navegar
  * — foi assim que a notificação de mensagem sumiu fora do /chat antes.
  */
-export function useNotificacoes() {
+/**
+ * @param ativo `false` quando a pessoa tem a Agenda bloqueada — mesma razão do
+ *   `use-notificacoes-de-mensagem`: sem assinatura e sem pop-up de algo que ela
+ *   não pode abrir.
+ */
+export function useNotificacoes(ativo = true) {
   const { user, isAuthenticated } = useAuth()
   const navigate = useNavigate()
 
@@ -102,7 +107,7 @@ export function useNotificacoes() {
   const jaAvisadas = useRef<Set<string>>(new Set())
 
   const carregar = useCallback(async () => {
-    if (!isAuthenticated || !user?.id) return
+    if (!isAuthenticated || !user?.id || !ativo) return
     definirCarregando(true)
     try {
       const lista = await buscarTudo()
@@ -112,7 +117,7 @@ export function useNotificacoes() {
     } finally {
       definirCarregando(false)
     }
-  }, [isAuthenticated, user?.id])
+  }, [isAuthenticated, user?.id, ativo])
 
   useEffect(() => {
     void carregar()
@@ -166,7 +171,7 @@ export function useNotificacoes() {
         (url) => navigate(url),
       )
     },
-    Boolean(user?.id),
+    Boolean(user?.id) && ativo,
     undefined,
     () => void carregar(),
   )

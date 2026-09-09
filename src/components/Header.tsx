@@ -22,7 +22,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { useAuth } from '@/hooks/use-auth'
 import { useToolAccess } from '@/hooks/use-tool-access'
 import { useInstalarPwa } from '@/hooks/use-instalar-pwa'
-import { DESTINOS_PRINCIPAIS, gruposDeFerramentas, itensDeConta, ehAcao } from '@/lib/navegacao'
+import { destinosPrincipais, gruposDeFerramentas, itensDeConta, ehAcao } from '@/lib/navegacao'
 import { iniciarTour } from '@/components/TourDoApp'
 import { cn } from '@/lib/utils'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
@@ -50,10 +50,9 @@ const ESTILO_BOTAO_INSTALAR =
  */
 function FerramentasMenu() {
   const navigate = useNavigate()
-  const { user } = useAuth()
 
   // Mesmos grupos (e mesmos gates) que a folha "Mais" do celular usa.
-  const grupos = gruposDeFerramentas(user, useToolAccess())
+  const grupos = gruposDeFerramentas(useToolAccess())
 
   return (
     <DropdownMenu>
@@ -127,8 +126,9 @@ export function Header() {
 
   const isDark = resolvedTheme === 'dark'
 
-  // Mesmos destinos que viram as abas do rodapé no celular.
-  const navLinks = DESTINOS_PRINCIPAIS
+  // Mesmos destinos que viram as abas do rodapé no celular — já sem as telas
+  // que esta pessoa não pode ver.
+  const navLinks = destinosPrincipais(useToolAccess())
 
   return (
     <>
