@@ -2,6 +2,13 @@ import { supabaseFinanceiro } from '@/lib/supabase/client-financeiro'
 
 export type RateioEmpresa = 'PRN' | 'PRN_APICE' | 'MEDIMAGEM' | 'MEDIMAGEM_APICE'
 
+// Serviço avulso do mês informado na tela (ex.: horas extras). O valor total é
+// dividido pelo motor entre as unidades cadastradas e ativas da empresa.
+export interface RateioAdicional {
+  nome: string
+  valor: number
+}
+
 export interface RateioResumo {
   empresa: string
   total_variavel: number
@@ -10,6 +17,9 @@ export interface RateioResumo {
   totais_taxa: Record<string, number>
   n_unidades: number
   total_exames: number
+  adicionais?: RateioAdicional[]
+  adicional_total?: number
+  adicional_n_unidades?: number
 }
 
 export interface RateioPendencia {
@@ -37,6 +47,8 @@ export interface RateioHistoricoItem {
   total_exames: number
   n_pendencias: number
   pendencias: RateioPendencia[]
+  adicionais: RateioAdicional[] | null
+  adicional_total: number | null
   criado_em: string
 }
 
@@ -48,14 +60,20 @@ const WEBHOOK_FALLBACK = 'https://apps-n8n.srofjl.easypanel.host/webhook/rateio-
 const TABLE_RATEIO = 'dash_rateio_execucoes'
 const RATEIO_LIST_COLS =
   'id, empresa, arquivo_nome, total_variavel, total_encargos, total_geral, totais_taxa, ' +
-  'n_unidades, total_exames, n_pendencias, pendencias, criado_em'
+  'n_unidades, total_exames, n_pendencias, pendencias, adicionais, adicional_total, criado_em'
 
-export async function processarRateio(arquivo: File, empresa: RateioEmpresa): Promise<RateioResultado> {
+export async function processarRateio(
+  arquivo: File,
+  empresa: RateioEmpresa,
+  adicionais: RateioAdicional[] = [],
+): Promise<RateioResultado> {
   const webhookUrl = import.meta.env.VITE_N8N_RATEIO_WEBHOOK || WEBHOOK_FALLBACK
 
   const fd = new FormData()
   fd.append('data', arquivo, arquivo.name)
   fd.append('empresa', empresa)
+  // Lista vazia não vai no corpo: sem o campo, o motor devolve o mesmo de sempre.
+  if (adicionais.length) fd.append('adicionais', JSON.stringify(adicionais))
 
   const res = await fetch(webhookUrl, { method: 'POST', body: fd })
   if (!res.ok) throw new Error(`Falha no processamento (HTTP ${res.status})`)

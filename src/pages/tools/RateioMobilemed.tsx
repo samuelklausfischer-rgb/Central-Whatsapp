@@ -1,14 +1,15 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { Loader2, UploadCloud, Download, FileSpreadsheet } from 'lucide-react'
+import { Loader2, UploadCloud, Download, FileSpreadsheet, Plus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import { GlassCard } from '@/components/ui/surface'
 import { ListRow } from '@/components/ui/list-row'
 import { useToast } from '@/hooks/use-toast'
 import { FinanceiroAuthProvider, useFinanceiroAuth } from '@/contexts/financeiro-auth-context'
 import { useRateioUpload, useRateioHistorico } from '@/hooks/use-rateio'
 import { RateioHistoricoPanel } from '@/components/rateio/RateioHistoricoPanel'
-import { fmt, fmtNum, baixarBase64 } from '@/lib/rateio/format'
+import { fmt, fmtNum, valorNumerico, baixarBase64 } from '@/lib/rateio/format'
 import { deleteRateioExecucao, type RateioEmpresa } from '@/services/rateio/rateio-service'
 
 const EMPRESAS: { key: RateioEmpresa; label: string }[] = [
@@ -52,10 +53,17 @@ function FinanceiroLoginGate({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
+// Linha do formulário de serviço adicional. `valor` fica como texto enquanto o
+// usuário digita; só vira número na hora de enviar.
+type LinhaAdicional = { nome: string; valor: string }
+
+const LINHA_ADICIONAL_VAZIA: LinhaAdicional = { nome: '', valor: '' }
+
 function RateioInner() {
   const [empresa, setEmpresa] = useState<RateioEmpresa>('PRN')
   const [arquivo, setArquivo] = useState<File | null>(null)
   const [arrastando, setArrastando] = useState(false)
+  const [adicionais, setAdicionais] = useState<LinhaAdicional[]>([{ ...LINHA_ADICIONAL_VAZIA }])
   const inputRef = useRef<HTMLInputElement>(null)
   const { toast } = useToast()
 
@@ -71,10 +79,29 @@ function RateioInner() {
     setArquivo(f)
   }
 
+  function atualizarAdicional(i: number, campo: keyof LinhaAdicional, valor: string) {
+    setAdicionais((atual) => atual.map((a, idx) => (idx === i ? { ...a, [campo]: valor } : a)))
+  }
+
+  function adicionarLinhaAdicional() {
+    setAdicionais((atual) => [...atual, { ...LINHA_ADICIONAL_VAZIA }])
+  }
+
+  function removerLinhaAdicional(i: number) {
+    setAdicionais((atual) => (atual.length > 1 ? atual.filter((_, idx) => idx !== i) : atual))
+  }
+
+  // Só sobe o que tem valor > 0. Linha em branco é o estado normal (campo opcional).
+  const adicionaisValidos = adicionais
+    .map((a) => ({ nome: a.nome.trim(), valor: valorNumerico(a.valor) }))
+    .filter((a) => a.valor > 0)
+
+  const totalAdicionais = adicionaisValidos.reduce((s, a) => s + a.valor, 0)
+
   async function handleGerar() {
     if (!arquivo || enviando) return
     try {
-      await processar(arquivo, empresa)
+      await processar(arquivo, empresa, adicionaisValidos)
       refetch()
     } catch {
       // erro já fica exposto pelo hook (erro/status) — nada mais a fazer aqui
@@ -173,6 +200,64 @@ function RateioInner() {
             />
           </div>
 
+          <div className="mt-4">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Serviço adicional <span className="normal-case">(opcional)</span>
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={adicionarLinhaAdicional}
+                className="h-7 gap-1 px-2 text-xs text-primary hover:text-primary"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                adicionar serviço
+              </Button>
+            </div>
+
+            <div className="space-y-2">
+              {adicionais.map((a, i) => (
+                <div key={i} className="flex gap-2">
+                  <Input
+                    value={a.nome}
+                    onChange={(e) => atualizarAdicional(i, 'nome', e.target.value)}
+                    placeholder="Nome do serviço (ex.: horas extras de setembro)"
+                    className="min-w-0 flex-1"
+                  />
+                  <Input
+                    inputMode="decimal"
+                    value={a.valor}
+                    onChange={(e) => atualizarAdicional(i, 'valor', e.target.value)}
+                    placeholder="Valor total"
+                    className="w-32 shrink-0 text-right"
+                  />
+                  {adicionais.length > 1 && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      aria-label={`Remover serviço ${i + 1}`}
+                      onClick={() => removerLinhaAdicional(i)}
+                      className="shrink-0 text-muted-foreground hover:text-destructive"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              {totalAdicionais > 0
+                ? `${fmt(totalAdicionais)} será dividido igualmente entre as unidades cadastradas e ativas de ${
+                    EMPRESAS.find((e) => e.key === empresa)?.label || empresa
+                  }.`
+                : 'Se preenchido, o valor é dividido igualmente entre as unidades cadastradas e ativas da empresa selecionada.'}
+            </p>
+          </div>
+
           <Button
             onClick={handleGerar}
             disabled={!arquivo || enviando}
@@ -234,6 +319,23 @@ function RateioInner() {
                   </ListRow>
                 ))}
               </div>
+
+              {(r.adicionais || []).length > 0 && (
+                <div className="mt-4 border-t border-border pt-3">
+                  <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Serviços adicionais informados
+                    {r.adicional_n_unidades
+                      ? ` · rateados entre ${fmtNum(r.adicional_n_unidades)} unidades`
+                      : ''}
+                  </p>
+                  {(r.adicionais || []).map((a, i) => (
+                    <ListRow key={i} className="justify-between">
+                      <span className="text-sm text-muted-foreground">{a.nome}</span>
+                      <span className="text-sm font-medium text-foreground">{fmt(a.valor)}</span>
+                    </ListRow>
+                  ))}
+                </div>
+              )}
             </GlassCard>
 
             {pendencias.length > 0 && (

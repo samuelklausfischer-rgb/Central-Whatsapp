@@ -6,6 +6,7 @@ import {
   type RateioEmpresa,
   type RateioResultado,
   type RateioHistoricoItem,
+  type RateioAdicional,
 } from '@/services/rateio/rateio-service'
 
 export function useRateioUpload() {
@@ -14,46 +15,51 @@ export function useRateioUpload() {
   const [erro, setErro] = useState<string | null>(null)
   const [resultado, setResultado] = useState<RateioResultado | null>(null)
 
-  const processar = useCallback(async (arquivo: File, empresa: RateioEmpresa) => {
-    setEnviando(true)
-    setErro(null)
-    setResultado(null)
-    setStatus('Processando planilha, aguarde...')
-    try {
-      const json = await processarRateio(arquivo, empresa)
-      setResultado(json)
-      setStatus('Rateio gerado com sucesso.')
-
-      // Histórico é secundário ao resultado — se a gravação falhar, o usuário já
-      // tem o resumo e o download na tela; só avisamos no console.
+  const processar = useCallback(
+    async (arquivo: File, empresa: RateioEmpresa, adicionais: RateioAdicional[] = []) => {
+      setEnviando(true)
+      setErro(null)
+      setResultado(null)
+      setStatus('Processando planilha, aguarde...')
       try {
-        await insertRateioExecucao({
-          empresa,
-          arquivo_nome: arquivo.name,
-          total_variavel: json.resumo.total_variavel,
-          total_encargos: json.resumo.total_encargos,
-          total_geral: json.resumo.total_geral,
-          totais_taxa: json.resumo.totais_taxa,
-          n_unidades: json.resumo.n_unidades,
-          total_exames: json.resumo.total_exames,
-          n_pendencias: (json.pendencias || []).length,
-          pendencias: json.pendencias || [],
-          resultado_xlsx_nome: json.arquivo?.nome,
-          resultado_xlsx_base64: json.arquivo?.base64,
-        })
-      } catch (histErr) {
-        console.error('Falha ao gravar histórico do rateio:', (histErr as Error).message)
-      }
+        const json = await processarRateio(arquivo, empresa, adicionais)
+        setResultado(json)
+        setStatus('Rateio gerado com sucesso.')
 
-      return json
-    } catch (err) {
-      setErro((err as Error).message)
-      setStatus('')
-      throw err
-    } finally {
-      setEnviando(false)
-    }
-  }, [])
+        // Histórico é secundário ao resultado — se a gravação falhar, o usuário já
+        // tem o resumo e o download na tela; só avisamos no console.
+        try {
+          await insertRateioExecucao({
+            empresa,
+            arquivo_nome: arquivo.name,
+            total_variavel: json.resumo.total_variavel,
+            total_encargos: json.resumo.total_encargos,
+            total_geral: json.resumo.total_geral,
+            totais_taxa: json.resumo.totais_taxa,
+            n_unidades: json.resumo.n_unidades,
+            total_exames: json.resumo.total_exames,
+            n_pendencias: (json.pendencias || []).length,
+            pendencias: json.pendencias || [],
+            adicionais: json.resumo.adicionais || [],
+            adicional_total: json.resumo.adicional_total ?? 0,
+            resultado_xlsx_nome: json.arquivo?.nome,
+            resultado_xlsx_base64: json.arquivo?.base64,
+          })
+        } catch (histErr) {
+          console.error('Falha ao gravar histórico do rateio:', (histErr as Error).message)
+        }
+
+        return json
+      } catch (err) {
+        setErro((err as Error).message)
+        setStatus('')
+        throw err
+      } finally {
+        setEnviando(false)
+      }
+    },
+    [],
+  )
 
   return { processar, enviando, status, erro, resultado }
 }
