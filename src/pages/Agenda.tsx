@@ -169,7 +169,10 @@ function doOutlook(ev: EventoDoOutlook): ItemDaAgenda {
     // O `outlook_event_id` existe para amarrar uma linha NOSSA a um evento de
     // lá — aqui não há linha nossa nenhuma.
     outlook_event_id: null,
-    outlook_ical_uid: null,
+    // Preenchido (e não mais fixo em null): é por este campo que `porDia`
+    // deduplica contra a linha do banco que já representa o mesmo compromisso
+    // (ver comentário na dedup, mais abaixo).
+    outlook_ical_uid: ev.ical_uid ?? null,
     outlook_sync_erro: null,
     // Cor é campo só nosso: o Microsoft Graph tem categorias de cor próprias,
     // e este recurso não tenta traduzir uma coisa na outra.
@@ -430,10 +433,41 @@ export default function Agenda() {
    * do tempo.
    */
   const porDia = useMemo(() => {
-    const todos: ItemDaAgenda[] = [
-      ...eventos.map((ev) => daNossaAgenda(ev, user?.id, souAdmin)),
-      ...doOutlookNoPeriodo.map(doOutlook),
-    ]
+    const nossos = eventos.map((ev) => daNossaAgenda(ev, user?.id, souAdmin))
+
+    // Trata nulo/string vazia como "não casa" — um `outlook_ical_uid` ausente
+    // no banco não pode combinar com um `ical_uid` ausente no Outlook, ou
+    // dois compromissos sem chave nenhuma sumiriam um do outro.
+    const naoVazio = (v: string | null | undefined): v is string => Boolean(v && v.trim())
+
+    const icalUidsDoBanco = new Set(nossos.map((ev) => ev.outlook_ical_uid).filter(naoVazio))
+    const eventIdsDoBanco = new Set(nossos.map((ev) => ev.outlook_event_id).filter(naoVazio))
+
+    /**
+     * Deduplicação Outlook x banco (ver `tipos.ts:outlook_ical_uid` e o
+     * comentário de `criar`/`atualizar` em `agenda-microsoft/index.ts`).
+     *
+     * Casa por `ical_uid` primeiro — é a chave que vale em TODAS as caixas,
+     * inclusive na de quem foi só convidado, e por isso é ela que resolve o
+     * caso de quem recebeu o convite mas não criou o compromisso.
+     * `outlook_event_id` entra como rede: só bate na caixa de quem criou, mas
+     * cobre linhas antigas gravadas antes de existir `ical_uid`.
+     *
+     * A remoção é SÓ do lado do Outlook. A linha do banco carrega `escopo`,
+     * `group_id` e as ações do app (editar, excluir, ver grupo) — descartá-la
+     * trocaria a duplicata por um bug pior. Por isso o filtro roda sobre
+     * `doOutlookNoPeriodo`, nunca sobre `nossos`.
+     *
+     * Não compara título + horário: duas reuniões diferentes no mesmo horário
+     * existem de verdade, e colapsá-las esconderia um compromisso real.
+     */
+    const doOutlookSemDuplicata = doOutlookNoPeriodo.filter((ev) => {
+      if (naoVazio(ev.ical_uid) && icalUidsDoBanco.has(ev.ical_uid)) return false
+      if (naoVazio(ev.id) && eventIdsDoBanco.has(ev.id)) return false
+      return true
+    })
+
+    const todos: ItemDaAgenda[] = [...nossos, ...doOutlookSemDuplicata.map(doOutlook)]
     const mapa = new Map<string, ItemDaAgenda[]>()
     for (const ev of todos) {
       const quando = new Date(ev.starts_at)

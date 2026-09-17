@@ -27,6 +27,17 @@ export interface EventoDoOutlook {
    */
   tipo?: string
   serie_id?: string | null
+  /**
+   * `iCalUId` do Exchange — o MESMO valor em todas as caixas, inclusive na de quem só foi
+   * convidado (o `id` acima muda de caixa para caixa). É a chave que a Agenda usa para
+   * reconhecer que um compromisso vindo do Outlook já está representado por uma linha de
+   * `agenda_events`, e assim não listá-lo duas vezes.
+   *
+   * Opcional porque a rota `eventos` só passou a devolvê-lo na correção da aba "Grupos":
+   * um cliente rodando contra uma edge function antiga recebe `undefined`, e a dedup cai
+   * na chave de reserva (`outlook_event_id`) em vez de quebrar.
+   */
+  ical_uid?: string | null
 }
 
 /** Faz parte de um compromisso que se repete? */

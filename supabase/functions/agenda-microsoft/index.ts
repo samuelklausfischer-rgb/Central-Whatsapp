@@ -240,6 +240,13 @@ interface EventoNormalizado {
   tipo: string
   /** Id do compromisso mestre, quando este é uma ocorrência dele. */
   serie_id: string | null
+  /**
+   * O `iCalUId` do evento — é a ÚNICA chave que vale nas outras caixas (ver o
+   * comentário em `criar`/`atualizar`, mais abaixo). Sem preencher isto aqui,
+   * os eventos da rota `eventos` chegavam anônimos na tela, e a dedup contra o
+   * que já está no nosso banco não tinha com o que casar.
+   */
+  ical_uid: string | null
 }
 
 function normalizar(ev: Record<string, any>): EventoNormalizado {
@@ -254,6 +261,7 @@ function normalizar(ev: Record<string, any>): EventoNormalizado {
     origem: 'outlook',
     tipo: String(ev.type ?? 'singleInstance'),
     serie_id: ev.seriesMasterId ? String(ev.seriesMasterId) : null,
+    ical_uid: ev.iCalUId ?? null,
   }
 }
 
