@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MAX_SELECIONADAS } from '@/lib/selection-actions'
 
 /**
@@ -69,6 +69,25 @@ export function useMessageSelection({ messages, chaveConversa, onTeto }: Opcoes)
 
   const estaSelecionada = useCallback((id: string) => ids.has(id), [ids])
 
+  /**
+   * `onTeto` guardado num ref, e fora das dependências de `alternar`.
+   *
+   * Quem chama passa uma arrow escrita ali mesmo (`onTeto: () => toast(...)`),
+   * que nasce nova a cada render. Como `alternar` a listava nas dependências,
+   * ELE também nascia novo a cada render — e isso sozinho derrubava a
+   * memorização da lista de balões no ChatWindow: cada letra digitada no
+   * compositor remontava a conversa inteira. Medido em 24/09/2026: era a ÚNICA
+   * dependência instável de 32.
+   *
+   * Atualizado num efeito (e não durante o render) porque um render pode ser
+   * descartado; `alternar` só é chamado por clique, sempre depois do commit,
+   * então nunca enxerga uma versão velha na prática.
+   */
+  const onTetoRef = useRef(onTeto)
+  useEffect(() => {
+    onTetoRef.current = onTeto
+  })
+
   const limpar = useCallback(() => {
     setIds(VAZIO)
     setModoSelecao(false)
@@ -113,7 +132,7 @@ export function useMessageSelection({ messages, chaveConversa, onTeto }: Opcoes)
             }
             proximo.add(alvo.id)
           }
-          if (estourou) onTeto?.()
+          if (estourou) onTetoRef.current?.()
           return proximo
         }
 
@@ -121,7 +140,7 @@ export function useMessageSelection({ messages, chaveConversa, onTeto }: Opcoes)
           proximo.delete(msg.id)
         } else {
           if (proximo.size >= MAX_SELECIONADAS) {
-            onTeto?.()
+            onTetoRef.current?.()
             return anterior
           }
           proximo.add(msg.id)
@@ -131,7 +150,9 @@ export function useMessageSelection({ messages, chaveConversa, onTeto }: Opcoes)
 
       ancoraRef.current = index
     },
-    [messages, onTeto],
+    // Sem `onTeto` aqui — ver `onTetoRef` acima. É o que mantém `alternar` com
+    // identidade estável entre renders.
+    [messages],
   )
 
   // Desmarcar a última sai do modo, como no WhatsApp. Decidido aqui e não dentro

@@ -114,7 +114,7 @@ import { compartilharContatos, podeCompartilhar, paraCartao } from '@/services/c
  * bundle principal, importada por dezenas de arquivos — carregar junto não
  * custa praticamente nada, e tira a rede do caminho crítico.
  */
-import { uploadAudio, uploadFile } from '@/services/storage'
+import { classifyFileType, uploadAudio, uploadFile } from '@/services/storage'
 import { traduzErro } from '@/lib/friendly-error'
 import { getParticipantesDoGrupo, escolherConversaDoParticipante } from '@/services/groups'
 import { AudioMessage } from '@/components/chat/AudioMessage'
@@ -481,6 +481,49 @@ function removerAssinaturaDuplicada(texto: string, assinatura: string): string {
   const assinaturaLimpa = assinatura.trim()
   if (!assinaturaLimpa || !texto.startsWith(assinaturaLimpa)) return texto
   return texto.slice(assinaturaLimpa.length).replace(/^\s+/, '')
+}
+
+/**
+ * O rótulo que o banco guarda quando a mídia vai sem legenda.
+ *
+ * O balão otimista PRECISA nascer com o mesmo texto que o servidor grava: é ele
+ * que `isMediaPlaceholder` usa para decidir se mostra o rodapé de mídia em vez
+ * do corpo de texto. Nascer diferente trocaria o desenho do balão no instante
+ * em que a linha real chegasse.
+ */
+/** Lista vazia de identidade fixa. Ver o uso em `messages`. */
+const SEM_MENSAGENS: any[] = []
+
+const rotuloDeMidia = (tipo: string) =>
+  tipo === 'image' ? '[Imagem]' : tipo === 'video' ? '[Vídeo]' : tipo === 'audio' ? '[Áudio]' : '[Documento]'
+
+/**
+ * Véu de upload, por cima da própria mídia.
+ *
+ * Substitui a barra azul que ficava sobre o compositor. Ali ela era ambígua —
+ * com três fotos na fila, não dizia de qual era — e, pior, obrigava o
+ * compositor a continuar cheio até o fim do envio. Aqui o progresso está
+ * literalmente em cima do arquivo a que se refere.
+ *
+ * `undefined` (e não 0) é o estado "não está subindo": zero é um progresso
+ * legítimo e precisa aparecer.
+ */
+function VeuDeEnvio({ pct }: { pct?: number }) {
+  if (pct === undefined) return null
+  return (
+    <span className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-xl bg-black/40">
+      <span
+        className="flex h-11 w-11 items-center justify-center rounded-full p-[2px] transition-[background] duration-200"
+        style={{
+          background: `conic-gradient(rgba(255,255,255,0.92) ${pct * 3.6}deg, rgba(255,255,255,0.22) 0deg)`,
+        }}
+      >
+        <span className="flex h-full w-full items-center justify-center rounded-full bg-black/70 text-[11px] font-semibold tabular-nums text-white">
+          {pct}
+        </span>
+      </span>
+    </span>
+  )
 }
 
 const isTechnicalPlaceholder = (content?: string) => {
@@ -1226,7 +1269,78 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
 
   const [isSending, setIsSending] = useState(false)
   const [isScheduling, setIsScheduling] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
+
+  /**
+   * Prévia LOCAL da mídia que está subindo, para o balão otimista.
+   *
+   * Não dá para reaproveitar `miniaturasRef`: aquele mapa é revogado assim que
+   * `attachments` esvazia — e esvaziar é exatamente a primeira coisa que o envio
+   * faz agora. A imagem do balão morreria no mesmo tick em que nasce.
+   *
+   * Chaveado por `tempId`, que é também o `chaveRender` que a linha REAL herda
+   * ao ser confirmada (ver `confirmOptimisticMessage` em ChatHub.tsx). Por isso
+   * a leitura continua acertando depois da troca, e a foto não pisca quando a
+   * URL do Storage substitui a `blob:` — seria um recarregamento visível de
+   * imagem 1 a 3 segundos depois de enviar.
+   */
+  const previasDeEnvioRef = useRef(new Map<string, string>())
+
+  /**
+   * O arquivo em si, guardado para o caso de o UPLOAD falhar.
+   *
+   * `guardarEnvioPendente` (localStorage) só serve quando já existe uma URL no
+   * Storage — um `File` não é serializável. Enquanto a página estiver aberta,
+   * isto é o que permite ao botão "tentar novamente" refazer o upload em vez de
+   * pedir para a pessoa escolher a foto de novo.
+   */
+  const arquivosParaReenvioRef = useRef(
+    new Map<
+      string,
+      {
+        arquivo: File | Blob
+        tipo: string
+        nome: string
+        conteudo: string
+        replyId?: string
+        mencionados: string[]
+        marcarTodos: boolean
+      }
+    >(),
+  )
+
+  /** Porcentagem de upload por balão otimista (`tempId` → 0..100). */
+  const [progressoDeEnvio, setProgressoDeEnvio] = useState<Record<string, number>>({})
+
+  /**
+   * Degraus de 5%, não o valor cru.
+   *
+   * O `onUploadProgress` dispara dezenas de vezes por segundo e cada `setState`
+   * redesenha a lista inteira — que não é virtualizada e pode ter 500 balões.
+   * Em degraus a barra continua lisa ao olho e o número de renders cai ~20x.
+   */
+  const marcarProgressoDeEnvio = useCallback((tempId: string, pct: number) => {
+    const degrau = Math.max(0, Math.min(100, Math.round(pct / 5) * 5))
+    setProgressoDeEnvio((prev) => (prev[tempId] === degrau ? prev : { ...prev, [tempId]: degrau }))
+  }, [])
+
+  const limparProgressoDeEnvio = useCallback((tempId: string) => {
+    setProgressoDeEnvio((prev) => {
+      if (!(tempId in prev)) return prev
+      const proximo = { ...prev }
+      delete proximo[tempId]
+      return proximo
+    })
+  }, [])
+
+  // As `blob:` do balão otimista vivem enquanto a tela viver. Molde igual ao das
+  // miniaturas do compositor, logo acima.
+  useEffect(() => {
+    const previas = previasDeEnvioRef.current
+    return () => {
+      for (const url of previas.values()) URL.revokeObjectURL(url)
+      previas.clear()
+    }
+  }, [])
 
   const [isRecording, setIsRecording] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
@@ -1295,6 +1409,42 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const reenviarFalha = useCallback(async (tempId: string) => {
     const pendente = getTodosOsEnviosPendentes().find((e) => e.tempId === tempId)
     if (!pendente) {
+      /**
+       * Nada no localStorage: ou é mídia cujo UPLOAD falhou (não há URL para
+       * guardar, só o `File` em memória), ou a página foi recarregada e o
+       * arquivo se perdeu junto. O primeiro caso ainda tem conserto aqui.
+       */
+      const midia = arquivosParaReenvioRef.current.get(tempId)
+      if (midia && device && user && contact) {
+        setReenviando(tempId)
+        try {
+          const enviado =
+            midia.arquivo instanceof File
+              ? await uploadFile(midia.arquivo, user.id, (pct) => marcarProgressoDeEnvio(tempId, pct))
+              : { url: await uploadAudio(midia.arquivo, user.id), type: 'audio', name: midia.nome }
+          const res: any = await sendMessage({
+            content: midia.conteudo,
+            device_id: device.id,
+            sender_id: user.id,
+            is_read: true,
+            remote_sender: contact,
+            mediaUrl: enviado.url,
+            mediaType: enviado.type,
+            mediaName: enviado.name,
+            reply_to_id: midia.replyId,
+            mentioned: midia.mencionados,
+            mentionEveryone: midia.marcarTodos,
+          })
+          arquivosParaReenvioRef.current.delete(tempId)
+          onOptimisticConfirm?.(tempId, res?.message)
+        } catch (err) {
+          toast({ title: traduzErro(err, 'Não consegui reenviar'), variant: 'destructive' })
+        } finally {
+          limparProgressoDeEnvio(tempId)
+          setReenviando(null)
+        }
+        return
+      }
       toast({
         title: 'Não achei o conteúdo para reenviar',
         description: 'Copie o texto e envie de novo, por favor.',
@@ -1328,7 +1478,15 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     } finally {
       setReenviando(null)
     }
-  }, [onOptimisticConfirm, toast])
+  }, [
+    onOptimisticConfirm,
+    toast,
+    device,
+    user,
+    contact,
+    marcarProgressoDeEnvio,
+    limparProgressoDeEnvio,
+  ])
 
   /**
    * Quando a rede volta, reenvia sozinho — mas SÓ o que falhou por estar
@@ -1527,7 +1685,13 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
    */
   const [mensagemDestacada, setMensagemDestacada] = useState<string | null>(null)
 
-  const messages = conversation?.messages || []
+  /*
+    `SEM_MENSAGENS` e não `[]`: um literal aqui nasce com identidade nova a cada
+    render, e bastaria isso para `baloesDaConversa` (e os outros memos que leem
+    `messages`) recalcularem sempre, mesmo sem mensagem nenhuma. Constante de
+    módulo tem identidade fixa.
+  */
+  const messages = conversation?.messages || SEM_MENSAGENS
 
   /**
    * As figurinhas que já apareceram nesta conversa, para a aba "Da conversa"
@@ -1665,6 +1829,56 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   // foi digitado.
 
   const convKey = conversationDraftKey(device?.id, contact)
+
+  /**
+   * Quem anima ao entrar: SÓ o que chegou depois de a conversa já estar na tela.
+   *
+   * Antes toda bolha nascia com `animate-in`. Abrir uma conversa disparava até
+   * 500 animações no mesmo frame — caro no aparelho (a lista não é
+   * virtualizada) e sem sentido para o olho: se tudo se mexe, o movimento não
+   * destaca nada. Agora o histórico aparece parado e o movimento fica
+   * reservado para a mensagem que acabou de ser enviada ou recebida.
+   *
+   * A decisão é tomada UMA vez por bolha e memorizada. Recalcular a cada render
+   * tiraria a classe no meio da animação, e ela abortaria pela metade.
+   */
+  const listaProntaRef = useRef(false)
+  const decisaoDeAnimacaoRef = useRef(new Map<string, boolean>())
+  const convKeyDaAnimacaoRef = useRef(convKey)
+  if (convKeyDaAnimacaoRef.current !== convKey) {
+    // Ajuste durante o render, e não num efeito: o PRIMEIRO render da conversa
+    // nova já precisa enxergar a lista como "ainda não pronta". Um efeito só
+    // rodaria depois de o histórico inteiro ter sido desenhado — tarde demais.
+    convKeyDaAnimacaoRef.current = convKey
+    decisaoDeAnimacaoRef.current = new Map()
+    listaProntaRef.current = false
+  }
+
+  /*
+    Sem lista de dependências: roda depois de todo render, e o custo é uma
+    comparação. O que importa é o INSTANTE em que vira `true` — tem de ser
+    depois de o histórico já ter sido desenhado (e portanto já memorizado como
+    "não anima"), nunca antes.
+
+    A conferência de `remote_sender`/`device_id` é a mesma de
+    `registrarProgressoDaUltimaVisivel`, e pelo mesmo motivo: o ChatWindow não
+    desmonta ao trocar de conversa, então há renders em que `convKey` já mudou e
+    `messages` ainda é o array da conversa anterior. Liberar ali marcaria o
+    histórico inteiro da próxima como "chegou agora".
+  */
+  useEffect(() => {
+    if (listaProntaRef.current) return
+    const ultima = messages[messages.length - 1]
+    if (!ultima) {
+      // Conversa comprovadamente vazia (e não apenas ainda carregando): a
+      // primeira mensagem dela é, de fato, uma mensagem nova.
+      if (estadoConversa === 'pronto') listaProntaRef.current = true
+      return
+    }
+    if (ultima.remote_sender === contact && ultima.device_id === device?.id) {
+      listaProntaRef.current = true
+    }
+  })
 
   // O ChatWindow NÃO desmonta ao trocar de conversa (é renderizado sem `key`),
   // então a escolha de colagem pendente sobreviveria à troca e cairia na conversa
@@ -2064,7 +2278,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     }
   }, [])
 
-  const loadContactTags = async () => {
+  const loadContactTags = useCallback(async () => {
     if (device && contact) {
       try {
         const tags = await getContactTags(device.id)
@@ -2073,7 +2287,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         /* intentionally ignored */
       }
     }
-  }
+  }, [device, contact])
 
   useEffect(() => {
     loadContactTags()
@@ -2399,7 +2613,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     }
   }
 
-  const handleDeleteNote = async (noteId: string) => {
+  const handleDeleteNote = useCallback(async (noteId: string) => {
     try {
       await deleteNote(noteId)
       setContactNotes((prev) => prev.filter((n) => n.id !== noteId))
@@ -2407,7 +2621,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     } catch {
       toast({ title: 'Erro ao remover anotação.', variant: 'destructive' })
     }
-  }
+  }, [toast])
 
   /**
    * Relê a atribuição da conversa e entrega o resultado aos DOIS lados: o estado
@@ -2421,14 +2635,14 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
    * pela rede para descobrir o que o clique já sabia. Bastava um handler novo
    * esquecer a linha do aviso para o "demora para aparecer em Minhas" renascer.
    */
-  const sincronizarAtribuicao = async () => {
+  const sincronizarAtribuicao = useCallback(async () => {
     if (!device || !contact) return
     const asgn = await getConversationAssignment(device.id, contact)
     setAssignment(asgn)
     onAssignmentChange?.(device.id, contact, asgn)
-  }
+  }, [device, contact, onAssignmentChange])
 
-  const handleActionTake = async () => {
+  const handleActionTake = useCallback(async () => {
     if (!device || !contact || loadingAction) return
     setLoadingAction('take')
     try {
@@ -2444,7 +2658,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     } finally {
       setLoadingAction(null)
     }
-  }
+  }, [device, contact, loadingAction, sincronizarAtribuicao, toast])
 
   /**
    * Devolve a conversa para a fila (status `waiting`, sem dono).
@@ -2454,7 +2668,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
    * daí o parâmetro. Sem ele, quem clicasse em Devolver e falhasse leria "não foi
    * possível marcar como 'não posso'", que não é a ação que ele pediu.
    */
-  const handleActionWaiting = async (rotulo = 'marcar como "não posso"') => {
+  const handleActionWaiting = useCallback(async (rotulo = 'marcar como "não posso"') => {
     if (!device || !contact || loadingAction) return
     setLoadingAction('waiting')
     try {
@@ -2474,9 +2688,9 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     } finally {
       setLoadingAction(null)
     }
-  }
+  }, [device, contact, loadingAction, sincronizarAtribuicao, toast, onBack])
 
-  const handleActionFinish = async () => {
+  const handleActionFinish = useCallback(async () => {
     if (!device || !contact || loadingAction) return
     setLoadingAction('finish')
     try {
@@ -2492,7 +2706,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     } finally {
       setLoadingAction(null)
     }
-  }
+  }, [device, contact, loadingAction, sincronizarAtribuicao, toast])
 
   const handleActionInviteRespond = async (accept: boolean) => {
     if (!device || !contact || loadingAction) return
@@ -2538,7 +2752,10 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   // texto normal, citando a lista original — a Evolution API não permite montar
   // uma resposta nativa de seleção (listResponseMessage é gerado pelo próprio
   // celular ao tocar na opção).
-  const sendListOptionAsText = async (optionTitle: string, sourceMsg: any) => {
+  // `useCallback` por causa de `baloesDaConversa`: era a ÚNICA função desta
+  // lista que nascia nova a cada render, e uma só bastaria para a memorização
+  // dos balões nunca acertar.
+  const sendListOptionAsText = useCallback(async (optionTitle: string, sourceMsg: any) => {
     if (!device || !user || !contact) return
     const signature = device?.signature || user?.signature || ''
     const displayContent = signature ? `${signature}\n\n${optionTitle}` : optionTitle
@@ -2576,7 +2793,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         variant: 'destructive',
       })
     }
-  }
+  }, [device, user, contact, onOptimisticSend, onOptimisticConfirm, tratarFalhaDeEnvio, toast])
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -2753,139 +2970,205 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       return
     }
 
-    const content = msgText.trim() ? msgText.trim() : (audioBlob ? '[Áudio]' : attachments.length > 0 ? '[Anexo]' : '')
-    // Conversa em que o envio começou. Os caminhos abaixo só limpam o compositor
-    // DEPOIS de awaits longos (upload de até 200MB) e nada impede a troca de
-    // conversa nesse meio-tempo.
-    const chaveEnvio = convKey
+    /**
+     * Caminho otimista de MÍDIA — foto, vídeo, documento e áudio gravado.
+     *
+     * Era o buraco da experiência. O texto já nascia na tela no mesmo frame (o
+     * ramo acima), mas a foto ficava PRESA no compositor durante o upload e as
+     * chamadas de RPC: de 2 a 15 segundos olhando para uma barrinha azul, sem
+     * nada na conversa. A queixa "apertei enter e a mensagem demora a aparecer"
+     * vinha quase toda daqui.
+     *
+     * Agora o balão nasce na hora, com a PRÉVIA LOCAL (`blob:`) do arquivo, o
+     * compositor esvazia no mesmo tick, e upload + envio correm em segundo
+     * plano. Um balão por arquivo, porque é um `sendMessage` por arquivo —
+     * assim cada um carrega o próprio progresso e a própria falha.
+     *
+     * Sem `setIsSending(true)`, de propósito: com o compositor já vazio, travar
+     * os botões só impediria escrever a próxima mensagem enquanto a foto sobe.
+     */
+    if (!editingMessageId && (attachments.length > 0 || audioBlob)) {
+      const legenda = msgText.trim()
+      const chaveEnvioDeMidia = convKey
+      const replyId = replyingTo?.id
+      const replySnapshot = replyingTo
+        ? { content: replyingTo.content, sender_name: replyingTo.sender_name, id: replyingTo.id }
+        : null
 
-    setIsSending(true)
-    try {
-      if (editingMessageId) {
-        // Erro próprio: a edição agora falha por motivos legítimos — passou dos
-        // 15 minutos do WhatsApp, a mensagem não tem id do lado de lá, a
-        // Evolution recusou. Caindo no `catch` geral lá embaixo, a pessoa lia
-        // "Erro ao enviar mensagem" ao tentar EDITAR. O texto continua no
-        // compositor para poder copiar ou tentar de novo, e nada é gravado:
-        // quando não dá para editar no WhatsApp, os dois lados seguem iguais.
-        try {
-          await editMessage(editingMessageId, device.id, content)
-        } catch (err) {
-          console.error('[edicao] falhou', err)
-          toast({
-            title: traduzErro(err, 'Não foi possível editar a mensagem'),
-            variant: 'destructive',
-          })
-          return
+      const base = Date.now()
+      const fila = (audioBlob ? [null] : attachments).map((arquivo, i) => {
+        const alvo: File | Blob = arquivo ?? (audioBlob as Blob)
+        const tipo = arquivo ? classifyFileType(arquivo).type : 'audio'
+        // Só o PRIMEIRO leva a legenda (e a menção junto): repetir em todos
+        // notificaria a pessoa uma vez por arquivo. Os outros vão com o rótulo
+        // técnico, exatamente como a versão anterior gravava.
+        const levaLegenda = i === 0 && !!legenda
+        return {
+          tempId: `temp-${base}-${i}-${Math.random().toString(36).slice(2)}`,
+          arquivo: alvo,
+          tipo,
+          nome: arquivo ? arquivo.name : 'audio.webm',
+          conteudo: levaLegenda ? legenda : rotuloDeMidia(tipo),
+          levaLegenda,
+          previa: URL.createObjectURL(alvo),
         }
-        limparCompositorAposEnvio(chaveEnvio, () => {
-          setEditingMessageId(null)
-          setMsgText('')
-          setReplyingTo(null)
-          setMencaoAtiva(null)
-          setAtalhosAbertos(false)
-          setMencionarTodos(false)
+      })
+
+      for (let i = 0; i < fila.length; i++) {
+        const item = fila[i]
+        previasDeEnvioRef.current.set(item.tempId, item.previa)
+        arquivosParaReenvioRef.current.set(item.tempId, {
+          arquivo: item.arquivo,
+          tipo: item.tipo,
+          nome: item.nome,
+          conteudo: item.conteudo,
+          replyId,
+          mencionados: item.levaLegenda ? mencionados : [],
+          marcarTodos: item.levaLegenda ? marcarTodos : false,
         })
-        toast({ title: 'Mensagem editada' })
-        return
+        onOptimisticSend?.({
+          id: item.tempId,
+          content: item.conteudo,
+          device_id: device.id,
+          // `base + i`: a ordem na lista e o separador de data leem `created_at`,
+          // e três fotos com o milissegundo idêntico ficariam empatadas.
+          created_at: new Date(base + i).toISOString(),
+          remote_sender: contact,
+          sender_id: user.id,
+          direction: 'outbound',
+          is_read: true,
+          status: 'sending',
+          reply_to_id: replyId || null,
+          reply_to_snapshot: replySnapshot,
+          attachments: [{ url: item.previa, type: item.tipo, name: item.nome }],
+        })
+        marcarProgressoDeEnvio(item.tempId, 0)
       }
 
-      if (audioBlob) {
-        const mediaUrl = await uploadAudio(audioBlob, user.id)
-        await sendMessage({
-          content,
-          device_id: device.id,
-          sender_id: user.id,
-          is_read: true,
-          remote_sender: contact,
-          mediaUrl,
-          mediaType: 'audio',
-          reply_to_id: replyingTo?.id,
-        })
-        // Áudio não tem legenda no endpoint da Evolution: o texto digitado não
-        // viaja com ele, então não existe menção para levar — só limpar.
-        limparCompositorAposEnvio(chaveEnvio, () => {
-          discardAudio()
-          setMencaoAtiva(null)
-          setAtalhosAbertos(false)
-          setMencionarTodos(false)
-        })
-      } else if (attachments.length > 0) {
-        const uploaded: { url: string; type: string; name: string }[] = []
-        for (let fi = 0; fi < attachments.length; fi++) {
-          setUploadProgress(0)
-          const result = await uploadFile(attachments[fi], user.id, (pct) => {
-            setUploadProgress(Math.round((fi / attachments.length) * 100 + pct / attachments.length))
-          })
-          uploaded.push(result)
-        }
-        setUploadProgress(null)
-        for (let i = 0; i < uploaded.length; i++) {
-          const att = uploaded[i]
-          // Só a PRIMEIRA mídia leva a legenda; as outras vão com rótulo. A
-          // menção acompanha a legenda, então também vale só para a primeira —
-          // repetir em todas notificaria a pessoa uma vez por anexo.
-          const levaLegenda = i === 0 && content !== '[Anexo]'
-          await sendMessage({
-            content: levaLegenda ? content : `[${att.type === 'image' ? 'Imagem' : att.type === 'video' ? 'Vídeo' : 'Documento'}]`,
-            device_id: device.id,
-            sender_id: user.id,
-            is_read: true,
-            remote_sender: contact,
-            mediaUrl: att.url,
-            mediaType: att.type,
-            mediaName: att.name,
-            reply_to_id: replyingTo?.id,
-            mentioned: levaLegenda ? mencionados : [],
-            mentionEveryone: levaLegenda ? marcarTodos : false,
-          })
-        }
-      } else {
-        // Texto puro que caiu neste ramo (edição em curso, por exemplo) —
-        // mesmo campo `noSignature` do caminho otimista acima, para que o
-        // toggle valha qualquer que seja a rota de envio de texto.
-        const envio = await sendMessage({
-          content,
-          device_id: device.id,
-          sender_id: user.id,
-          is_read: true,
-          remote_sender: contact,
-          reply_to_id: replyingTo?.id,
-          mentioned: mencionados,
-          mentionEveryone: marcarTodos,
-          noSignature: semAssinatura,
-        })
-
-        // A mensagem SAIU, mas com assinatura: o banco não suportava suprimir e
-        // `sendMessage` reenviou sem o pedido, em vez de deixar a mensagem se
-        // perder. Avisar é obrigatório — quem desligou a assinatura de propósito
-        // precisa saber que ela foi junto assim mesmo.
-        if (envio?.assinaturaNaoSuprimida) {
-          toast({
-            title: 'Mensagem enviada, mas com assinatura',
-            description:
-              'A opção de enviar sem assinatura ainda não está disponível neste servidor. Avise o time técnico.',
-          })
-        }
-      }
-      limparCompositorAposEnvio(chaveEnvio, () => {
+      // Limpeza SÍNCRONA, mesmo tick dos balões: o React agrupa os setState num
+      // commit só e a barra esvazia no MESMO frame em que a foto aparece.
+      limparCompositorAposEnvio(chaveEnvioDeMidia, () => {
         setMsgText('')
         setAttachments([])
+        discardAudio()
         setReplyingTo(null)
         setMencaoAtiva(null)
         setAtalhosAbertos(false)
         setMencionarTodos(false)
       })
-    } catch (err) {
-      // Este é o caminho de áudio, anexo e edição. Até agora ele só dava um
-      // toast: a falha sumia e não havia o que reenviar. Sem balão otimista
-      // para descartar, aqui o helper só traz a tentativa gravada para a tela.
-      tratarFalhaDeEnvio(err)
-      console.error('[envio] falhou', err)
-      toast({
-        title: traduzErro(err, 'Erro ao enviar mensagem'),
-        variant: 'destructive',
+
+      // Sequencial de propósito: preserva a ordem em que os arquivos chegam ao
+      // WhatsApp, e evita dez uploads dividindo a mesma banda (com nenhum
+      // terminando, a barra de todos rastejaria).
+      void (async () => {
+        for (const item of fila) {
+          let urlNoStorage: string | null = null
+          try {
+            const enviado =
+              item.arquivo instanceof File
+                ? await uploadFile(item.arquivo, user.id, (pct) =>
+                    marcarProgressoDeEnvio(item.tempId, pct),
+                  )
+                : { url: await uploadAudio(item.arquivo, user.id), type: 'audio', name: item.nome }
+            urlNoStorage = enviado.url
+            marcarProgressoDeEnvio(item.tempId, 100)
+            const res: any = await sendMessage({
+              content: item.conteudo,
+              device_id: device.id,
+              sender_id: user.id,
+              is_read: true,
+              remote_sender: contact,
+              mediaUrl: enviado.url,
+              mediaType: enviado.type,
+              mediaName: enviado.name,
+              reply_to_id: replyId,
+              mentioned: item.levaLegenda ? mencionados : [],
+              mentionEveryone: item.levaLegenda ? marcarTodos : false,
+            })
+            arquivosParaReenvioRef.current.delete(item.tempId)
+            onOptimisticConfirm?.(item.tempId, res?.message)
+          } catch (err) {
+            tratarFalhaDeEnvio(err, item.tempId)
+            /**
+             * Persistir só quando o arquivo JÁ SUBIU. Aí o reenvio é uma URL e
+             * funciona até depois de recarregar a página. Se foi o upload que
+             * falhou não há o que guardar — um `File` não é serializável —, e o
+             * botão "tentar novamente" recorre a `arquivosParaReenvioRef`, que
+             * vive só enquanto a tela viver.
+             */
+            if (urlNoStorage && !(err as { idTentativa?: string } | null)?.idTentativa) {
+              guardarEnvioPendente({
+                tempId: item.tempId,
+                deviceId: device.id,
+                remoteSender: contact,
+                senderId: user.id,
+                criadoEm: new Date(base).toISOString(),
+                motivo: navigator.onLine === false ? 'offline' : 'desconhecido',
+                payload: {
+                  content: item.conteudo,
+                  mediaUrl: urlNoStorage,
+                  mediaType: item.tipo,
+                  mediaName: item.nome,
+                  reply_to_id: replyId,
+                  mentioned: item.levaLegenda ? mencionados : [],
+                  mentionEveryone: item.levaLegenda ? marcarTodos : false,
+                },
+              })
+            }
+            console.error('[envio] midia falhou', err)
+            toast({
+              title: traduzErro(err, 'Erro ao enviar anexo'),
+              variant: 'destructive',
+            })
+          } finally {
+            limparProgressoDeEnvio(item.tempId)
+          }
+        }
+      })()
+      return
+    }
+
+    /**
+     * Só a EDIÇÃO chega aqui.
+     *
+     * Texto sai pelo ramo otimista lá em cima; foto, vídeo, documento e áudio
+     * saem pelo ramo otimista de mídia logo acima. Os ramos de upload que
+     * existiam neste ponto ficaram sem caminho de entrada e saíram junto — o
+     * que sobrou é a edição, que continua sendo bloqueante de propósito: a
+     * pessoa precisa saber se o WhatsApp aceitou antes de o texto sumir do
+     * compositor.
+     */
+    const content = msgText.trim()
+    // Conversa em que a edição começou: nada impede trocar de conversa enquanto
+    // ela vai e volta do servidor.
+    const chaveEnvio = convKey
+
+    setIsSending(true)
+    try {
+      // A edição falha por motivos legítimos — passou dos 15 minutos do
+      // WhatsApp, a mensagem não tem id do lado de lá, a Evolution recusou. O
+      // texto continua no compositor para poder copiar ou tentar de novo, e
+      // nada é gravado: quando não dá para editar no WhatsApp, os dois lados
+      // seguem iguais.
+      try {
+        await editMessage(editingMessageId, device.id, content)
+      } catch (err) {
+        console.error('[edicao] falhou', err)
+        toast({
+          title: traduzErro(err, 'Não foi possível editar a mensagem'),
+          variant: 'destructive',
+        })
+        return
+      }
+      limparCompositorAposEnvio(chaveEnvio, () => {
+        setEditingMessageId(null)
+        setMsgText('')
+        setReplyingTo(null)
+        setMencaoAtiva(null)
+        setAtalhosAbertos(false)
+        setMencionarTodos(false)
       })
+      toast({ title: 'Mensagem editada' })
     } finally {
       setIsSending(false)
     }
@@ -3524,7 +3807,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     }
   }
 
-  const handleToggleLabel = async (labelId: string) => {
+  const handleToggleLabel = useCallback(async (labelId: string) => {
     if (!device || !contact) return
     try {
       await toggleContactTag(device.id, contact, labelId)
@@ -3535,7 +3818,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     } catch (err) {
       toast({ title: 'Erro ao alterar etiqueta', variant: 'destructive' })
     }
-  }
+  }, [device, contact, toast, loadContactTags])
 
   const contactIndex = useMemo(() => {
     return buildContactIndex(contacts || [])
@@ -3827,11 +4110,11 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   // contato da conversa", que é o comportamento antigo.
   const [apelidoDoJid, setApelidoDoJid] = useState<string | null>(null)
 
-  const handleEditNickname = () => {
+  const handleEditNickname = useCallback(() => {
     setApelidoDoJid(null)
     setNicknameInput(contactRecord?.nickname || '')
     setIsNicknameOpen(true)
-  }
+  }, [contactRecord?.nickname])
 
   const handleEditNicknameParticipante = useCallback((jid: string, nomeAtual: string) => {
     setApelidoDoJid(jid)
@@ -3865,75 +4148,811 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     [triggers, termoAtalhoBarra],
   )
 
-  if (!device || !contact) {
-    return (
-      <div className="hidden md:flex flex-col items-center justify-center h-full bg-chat-conversation/80 backdrop-blur-sm flex-1 relative overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(59,130,246,0.04),transparent_70%)]" />
-        <div className="relative z-10 flex flex-col items-center text-center px-8 max-w-sm">
-          <BrandLogo className="h-20 w-auto mb-8 object-contain drop-shadow-lg" />
-          <p className="text-chat-text/70 text-[15px] leading-relaxed">
-            {device
-              ? 'Selecione uma conversa para iniciar o atendimento.'
-              : 'Selecione uma conversa para iniciar o atendimento.'}
-          </p>
-          {device && onStartConversation && (
-            <Button
-              onClick={onStartConversation}
-              className="mt-6 bg-primary hover:bg-primary/90 text-primary-foreground rounded-full px-6 h-10 font-medium shadow-lg shadow-primary/25 transition-all hover:scale-105 active:scale-95"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Adicionar nova conversa
-            </Button>
-          )}
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div
-      className="flex flex-col h-full bg-transparent flex-1 relative min-w-0"
-      onDragEnter={handleDragEnter}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-    >
-      {/* ITEM 2: realce de "solte aqui" enquanto se arrasta um arquivo sobre a
-          conversa. `pointer-events-none` para o overlay nunca ser o alvo dos
-          eventos de drag — sem isto, entrar nele contaria como sair da área
-          de baixo (e vice-versa) e o contador de dragenter/dragleave em
-          `dragCounterRef` erraria a conta. Fica por cima de tudo (`z-50`),
-          inclusive do cabeçalho e do compositor, porque soltar em qualquer
-          ponto da conversa aberta deve anexar. */}
-      {isDraggingFile && (
-        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-chat-conversation/90 backdrop-blur-sm border-4 border-dashed border-primary pointer-events-none">
-          <Paperclip className="h-10 w-10 text-primary" />
-          <p className="text-base font-semibold text-chat-text">Solte para anexar à conversa</p>
-        </div>
-      )}
-      {/* No modo de seleção a barra de ações OCUPA O LUGAR do cabeçalho, como no
-          WhatsApp. Empilhar as duas empurraria a conversa para baixo e a lista
-          saltaria a cada entrada e saída do modo. */}
-      {modoSelecao ? (
-        <MessageSelectionBar
-          quantidade={qtdSelecionadas}
-          onFechar={limparSelecao}
-          onEncaminhar={() => setMsgsParaEncaminhar(selecionadas)}
-          onCopiar={copiarSelecao}
-          onBaixar={baixarSelecao}
-          onApagar={() => setApagarSelecionadasAberto(true)}
-          podeEncaminhar={podeEncaminharSelecao}
-          podeCopiar={podeCopiarSelecao}
-          podeBaixar={midiasDaSelecao.length > 0 && !baixarBloqueadoNoAndroid}
-          podeApagar={apagaveisDaSelecao.length > 0}
-          motivoBaixar={
-            baixarBloqueadoNoAndroid
-              ? 'No celular só dá para baixar um arquivo por vez'
-              : undefined
+  /**
+   * A LISTA DE BALÕES, MEMORIZADA — e o motivo de o chat ter parado de travar
+   * enquanto se digita.
+   *
+   * MEDIDO em 24/09/2026, numa conversa de 220 balões: cada tecla custava 70 ms
+   * de trabalho (pior caso 444 ms). A causa NÃO era o layout nem o campo de
+   * texto se remedir — os dois ficaram abaixo de 0,01 ms na mesma medição. Era
+   * o React reconstruindo e comparando os 220 balões a cada letra, porque
+   * `msgText` mora neste mesmo componente e qualquer `setState` daqui redesenha
+   * a árvore inteira. Digitando rápido, as teclas entravam numa fila atrás desse
+   * trabalho — e é por isso que quanto mais rápido se digita, mais o atraso
+   * aparece.
+   *
+   * A lista não depende de UMA LETRA do compositor. Memorizando o resultado, o
+   * render disparado por tecla devolve exatamente os mesmos elementos, o React
+   * reconhece a identidade e não desce na árvore.
+   *
+   * Precisa ficar ANTES do `if (!device || !contact)` logo abaixo: hook depois
+   * de um return antecipado é hook condicional.
+   *
+   * As dependências são conferidas pelo oxlint (`react-hooks/exhaustive-deps`) —
+   * se algo usado lá dentro sair desta lista, o lint acusa. Não tire um item
+   * para "memorizar melhor": o preço seria a lista mostrar dado velho.
+   */
+  const baloesDaConversa = useMemo(() =>
+          messages.map((msg: any, index: number) => {
+          const isMe = msg.direction === 'outbound' || msg.sender_id === user?.id
+          const estaMarcada = estaSelecionada(msg.id)
+          const messageAttachments = Array.isArray(msg.attachments) ? msg.attachments : []
+          /**
+           * Identidade de renderização — a mesma que a linha real HERDA do balão
+           * otimista. Serve de chave tanto para a prévia local quanto para o
+           * progresso de upload, e é o que faz a foto não recarregar quando a
+           * URL do Storage toma o lugar da `blob:`.
+           */
+          const chaveDeRender = msg.chaveRender ?? msg.id
+          const previaLocal = previasDeEnvioRef.current.get(chaveDeRender)
+          const pctEnvio = progressoDeEnvio[chaveDeRender]
+          // Decidido uma vez por bolha e guardado — ver `decisaoDeAnimacaoRef`.
+          let animarEntrada = decisaoDeAnimacaoRef.current.get(chaveDeRender)
+          if (animarEntrada === undefined) {
+            animarEntrada = listaProntaRef.current
+            decisaoDeAnimacaoRef.current.set(chaveDeRender, animarEntrada)
           }
-        />
-      ) : (
-      <div className="h-[64px] border-b border-chat-border bg-chat-header shadow-chat flex items-center justify-between px-4 sm:px-5 sticky top-0 z-10 flex-shrink-0">
+          const timestamp = timeFormatter.format(new Date(msg.created_at))
+          const previousMsg = messages[index - 1]
+          const shouldShowDateSeparator =
+            !previousMsg || getDateKey(previousMsg.created_at) !== getDateKey(msg.created_at)
+          const previousIsMe = previousMsg
+            ? previousMsg.direction === 'outbound' || previousMsg.sender_id === user?.id
+            : false
+          const isGroupContactMsg = contact?.includes('@g.us') || msg.remote_sender?.includes('@g.us')
+          const participantContact = msg.group_participant
+            ? findContactByIdentifier(msg.group_participant, contactIndex)
+            : null
+          const fallbackParticipantId = msg.group_participant ? normalizeToDigits(msg.group_participant) : ''
+          const thisSender = !isMe && isGroupContactMsg
+            ? (msg.sender_name || participantContact?.nickname || participantContact?.name || fallbackParticipantId || 'Participante')
+            : null
+          const currentAuthorKey = msg.group_participant || msg.sender_name || msg.remote_sender
+          const previousAuthorKey = previousMsg && !previousIsMe
+            ? (previousMsg.group_participant || previousMsg.sender_name || previousMsg.remote_sender)
+            : null
+          const shouldShowSenderLabel = !isMe && isGroupContactMsg && !!thisSender && (
+            !previousMsg ||
+            previousIsMe ||
+            shouldShowDateSeparator ||
+            currentAuthorKey !== previousAuthorKey
+          )
+          const shouldShowReceivedAvatar =
+            !isMe &&
+            !isGroupContactMsg &&
+            (
+              !previousMsg ||
+              previousIsMe ||
+              shouldShowDateSeparator ||
+              previousMsg.remote_sender !== msg.remote_sender
+            )
+          return (
+            // `chaveRender` antes de `id`: a mensagem enviada por aqui nasce
+            // como balão otimista (`temp-...`) e é substituída pela linha real
+            // (UUID do banco) quando a RPC responde. Sem esta herança de
+            // identidade a key mudaria, o React remontaria o balão e a animação
+            // de entrada rodaria de novo — o "flick" ~1s depois de enviar. Ver
+            // `herdarChaveRender` em `stores/conversationMessages.ts`.
+            <React.Fragment key={msg.chaveRender ?? msg.id}>
+              {shouldShowDateSeparator && (
+                // Separador DENTRO do fluxo, não `sticky`. Como `position: sticky`
+                // não reserva espaço ao grudar, a pílula flutuava permanentemente
+                // sobre as bolhas — cortava texto no meio ("Samu( Hoje )el - Eng.
+                // IA") e, sem `pointer-events-none`, ainda engolia o clique de
+                // quem tentava selecionar o que estava embaixo. Em conversa de um
+                // dia só ela aparece uma vez, no topo, e some ao rolar.
+                <div className="flex justify-center py-2">
+                  <span className="rounded-full border border-chat-border bg-chat-panel/90 px-3 py-1 text-[12px] font-medium text-chat-muted shadow-chat backdrop-blur">
+                    {getDateLabel(msg.created_at)}
+                  </span>
+                </div>
+              )}
+            <div
+              ref={(el) => {
+                if (el) messageRefs.current.set(msg.id, el)
+                else messageRefs.current.delete(msg.id)
+              }}
+              onPointerDown={(e) => iniciarLongPress(e, msg)}
+              onPointerMove={moverLongPress}
+              onPointerUp={cancelarLongPress}
+              onPointerCancel={cancelarLongPress}
+              onPointerLeave={cancelarLongPress}
+              onClickCapture={
+                modoSelecao
+                  ? (e) => {
+                      // FASE DE CAPTURA: intercepta antes dos controles de dentro
+                      // da bolha (abrir imagem, tocar áudio, baixar documento,
+                      // menu ⋮). No modo de seleção o clique tem um significado
+                      // só — marcar —, e sem isto tocar numa foto abriria o
+                      // visualizador em vez de selecioná-la.
+                      e.preventDefault()
+                      e.stopPropagation()
+                      alternarSelecao(msg, index, e.shiftKey)
+                    }
+                  : undefined
+              }
+              className={cn(
+                'flex flex-col',
+                /*
+                  A bolha entra do lado de quem falou: a minha sobe vindo da
+                  direita (de onde saiu o compositor), a do cliente vindo da
+                  esquerda. `origin-bottom-*` põe o ponto de crescimento no
+                  canto onde a bolha de fato está — sem isso a linha inteira,
+                  que ocupa a largura toda, encolheria pelo meio.
+
+                  `motion-safe:` em tudo: quem pediu "reduzir movimento" no
+                  sistema operacional recebe a mensagem já no lugar.
+                */
+                // 200ms, e não um valor arbitrário: `duration-[...]` não entra
+                // na escala que o plugin de animação usa e a regra nem chega a
+                // ser gerada — o balão cairia no padrão de 150ms sem aviso.
+                animarEntrada &&
+                  'motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:slide-in-from-bottom-4 motion-safe:duration-200 motion-safe:ease-out',
+                animarEntrada &&
+                  (isMe
+                    ? 'motion-safe:slide-in-from-right-3 motion-safe:origin-bottom-right'
+                    : 'motion-safe:slide-in-from-left-3 motion-safe:origin-bottom-left'),
+                isMe ? 'items-end' : 'items-start',
+                modoSelecao && 'cursor-pointer select-none rounded-lg -mx-1 px-1 py-0.5 transition-colors',
+                estaMarcada && 'bg-chat-text/[0.07]',
+                // ITEM 12: realce de quem acabou de receber o pulo de uma
+                // citação. Some sozinho (ver o efeito de `mensagemDestacada`).
+                mensagemDestacada === msg.id &&
+                  'rounded-lg -mx-1 px-1 py-0.5 bg-blue-400/15 transition-colors duration-500',
+              )}
+            >
+              {shouldShowSenderLabel && (
+                <div
+                  className="text-[12px] leading-none font-semibold mb-1 ml-1 px-1.5 py-0.5 rounded-full bg-chat-text/10 text-chat-text/80 border border-chat-text/10 inline-flex items-center gap-1.5 select-none"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-chat-text/30 flex-shrink-0" />
+                  <span>{thisSender}</span>
+                </div>
+              )}
+              <div
+                className={`flex gap-2.5 items-end w-full ${isMe ? 'justify-end' : 'justify-start'}`}
+              >
+              {/* `mr-auto` só nas próprias: a linha delas é `justify-end`, e sem
+                  isso a caixinha colaria na bolha em vez de ficar na margem —
+                  as marcações não formariam uma coluna para o olho seguir. */}
+              {modoSelecao && (
+                <Checkbox
+                  checked={estaMarcada}
+                  tabIndex={-1}
+                  aria-label={estaMarcada ? 'Desmarcar mensagem' : 'Marcar mensagem'}
+                  className={cn('shrink-0 self-center', isMe && 'mr-auto')}
+                />
+              )}
+              {!isMe && (
+                shouldShowReceivedAvatar ? (
+                  <SmartAvatar
+                    jid={msg.remote_sender}
+                    name={resolveContactDisplayName(msg.remote_sender, contactIndex, {
+                      sender_name: msg.sender_name
+                    })}
+                    instanceKey={device?.instance_key}
+                    contactRecord={findContactByIdentifier(msg.remote_sender, contactIndex)}
+                    className="h-7 w-7 border border-chat-border shadow-sm flex-shrink-0 mb-1 hidden sm:block"
+                    fallbackClassName="bg-chat-panel text-chat-muted text-xs"
+                  />
+                  ) : (
+                    <div className="h-7 w-7 flex-shrink-0 mb-1 hidden sm:block" />
+                  )
+                )}
+                <div
+                  className={`max-w-[88%] sm:max-w-[78%] rounded-2xl px-3.5 py-2 shadow-chat-bubble relative group transition-all duration-150 ${
+                    isMe
+                      ? 'bg-chat-bubble-out text-chat-text rounded-br-sm border border-chat-bubble-outline'
+                      : 'bg-chat-bubble-in text-chat-text rounded-bl-sm'
+                  }`}
+                >
+                  {!msg.deleted_at && msg.reply_to_snapshot && (
+                    // ITEM 12: só vira botão quando há para onde pular. Sem
+                    // `reply_to_id` a original não está no nosso banco (só o
+                    // stanzaId da Evolution, no snapshot), então o bloco segue
+                    // sendo texto: um cursor de mão que não leva a lugar nenhum
+                    // é pior que nenhum.
+                    <div
+                      role={msg.reply_to_id ? 'button' : undefined}
+                      tabIndex={msg.reply_to_id ? 0 : undefined}
+                      onClick={
+                        msg.reply_to_id
+                          ? () => pularParaMensagemOriginal(msg.reply_to_id)
+                          : undefined
+                      }
+                      onKeyDown={
+                        msg.reply_to_id
+                          ? (e) => {
+                              if (e.key !== 'Enter' && e.key !== ' ') return
+                              e.preventDefault()
+                              pularParaMensagemOriginal(msg.reply_to_id)
+                            }
+                          : undefined
+                      }
+                      className={cn(
+                        'flex items-start gap-2 mb-2 pl-2 border-l-2 border-chat-text/20 rounded-r',
+                        msg.reply_to_id &&
+                          'cursor-pointer transition-colors hover:bg-chat-text/[0.06] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-400/50',
+                      )}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[11px] font-semibold text-chat-muted/90">
+                          {nomeDaCitacao(msg)}
+                        </div>
+                          <div className="text-[12px] truncate text-chat-muted/70">
+                            {isTechnicalPlaceholder(msg.reply_to_snapshot.content) ? 'Voz' : msg.reply_to_snapshot.content || ''}
+                          </div>
+                      </div>
+                    </div>
+                  )}
+                  {/* Encaminhada, como no WhatsApp: itálico, apagado, acima do
+                      conteúdo. Vale nos dois sentidos — o WhatsApp também marca
+                      para quem enviou. Mensagem apagada não leva rótulo. */}
+                  {!msg.deleted_at && msg.is_forwarded && (
+                    <div className="flex items-center gap-1 mb-0.5 text-[12px] italic text-chat-muted/70">
+                      <Forward className="h-3 w-3 shrink-0" />
+                      Encaminhada
+                    </div>
+                  )}
+                    {messageAttachments.length > 0 && (
+                     <div className="flex flex-col gap-2 mb-2">
+                       {messageAttachments.map((att: any, idx: number) => {
+                          if (att && typeof att === 'object' && att.type === 'contact') {
+                            return (
+                              <ContactShareBubble
+                                key={idx}
+                                name={att.name || 'Contato'}
+                                phone={att.phone || null}
+                                onOpenConversation={(jid) => onOpenConversationByJid?.(jid)}
+                              />
+                            )
+                          }
+                          if (att && typeof att === 'object' && att.type === 'list') {
+                            return (
+                              <ListMessageBubble
+                                key={idx}
+                                title={att.title || ''}
+                                description={att.description || ''}
+                                buttonText={att.buttonText || 'Ver opções'}
+                                sections={Array.isArray(att.sections) ? att.sections : []}
+                                onSelectOption={(optionTitle) => sendListOptionAsText(optionTitle, msg)}
+                              />
+                            )
+                          }
+                          if (att && typeof att === 'object' && att.url) {
+                            /**
+                             * A PRÉVIA LOCAL ganha do que está gravado.
+                             *
+                             * Enquanto o arquivo sobe, `att.url` é a própria
+                             * `blob:`. Quando a linha real chega, ela traz a URL
+                             * do Storage — e trocar a origem do `<img>` faria a
+                             * foto recarregar do zero, piscando branco segundos
+                             * depois de enviada. Como `chaveDeRender` sobrevive
+                             * à troca, a prévia continua servindo até a tela ser
+                             * fechada.
+                             */
+                            const urlDoAnexo = (idx === 0 && previaLocal) || att.url
+                            // Arquivo do servidor antigo, que não existe mais.
+                            // Vem ANTES de qualquer ramo de mídia: renderizar o
+                            // `<img>`/`<audio>`/documento normal dispararia uma
+                            // requisição condenada e a altura mudaria depois que
+                            // a conversa já tivesse rolado para o fim.
+                            if (!anexoEstaVivo(urlDoAnexo)) {
+                              return <UnavailableAttachmentBubble key={idx} name={att.name} />
+                            }
+                            if (att.type === 'audio') {
+                             return (
+                               <div key={idx}>
+                                 <AudioMessage
+                                   src={urlDoAnexo}
+                                   isMe={isMe}
+                                   msgId={msg.id}
+                                   transcription={msg.transcription}
+                                   transcriptionStatus={msg.transcription_status}
+                                   createdAt={msg.created_at}
+                                 />
+                               </div>
+                              )
+                            }
+                          if (att.type === 'video') {
+                            return (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => setMediaView({ url: urlDoAnexo, type: 'video', name: att.name })}
+                                className="group relative block w-[300px] max-w-full min-h-[180px] overflow-hidden rounded-xl border border-chat-border bg-black shadow-sm"
+                              >
+                                {/* `min-h` fixo no contêiner, não liberado depois: o
+                                    fundo é preto e `object-contain` já letterboxa,
+                                    então um vídeo baixo fica com barras em vez de
+                                    fazer o balão pular quando os metadados chegam. */}
+                                <video
+                                  src={urlDoAnexo}
+                                  muted
+                                  preload="metadata"
+                                  className="w-full max-h-[320px] object-contain pointer-events-none"
+                                />
+                                <span className="absolute inset-0 flex items-center justify-center">
+                                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-black/55 text-white transition-colors group-hover:bg-black/70">
+                                    <Play className="h-6 w-6 translate-x-0.5" fill="currentColor" />
+                                  </span>
+                                </span>
+                                <VeuDeEnvio pct={pctEnvio} />
+                              </button>
+                            )
+                          }
+                           if (att.type === 'image') {
+                             return (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => setMediaView({ url: urlDoAnexo, type: 'image', name: att.name })}
+                                /*
+                                  ITEM 6: mais perto do WhatsApp. Saíram a borda,
+                                  a sombra e o `hover:scale` — o WhatsApp não tem
+                                  nenhum dos três, e o crescimento no hover fazia
+                                  a foto pular por cima do balão vizinho. O teto
+                                  subiu de 240px para 320px, que é a ordem de
+                                  grandeza do WhatsApp no computador.
+
+                                  A largura continua natural (sem `w-full`) de
+                                  propósito: esticar foto pequena — QR code de
+                                  boleto, etiqueta de exame, print — já foi um bug
+                                  corrigido, e o comentário do ChatImage explica
+                                  por quê. `object-contain` no lugar de
+                                  `object-cover` para nunca cortar a imagem.
+                                */
+                                className="relative block max-w-[320px] overflow-hidden rounded-xl cursor-zoom-in transition-opacity duration-200 hover:opacity-95"
+                              >
+                                <ChatImage
+                                  src={urlDoAnexo}
+                                  alt={att.name || 'Imagem'}
+                                  className="w-full h-auto object-contain pointer-events-none"
+                                />
+                                <VeuDeEnvio pct={pctEnvio} />
+                              </button>
+                             )
+                           }
+                          if (att.type === 'sticker') {
+                            return (
+                              // Era um `<a target="_blank">`: clicar jogava a
+                              // pessoa para fora do app, numa aba do navegador
+                              // com o arquivo cru — e no Electron isso abre o
+                              // navegador do sistema, tirando a pessoa do
+                              // atendimento. Agora entra no mesmo visualizador
+                              // que imagem e vídeo já usavam.
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() =>
+                                  setMediaView({ url: urlDoAnexo, type: 'sticker', name: att.name })
+                                }
+                                className="block max-w-[160px] overflow-hidden rounded-xl hover:opacity-90 hover:scale-[1.02] transition-all duration-300"
+                              >
+                                <ChatImage
+                                  src={urlDoAnexo}
+                                  alt={att.name || 'Figurinha'}
+                                  className="w-full h-auto object-contain"
+                                  reservaClassName="w-[160px] min-h-[120px]"
+                                />
+                              </button>
+                            )
+                          }
+                          {
+                            const docName = att.name || att.url
+                            const hasPreview = isPdfFile(docName) || isExcelFile(docName)
+                            return (
+                              <div key={idx} className="relative">
+                                <DocumentBubble
+                                  url={urlDoAnexo}
+                                  name={docName}
+                                  onOpenPreview={
+                                    hasPreview
+                                      ? () => setMediaView({ url: urlDoAnexo, type: isPdfFile(docName) ? 'pdf' : 'excel', name: att.name })
+                                      : null
+                                  }
+                                />
+                                <VeuDeEnvio pct={pctEnvio} />
+                              </div>
+                            )
+                          }
+                        }
+                        const filename = att as string
+                        const url = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/chat-attachments/${msg.id}/${filename}`
+                        const isImage = /\.(jpeg|jpg|gif|png|webp)$/i.test(filename)
+                        const isVideo = /\.(mp4|webm|mov|m4v|3gp)$/i.test(filename)
+                        const isAudio = /\.(mp3|ogg|oga|m4a|aac|wav|webm)$/i.test(filename)
+                        const isSticker = /\.(webp)$/i.test(filename)
+                        if (isAudio) {
+                          return (
+                            <div key={idx}>
+                              <AudioMessage
+                                src={url}
+                                isMe={isMe}
+                                msgId={msg.id}
+                                transcription={msg.transcription}
+                                transcriptionStatus={msg.transcription_status}
+                                createdAt={msg.created_at}
+                              />
+                            </div>
+                          )
+                        }
+                        if (isVideo) {
+                          return (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => setMediaView({ url, type: 'video', name: filename })}
+                              className="group relative block max-w-[300px] overflow-hidden rounded-xl border border-chat-border bg-black shadow-sm"
+                            >
+                              <video
+                                src={url}
+                                muted
+                                preload="metadata"
+                                className="w-full max-h-[320px] object-contain pointer-events-none"
+                              />
+                              <span className="absolute inset-0 flex items-center justify-center">
+                                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-black/55 text-white transition-colors group-hover:bg-black/70">
+                                  <Play className="h-6 w-6 translate-x-0.5" fill="currentColor" />
+                                </span>
+                              </span>
+                            </button>
+                          )
+                        }
+                        if (isImage) {
+                          return (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => setMediaView({ url, type: 'image', name: filename })}
+                              className="block max-w-[240px] overflow-hidden rounded-xl border border-chat-border hover:opacity-90 hover:scale-[1.02] transition-all duration-300 shadow-sm cursor-zoom-in"
+                            >
+                              <img
+                                src={url}
+                                alt={filename}
+                                className="w-full h-auto object-cover pointer-events-none"
+                              />
+                            </button>
+                          )
+                        }
+                        if (isSticker) {
+                          return (
+                            <a
+                              key={idx}
+                              href={url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block max-w-[160px] overflow-hidden rounded-xl hover:opacity-90 hover:scale-[1.02] transition-all duration-300"
+                            >
+                              <img
+                                src={url}
+                                alt={filename}
+                                className="w-full h-auto object-contain"
+                              />
+                            </a>
+                          )
+                        }
+                        {
+                          const hasPreview = isPdfFile(filename) || isExcelFile(filename)
+                          return (
+                            <DocumentBubble
+                              key={idx}
+                              url={url}
+                              name={filename}
+                              onOpenPreview={
+                                hasPreview
+                                  ? () => setMediaView({ url, type: isPdfFile(filename) ? 'pdf' : 'excel', name: filename })
+                                  : null
+                              }
+                            />
+                          )
+                        }
+                      })}
+                    </div>
+                  )}
+                    {msg.deleted_at ? (
+                     <div className="text-[13px] italic text-chat-muted/60">
+                       [Mensagem apagada]
+                     </div>
+                   ) : msg.content?.trim() && !isTechnicalPlaceholder(msg.content) ? (
+                     <div className="text-[15px] leading-relaxed break-words">
+                        <MessageBody
+                          content={msg.content}
+                          isMe={isMe}
+                          onOpenConversation={onOpenConversationByJid}
+                          ranges={rangesByMessageId.get(msg.id) ?? EMPTY_RANGES}
+                          resolveMention={resolverNomeDaMencao}
+                        />
+                       <span
+  className={`inline-flex translate-y-[30%] items-center gap-1 whitespace-nowrap ${
+    isMe ? 'float-right ml-3' : 'ml-1'
+  }`}>
+                         {msg.edited_at && (
+                           <span className="text-[10px] text-chat-muted/60">(editado)</span>
+                         )}
+                         {msg.revoked_at && (
+                           <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-red-400">
+                             <Trash2 className="h-3 w-3" /> apagada
+                           </span>
+                         )}
+                         {isMe && msg.status === 'sending' && (
+                           <Clock className="h-3 w-3 text-chat-muted/60 shrink-0" />
+                         )}
+                         {isMe && msg.status === 'failed' && (
+                           // Era só o texto "falhou", sem saída nenhuma: a
+                           // pessoa via o problema e não tinha o que fazer. O
+                           // reenvio sai do payload guardado no aparelho, então
+                           // funciona mesmo depois de recarregar a página.
+                           <button
+                             type="button"
+                             disabled={reenviando === msg.id}
+                             onClick={(e) => {
+                               e.preventDefault()
+                               e.stopPropagation()
+                               void reenviarFalha(msg.id)
+                             }}
+                             className="inline-flex items-center gap-0.5 text-[10px] font-medium text-red-400 hover:text-red-300 hover:underline disabled:opacity-60"
+                           >
+                             {reenviando === msg.id ? (
+                               <Loader2 className="h-3 w-3 animate-spin" />
+                             ) : (
+                               <AlertCircle className="h-3 w-3" />
+                             )}
+                             {reenviando === msg.id ? 'reenviando…' : 'falhou · tentar novamente'}
+                           </button>
+                         )}
+                         <span className="text-[10px] font-medium text-chat-muted/70">{timestamp}</span>
+                         <DropdownMenu
+                           open={messageMenuOpenId === msg.id}
+                           onOpenChange={(open) => setMessageMenuOpenId(open ? msg.id : null)}
+                         >
+                           <DropdownMenuTrigger asChild>
+                             <button
+                               type="button"
+                               onClick={(e) => e.stopPropagation()}
+                               onMouseDown={(e) => e.stopPropagation()}
+                               onPointerDown={(e) => e.stopPropagation()}
+                               className={`text-chat-muted/50 hover:text-chat-muted transition-all duration-150 p-0.5 rounded hover:bg-chat-hover ${
+                                 messageMenuOpenId === msg.id
+                                   ? 'opacity-100 pointer-events-auto'
+                                   : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'
+                               }`}
+                             >
+                               <MoreVertical className="h-3.5 w-3.5" />
+                             </button>
+                           </DropdownMenuTrigger>
+                           <MessageActionsMenu
+                             msg={msg}
+                             isMe={isMe}
+                             podeEditar={isMe && podeEditarNoWhatsapp(msg)}
+                             onReply={setReplyingTo}
+                             onCopy={handleCopyMessage}
+                             onEdit={handleEditMessage}
+                             onDelete={setDeleteConfirmMsg}
+  onForward={(m: any) => setMsgsParaEncaminhar([m])}
+  onSelecionar={iniciarSelecaoCom}
+  onReplyPrivately={handleReplyPrivately}
+  podeResponderPrivadamente={isGroupContact && !isMe && !!msg.group_participant}
+  onInfo={setMsgInfoAberta}
+                           />
+                         </DropdownMenu>
+                       </span>
+                     </div>
+                    ) : null}
+                    {msg.reactions && msg.reactions.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {Array.from(
+                          msg.reactions.reduce((acc: Map<string, number>, r: any) => {
+                            acc.set(r.emoji, (acc.get(r.emoji) || 0) + 1)
+                            return acc
+                          }, new Map())
+                        ).map(([emoji, count]) => (
+                          <span
+                             key={emoji}
+                              className="text-[11px] px-1 py-0.5 rounded-full border border-chat-text/10 bg-chat-text/5"
+                          >
+                            {emoji}{count > 1 ? String(count) : ''}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {(msg.deleted_at || !msg.content?.trim() || isTechnicalPlaceholder(msg.content)) && (
+                      <div className="mt-1.5 flex items-center justify-end gap-1">
+                        {msg.edited_at && (
+                          <span className="text-[10px] text-chat-muted/60">(editado)</span>
+                        )}
+                        {/* Mídia sem legenda cai neste ramo (o conteúdo vira um
+                            rótulo técnico tipo "[Imagem]"), então o badge do ramo
+                            de texto nunca aparecia para imagem/áudio/vídeo — era
+                            metade da queixa. O `!msg.deleted_at` evita o sinal
+                            duplicado: mensagem apagada pelo próprio operador já
+                            mostra "[Mensagem apagada]" e não deve ganhar o badge
+                            de revoke por cima. */}
+                        {!msg.deleted_at && msg.revoked_at && (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-red-400">
+                            <Trash2 className="h-3 w-3" /> apagada
+                          </span>
+                        )}
+                        {/* Relógio e "tentar novamente" também aqui: mídia sem
+                            legenda cai neste rodapé, e sem isto uma foto que
+                            está subindo (ou que falhou) ficava sem sinal
+                            nenhum — só o balão de texto tinha os dois. */}
+                        {isMe && msg.status === 'sending' && (
+                          <Clock className="h-3 w-3 text-chat-muted/60 shrink-0" />
+                        )}
+                        {isMe && msg.status === 'failed' && (
+                          <button
+                            type="button"
+                            disabled={reenviando === msg.id}
+                            onClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              void reenviarFalha(msg.id)
+                            }}
+                            className="inline-flex items-center gap-0.5 text-[10px] font-medium text-red-400 hover:text-red-300 hover:underline disabled:opacity-60"
+                          >
+                            {reenviando === msg.id ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <AlertCircle className="h-3 w-3" />
+                            )}
+                            {reenviando === msg.id ? 'reenviando…' : 'falhou · tentar novamente'}
+                          </button>
+                        )}
+                        <span className="text-[10px] font-medium text-chat-muted/70 translate-y-[1px]">
+                          {timestamp}
+                        </span>
+                        {!msg.deleted_at && (
+                          <DropdownMenu
+                            open={messageMenuOpenId === msg.id}
+                            onOpenChange={(open) => setMessageMenuOpenId(open ? msg.id : null)}
+                          >
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type="button"
+                                onClick={(e) => e.stopPropagation()}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onPointerDown={(e) => e.stopPropagation()}
+                                className={`text-chat-muted/50 hover:text-chat-muted transition-all duration-150 p-0.5 rounded hover:bg-chat-hover ${
+                                  messageMenuOpenId === msg.id
+                                    ? 'opacity-100 pointer-events-auto'
+                                    : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'
+                                }`}
+                              >
+                                <MoreVertical className="h-3.5 w-3.5" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <MessageActionsMenu
+                              msg={msg}
+                              isMe={isMe}
+                              podeEditar={isMe && podeEditarNoWhatsapp(msg)}
+                              onReply={setReplyingTo}
+                              onCopy={handleCopyMessage}
+                              onEdit={handleEditMessage}
+                              onDelete={setDeleteConfirmMsg}
+  onForward={(m: any) => setMsgsParaEncaminhar([m])}
+  onSelecionar={iniciarSelecaoCom}
+  onReplyPrivately={handleReplyPrivately}
+  podeResponderPrivadamente={isGroupContact && !isMe && !!msg.group_participant}
+  onInfo={setMsgInfoAberta}
+                            />
+                          </DropdownMenu>
+                        )}
+                      </div>
+                    )}
+                     {!msg.deleted_at && (
+                       <div className={`absolute top-1/2 z-10 -translate-y-1/2 ${isMe ? '-left-8' : '-right-8'}`}>
+                         <button
+                           type="button"
+                           aria-label="Adicionar reação"
+                           title="Adicionar reação"
+                           aria-haspopup="menu"
+                           aria-expanded={reactionPopoverMessageId === msg.id}
+                           onClick={(e) => {
+                             e.preventDefault()
+                             e.stopPropagation()
+                             setReactionPopoverMessageId(
+                               reactionPopoverMessageId === msg.id ? null : msg.id,
+                             )
+                           }}
+                           onMouseDown={(e) => e.stopPropagation()}
+                           onPointerDown={(e) => e.stopPropagation()}
+                           className={`flex h-8 w-8 items-center justify-center rounded-full border border-chat-border bg-chat-panel text-chat-muted shadow-chat transition-all duration-150 hover:bg-chat-hover hover:text-chat-text ${
+                             reactionPopoverMessageId === msg.id
+                               ? 'opacity-100 pointer-events-auto scale-100'
+                               : 'opacity-0 pointer-events-none scale-95 group-hover:opacity-100 group-hover:pointer-events-auto group-hover:scale-100 group-focus-within:opacity-100 group-focus-within:pointer-events-auto group-focus-within:scale-100'
+                           }`}
+                         >
+                           <Smile className="h-4 w-4" />
+                         </button>
+
+                         {reactionPopoverMessageId === msg.id && (
+                           <MenuRadialDeReacoes
+                             usoPorEmoji={usoDeReacoes}
+                             paraEsquerda={isMe}
+                             aoFechar={() => setReactionPopoverMessageId(null)}
+                             aoEscolher={async (emoji) => {
+                               try {
+                                 await reactToMessage(msg.id, emoji, device.id, user.id)
+                                 setReactionPopoverMessageId(null)
+                                 // Só conta o que deu certo, e sem esperar: a
+                                 // estatística não pode atrasar nem derrubar o
+                                 // ato de reagir.
+                                 void registrarUsoDeReacao(emoji)
+                                 setUsoDeReacoes((antes) => ({
+                                   ...(antes || {}),
+                                   [emoji]: ((antes || {})[emoji] || 0) + 1,
+                                 }))
+                               } catch (err: any) {
+                                 toast({ title: err.message || 'Erro ao reagir', variant: 'destructive' })
+                               }
+                             }}
+                           />
+                         )}
+                       </div>
+                     )}
+                 </div>
+                {isMe && (
+                  <div className="w-7 flex-shrink-0 hidden sm:block" />
+                )}
+              </div>
+            </div>
+          </React.Fragment>
+          )
+  }), [
+    // Dados desenhados.
+    //
+    // `device?.id` e não `device.id` (que é como o corpo do map escreve, e como
+    // o lint sugere): este array é avaliado a CADA render, inclusive nos em que
+    // ainda não há conversa aberta — antes da guarda `if (!device || !contact)`,
+    // que fica logo abaixo. Sem a interrogação, abrir o chat sem conversa
+    // selecionada quebraria a tela com "cannot read properties of null".
+    messages,
+    device?.id,
+    device?.instance_key,
+    contact,
+    user?.id,
+    isGroupContact,
+    contactIndex,
+    rangesByMessageId,
+    usoDeReacoes,
+    progressoDeEnvio,
+    // Estado de interação que muda o desenho
+    modoSelecao,
+    estaSelecionada,
+    messageMenuOpenId,
+    reactionPopoverMessageId,
+    mensagemDestacada,
+    reenviando,
+    // Ações (todas memorizadas na origem — ver `sendListOptionAsText`)
+    alternarSelecao,
+    iniciarSelecaoCom,
+    iniciarLongPress,
+    moverLongPress,
+    cancelarLongPress,
+    handleCopyMessage,
+    handleEditMessage,
+    handleReplyPrivately,
+    sendListOptionAsText,
+    pularParaMensagemOriginal,
+    podeEditarNoWhatsapp,
+    reenviarFalha,
+    resolverNomeDaMencao,
+    nomeDaCitacao,
+    onOpenConversationByJid,
+    toast,
+  ])
+
+  /**
+   * O CABECALHO, memorizado pelo mesmo motivo da lista de baloes.
+   *
+   * Medido em 24/09/2026, depois de a lista ja estar memorizada: das 56 ms que
+   * ainda sobravam por tecla, 43 ms eram este bloco — nome do contato, etiquetas,
+   * botoes de atendimento e o painel lateral inteiro, redesenhados a cada letra
+   * digitada no compositor. Nenhum deles depende do texto que esta sendo escrito.
+   */
+  const cabecalhoDaConversa = useMemo(() => (
+        <div className="h-[64px] border-b border-chat-border bg-chat-header shadow-chat flex items-center justify-between px-4 sm:px-5 sticky top-0 z-10 flex-shrink-0">
         <div className="flex items-center gap-3 min-w-0">
           {/*
             Sair da conversa. Um botão só, à esquerda, nas duas telas: antes havia
@@ -4610,7 +5629,90 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
             />
           </Sheet>
         </div>
+        </div>
+  ), [
+    // Dados do contato e da conversa
+    device, user, contact, contactRecord, contactIndex, convKey, displayName, isGroupContact,
+    assignment, donoFixo, labels, etiquetasDoContato, contactTags, contactNotes, viewers,
+    // Estado de abertura de paineis e acoes em curso
+    sheetOpen, isLabelsOpen, isManageLabelsOpen, isGroupActionsOpen, membrosAbertos,
+    galeriaAberta, loadingAction, taskAssignedTo,
+    // Acoes (memorizadas na origem)
+    onBack, onSheetOpenChange, onOpenConversationByJid, openFind, refreshLabels,
+    abrirMidiaDaGaleria, handleEditNickname, handleEditNicknameParticipante,
+    handleToggleLabel, handleDeleteNote, handleActionTake, handleActionWaiting,
+    handleActionFinish,
+  ])
+
+  if (!device || !contact) {
+    return (
+      <div className="hidden md:flex flex-col items-center justify-center h-full bg-chat-conversation/80 backdrop-blur-sm flex-1 relative overflow-hidden">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(59,130,246,0.04),transparent_70%)]" />
+        <div className="relative z-10 flex flex-col items-center text-center px-8 max-w-sm">
+          <BrandLogo className="h-20 w-auto mb-8 object-contain drop-shadow-lg" />
+          <p className="text-chat-text/70 text-[15px] leading-relaxed">
+            {device
+              ? 'Selecione uma conversa para iniciar o atendimento.'
+              : 'Selecione uma conversa para iniciar o atendimento.'}
+          </p>
+          {device && onStartConversation && (
+            <Button
+              onClick={onStartConversation}
+              className="mt-6 bg-primary hover:bg-primary/90 text-primary-foreground rounded-full px-6 h-10 font-medium shadow-lg shadow-primary/25 transition-all hover:scale-105 active:scale-95"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Adicionar nova conversa
+            </Button>
+          )}
+        </div>
       </div>
+    )
+  }
+
+  return (
+    <div
+      className="flex flex-col h-full bg-transparent flex-1 relative min-w-0"
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {/* ITEM 2: realce de "solte aqui" enquanto se arrasta um arquivo sobre a
+          conversa. `pointer-events-none` para o overlay nunca ser o alvo dos
+          eventos de drag — sem isto, entrar nele contaria como sair da área
+          de baixo (e vice-versa) e o contador de dragenter/dragleave em
+          `dragCounterRef` erraria a conta. Fica por cima de tudo (`z-50`),
+          inclusive do cabeçalho e do compositor, porque soltar em qualquer
+          ponto da conversa aberta deve anexar. */}
+      {isDraggingFile && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-chat-conversation/90 backdrop-blur-sm border-4 border-dashed border-primary pointer-events-none">
+          <Paperclip className="h-10 w-10 text-primary" />
+          <p className="text-base font-semibold text-chat-text">Solte para anexar à conversa</p>
+        </div>
+      )}
+      {/* No modo de seleção a barra de ações OCUPA O LUGAR do cabeçalho, como no
+          WhatsApp. Empilhar as duas empurraria a conversa para baixo e a lista
+          saltaria a cada entrada e saída do modo. */}
+      {modoSelecao ? (
+        <MessageSelectionBar
+          quantidade={qtdSelecionadas}
+          onFechar={limparSelecao}
+          onEncaminhar={() => setMsgsParaEncaminhar(selecionadas)}
+          onCopiar={copiarSelecao}
+          onBaixar={baixarSelecao}
+          onApagar={() => setApagarSelecionadasAberto(true)}
+          podeEncaminhar={podeEncaminharSelecao}
+          podeCopiar={podeCopiarSelecao}
+          podeBaixar={midiasDaSelecao.length > 0 && !baixarBloqueadoNoAndroid}
+          podeApagar={apagaveisDaSelecao.length > 0}
+          motivoBaixar={
+            baixarBloqueadoNoAndroid
+              ? 'No celular só dá para baixar um arquivo por vez'
+              : undefined
+          }
+        />
+      ) : (
+        cabecalhoDaConversa
       )}
 
       <div
@@ -4709,657 +5811,8 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
             </p>
           </div>
         ) : (
-          messages.map((msg: any, index: number) => {
-          const isMe = msg.direction === 'outbound' || msg.sender_id === user?.id
-          const estaMarcada = estaSelecionada(msg.id)
-          const messageAttachments = Array.isArray(msg.attachments) ? msg.attachments : []
-          const timestamp = timeFormatter.format(new Date(msg.created_at))
-          const previousMsg = messages[index - 1]
-          const shouldShowDateSeparator =
-            !previousMsg || getDateKey(previousMsg.created_at) !== getDateKey(msg.created_at)
-          const previousIsMe = previousMsg
-            ? previousMsg.direction === 'outbound' || previousMsg.sender_id === user?.id
-            : false
-          const isGroupContactMsg = contact?.includes('@g.us') || msg.remote_sender?.includes('@g.us')
-          const participantContact = msg.group_participant
-            ? findContactByIdentifier(msg.group_participant, contactIndex)
-            : null
-          const fallbackParticipantId = msg.group_participant ? normalizeToDigits(msg.group_participant) : ''
-          const thisSender = !isMe && isGroupContactMsg
-            ? (msg.sender_name || participantContact?.nickname || participantContact?.name || fallbackParticipantId || 'Participante')
-            : null
-          const currentAuthorKey = msg.group_participant || msg.sender_name || msg.remote_sender
-          const previousAuthorKey = previousMsg && !previousIsMe
-            ? (previousMsg.group_participant || previousMsg.sender_name || previousMsg.remote_sender)
-            : null
-          const shouldShowSenderLabel = !isMe && isGroupContactMsg && !!thisSender && (
-            !previousMsg ||
-            previousIsMe ||
-            shouldShowDateSeparator ||
-            currentAuthorKey !== previousAuthorKey
-          )
-          const shouldShowReceivedAvatar =
-            !isMe &&
-            !isGroupContactMsg &&
-            (
-              !previousMsg ||
-              previousIsMe ||
-              shouldShowDateSeparator ||
-              previousMsg.remote_sender !== msg.remote_sender
-            )
-          return (
-            // `chaveRender` antes de `id`: a mensagem enviada por aqui nasce
-            // como balão otimista (`temp-...`) e é substituída pela linha real
-            // (UUID do banco) quando a RPC responde. Sem esta herança de
-            // identidade a key mudaria, o React remontaria o balão e a animação
-            // de entrada rodaria de novo — o "flick" ~1s depois de enviar. Ver
-            // `herdarChaveRender` em `stores/conversationMessages.ts`.
-            <React.Fragment key={msg.chaveRender ?? msg.id}>
-              {shouldShowDateSeparator && (
-                // Separador DENTRO do fluxo, não `sticky`. Como `position: sticky`
-                // não reserva espaço ao grudar, a pílula flutuava permanentemente
-                // sobre as bolhas — cortava texto no meio ("Samu( Hoje )el - Eng.
-                // IA") e, sem `pointer-events-none`, ainda engolia o clique de
-                // quem tentava selecionar o que estava embaixo. Em conversa de um
-                // dia só ela aparece uma vez, no topo, e some ao rolar.
-                <div className="flex justify-center py-2">
-                  <span className="rounded-full border border-chat-border bg-chat-panel/90 px-3 py-1 text-[12px] font-medium text-chat-muted shadow-chat backdrop-blur">
-                    {getDateLabel(msg.created_at)}
-                  </span>
-                </div>
-              )}
-            <div
-              ref={(el) => {
-                if (el) messageRefs.current.set(msg.id, el)
-                else messageRefs.current.delete(msg.id)
-              }}
-              onPointerDown={(e) => iniciarLongPress(e, msg)}
-              onPointerMove={moverLongPress}
-              onPointerUp={cancelarLongPress}
-              onPointerCancel={cancelarLongPress}
-              onPointerLeave={cancelarLongPress}
-              onClickCapture={
-                modoSelecao
-                  ? (e) => {
-                      // FASE DE CAPTURA: intercepta antes dos controles de dentro
-                      // da bolha (abrir imagem, tocar áudio, baixar documento,
-                      // menu ⋮). No modo de seleção o clique tem um significado
-                      // só — marcar —, e sem isto tocar numa foto abriria o
-                      // visualizador em vez de selecioná-la.
-                      e.preventDefault()
-                      e.stopPropagation()
-                      alternarSelecao(msg, index, e.shiftKey)
-                    }
-                  : undefined
-              }
-              className={cn(
-                'flex flex-col animate-in fade-in slide-in-from-bottom-2 duration-300',
-                isMe ? 'items-end' : 'items-start',
-                modoSelecao && 'cursor-pointer select-none rounded-lg -mx-1 px-1 py-0.5 transition-colors',
-                estaMarcada && 'bg-chat-text/[0.07]',
-                // ITEM 12: realce de quem acabou de receber o pulo de uma
-                // citação. Some sozinho (ver o efeito de `mensagemDestacada`).
-                mensagemDestacada === msg.id &&
-                  'rounded-lg -mx-1 px-1 py-0.5 bg-blue-400/15 transition-colors duration-500',
-              )}
-            >
-              {shouldShowSenderLabel && (
-                <div
-                  className="text-[12px] leading-none font-semibold mb-1 ml-1 px-1.5 py-0.5 rounded-full bg-chat-text/10 text-chat-text/80 border border-chat-text/10 inline-flex items-center gap-1.5 select-none"
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-chat-text/30 flex-shrink-0" />
-                  <span>{thisSender}</span>
-                </div>
-              )}
-              <div
-                className={`flex gap-2.5 items-end w-full ${isMe ? 'justify-end' : 'justify-start'}`}
-              >
-              {/* `mr-auto` só nas próprias: a linha delas é `justify-end`, e sem
-                  isso a caixinha colaria na bolha em vez de ficar na margem —
-                  as marcações não formariam uma coluna para o olho seguir. */}
-              {modoSelecao && (
-                <Checkbox
-                  checked={estaMarcada}
-                  tabIndex={-1}
-                  aria-label={estaMarcada ? 'Desmarcar mensagem' : 'Marcar mensagem'}
-                  className={cn('shrink-0 self-center', isMe && 'mr-auto')}
-                />
-              )}
-              {!isMe && (
-                shouldShowReceivedAvatar ? (
-                  <SmartAvatar
-                    jid={msg.remote_sender}
-                    name={resolveContactDisplayName(msg.remote_sender, contactIndex, {
-                      sender_name: msg.sender_name
-                    })}
-                    instanceKey={device?.instance_key}
-                    contactRecord={findContactByIdentifier(msg.remote_sender, contactIndex)}
-                    className="h-7 w-7 border border-chat-border shadow-sm flex-shrink-0 mb-1 hidden sm:block"
-                    fallbackClassName="bg-chat-panel text-chat-muted text-xs"
-                  />
-                  ) : (
-                    <div className="h-7 w-7 flex-shrink-0 mb-1 hidden sm:block" />
-                  )
-                )}
-                <div
-                  className={`max-w-[88%] sm:max-w-[78%] rounded-2xl px-3.5 py-2 shadow-chat-bubble relative group transition-all duration-150 ${
-                    isMe
-                      ? 'bg-chat-bubble-out text-chat-text rounded-br-sm border border-chat-bubble-outline'
-                      : 'bg-chat-bubble-in text-chat-text rounded-bl-sm'
-                  }`}
-                >
-                  {!msg.deleted_at && msg.reply_to_snapshot && (
-                    // ITEM 12: só vira botão quando há para onde pular. Sem
-                    // `reply_to_id` a original não está no nosso banco (só o
-                    // stanzaId da Evolution, no snapshot), então o bloco segue
-                    // sendo texto: um cursor de mão que não leva a lugar nenhum
-                    // é pior que nenhum.
-                    <div
-                      role={msg.reply_to_id ? 'button' : undefined}
-                      tabIndex={msg.reply_to_id ? 0 : undefined}
-                      onClick={
-                        msg.reply_to_id
-                          ? () => pularParaMensagemOriginal(msg.reply_to_id)
-                          : undefined
-                      }
-                      onKeyDown={
-                        msg.reply_to_id
-                          ? (e) => {
-                              if (e.key !== 'Enter' && e.key !== ' ') return
-                              e.preventDefault()
-                              pularParaMensagemOriginal(msg.reply_to_id)
-                            }
-                          : undefined
-                      }
-                      className={cn(
-                        'flex items-start gap-2 mb-2 pl-2 border-l-2 border-chat-text/20 rounded-r',
-                        msg.reply_to_id &&
-                          'cursor-pointer transition-colors hover:bg-chat-text/[0.06] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-400/50',
-                      )}
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[11px] font-semibold text-chat-muted/90">
-                          {nomeDaCitacao(msg)}
-                        </div>
-                          <div className="text-[12px] truncate text-chat-muted/70">
-                            {isTechnicalPlaceholder(msg.reply_to_snapshot.content) ? 'Voz' : msg.reply_to_snapshot.content || ''}
-                          </div>
-                      </div>
-                    </div>
-                  )}
-                  {/* Encaminhada, como no WhatsApp: itálico, apagado, acima do
-                      conteúdo. Vale nos dois sentidos — o WhatsApp também marca
-                      para quem enviou. Mensagem apagada não leva rótulo. */}
-                  {!msg.deleted_at && msg.is_forwarded && (
-                    <div className="flex items-center gap-1 mb-0.5 text-[12px] italic text-chat-muted/70">
-                      <Forward className="h-3 w-3 shrink-0" />
-                      Encaminhada
-                    </div>
-                  )}
-                    {messageAttachments.length > 0 && (
-                     <div className="flex flex-col gap-2 mb-2">
-                       {messageAttachments.map((att: any, idx: number) => {
-                          if (att && typeof att === 'object' && att.type === 'contact') {
-                            return (
-                              <ContactShareBubble
-                                key={idx}
-                                name={att.name || 'Contato'}
-                                phone={att.phone || null}
-                                onOpenConversation={(jid) => onOpenConversationByJid?.(jid)}
-                              />
-                            )
-                          }
-                          if (att && typeof att === 'object' && att.type === 'list') {
-                            return (
-                              <ListMessageBubble
-                                key={idx}
-                                title={att.title || ''}
-                                description={att.description || ''}
-                                buttonText={att.buttonText || 'Ver opções'}
-                                sections={Array.isArray(att.sections) ? att.sections : []}
-                                onSelectOption={(optionTitle) => sendListOptionAsText(optionTitle, msg)}
-                              />
-                            )
-                          }
-                          if (att && typeof att === 'object' && att.url) {
-                            // Arquivo do servidor antigo, que não existe mais.
-                            // Vem ANTES de qualquer ramo de mídia: renderizar o
-                            // `<img>`/`<audio>`/documento normal dispararia uma
-                            // requisição condenada e a altura mudaria depois que
-                            // a conversa já tivesse rolado para o fim.
-                            if (!anexoEstaVivo(att.url)) {
-                              return <UnavailableAttachmentBubble key={idx} name={att.name} />
-                            }
-                            if (att.type === 'audio') {
-                             return (
-                               <div key={idx}>
-                                 <AudioMessage
-                                   src={att.url}
-                                   isMe={isMe}
-                                   msgId={msg.id}
-                                   transcription={msg.transcription}
-                                   transcriptionStatus={msg.transcription_status}
-                                   createdAt={msg.created_at}
-                                 />
-                               </div>
-                              )
-                            }
-                          if (att.type === 'video') {
-                            return (
-                              <button
-                                key={idx}
-                                type="button"
-                                onClick={() => setMediaView({ url: att.url, type: 'video', name: att.name })}
-                                className="group relative block w-[300px] max-w-full min-h-[180px] overflow-hidden rounded-xl border border-chat-border bg-black shadow-sm"
-                              >
-                                {/* `min-h` fixo no contêiner, não liberado depois: o
-                                    fundo é preto e `object-contain` já letterboxa,
-                                    então um vídeo baixo fica com barras em vez de
-                                    fazer o balão pular quando os metadados chegam. */}
-                                <video
-                                  src={att.url}
-                                  muted
-                                  preload="metadata"
-                                  className="w-full max-h-[320px] object-contain pointer-events-none"
-                                />
-                                <span className="absolute inset-0 flex items-center justify-center">
-                                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-black/55 text-white transition-colors group-hover:bg-black/70">
-                                    <Play className="h-6 w-6 translate-x-0.5" fill="currentColor" />
-                                  </span>
-                                </span>
-                              </button>
-                            )
-                          }
-                           if (att.type === 'image') {
-                             return (
-                              <button
-                                key={idx}
-                                type="button"
-                                onClick={() => setMediaView({ url: att.url, type: 'image', name: att.name })}
-                                /*
-                                  ITEM 6: mais perto do WhatsApp. Saíram a borda,
-                                  a sombra e o `hover:scale` — o WhatsApp não tem
-                                  nenhum dos três, e o crescimento no hover fazia
-                                  a foto pular por cima do balão vizinho. O teto
-                                  subiu de 240px para 320px, que é a ordem de
-                                  grandeza do WhatsApp no computador.
-
-                                  A largura continua natural (sem `w-full`) de
-                                  propósito: esticar foto pequena — QR code de
-                                  boleto, etiqueta de exame, print — já foi um bug
-                                  corrigido, e o comentário do ChatImage explica
-                                  por quê. `object-contain` no lugar de
-                                  `object-cover` para nunca cortar a imagem.
-                                */
-                                className="block max-w-[320px] overflow-hidden rounded-xl cursor-zoom-in transition-opacity duration-200 hover:opacity-95"
-                              >
-                                <ChatImage
-                                  src={att.url}
-                                  alt={att.name || 'Imagem'}
-                                  className="w-full h-auto object-contain pointer-events-none"
-                                />
-                              </button>
-                             )
-                           }
-                          if (att.type === 'sticker') {
-                            return (
-                              // Era um `<a target="_blank">`: clicar jogava a
-                              // pessoa para fora do app, numa aba do navegador
-                              // com o arquivo cru — e no Electron isso abre o
-                              // navegador do sistema, tirando a pessoa do
-                              // atendimento. Agora entra no mesmo visualizador
-                              // que imagem e vídeo já usavam.
-                              <button
-                                key={idx}
-                                type="button"
-                                onClick={() =>
-                                  setMediaView({ url: att.url, type: 'sticker', name: att.name })
-                                }
-                                className="block max-w-[160px] overflow-hidden rounded-xl hover:opacity-90 hover:scale-[1.02] transition-all duration-300"
-                              >
-                                <ChatImage
-                                  src={att.url}
-                                  alt={att.name || 'Figurinha'}
-                                  className="w-full h-auto object-contain"
-                                  reservaClassName="w-[160px] min-h-[120px]"
-                                />
-                              </button>
-                            )
-                          }
-                          {
-                            const docName = att.name || att.url
-                            const hasPreview = isPdfFile(docName) || isExcelFile(docName)
-                            return (
-                              <DocumentBubble
-                                key={idx}
-                                url={att.url}
-                                name={docName}
-                                onOpenPreview={
-                                  hasPreview
-                                    ? () => setMediaView({ url: att.url, type: isPdfFile(docName) ? 'pdf' : 'excel', name: att.name })
-                                    : null
-                                }
-                              />
-                            )
-                          }
-                        }
-                        const filename = att as string
-                        const url = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/chat-attachments/${msg.id}/${filename}`
-                        const isImage = /\.(jpeg|jpg|gif|png|webp)$/i.test(filename)
-                        const isVideo = /\.(mp4|webm|mov|m4v|3gp)$/i.test(filename)
-                        const isAudio = /\.(mp3|ogg|oga|m4a|aac|wav|webm)$/i.test(filename)
-                        const isSticker = /\.(webp)$/i.test(filename)
-                        if (isAudio) {
-                          return (
-                            <div key={idx}>
-                              <AudioMessage
-                                src={url}
-                                isMe={isMe}
-                                msgId={msg.id}
-                                transcription={msg.transcription}
-                                transcriptionStatus={msg.transcription_status}
-                                createdAt={msg.created_at}
-                              />
-                            </div>
-                          )
-                        }
-                        if (isVideo) {
-                          return (
-                            <button
-                              key={idx}
-                              type="button"
-                              onClick={() => setMediaView({ url, type: 'video', name: filename })}
-                              className="group relative block max-w-[300px] overflow-hidden rounded-xl border border-chat-border bg-black shadow-sm"
-                            >
-                              <video
-                                src={url}
-                                muted
-                                preload="metadata"
-                                className="w-full max-h-[320px] object-contain pointer-events-none"
-                              />
-                              <span className="absolute inset-0 flex items-center justify-center">
-                                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-black/55 text-white transition-colors group-hover:bg-black/70">
-                                  <Play className="h-6 w-6 translate-x-0.5" fill="currentColor" />
-                                </span>
-                              </span>
-                            </button>
-                          )
-                        }
-                        if (isImage) {
-                          return (
-                            <button
-                              key={idx}
-                              type="button"
-                              onClick={() => setMediaView({ url, type: 'image', name: filename })}
-                              className="block max-w-[240px] overflow-hidden rounded-xl border border-chat-border hover:opacity-90 hover:scale-[1.02] transition-all duration-300 shadow-sm cursor-zoom-in"
-                            >
-                              <img
-                                src={url}
-                                alt={filename}
-                                className="w-full h-auto object-cover pointer-events-none"
-                              />
-                            </button>
-                          )
-                        }
-                        if (isSticker) {
-                          return (
-                            <a
-                              key={idx}
-                              href={url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="block max-w-[160px] overflow-hidden rounded-xl hover:opacity-90 hover:scale-[1.02] transition-all duration-300"
-                            >
-                              <img
-                                src={url}
-                                alt={filename}
-                                className="w-full h-auto object-contain"
-                              />
-                            </a>
-                          )
-                        }
-                        {
-                          const hasPreview = isPdfFile(filename) || isExcelFile(filename)
-                          return (
-                            <DocumentBubble
-                              key={idx}
-                              url={url}
-                              name={filename}
-                              onOpenPreview={
-                                hasPreview
-                                  ? () => setMediaView({ url, type: isPdfFile(filename) ? 'pdf' : 'excel', name: filename })
-                                  : null
-                              }
-                            />
-                          )
-                        }
-                      })}
-                    </div>
-                  )}
-                    {msg.deleted_at ? (
-                     <div className="text-[13px] italic text-chat-muted/60">
-                       [Mensagem apagada]
-                     </div>
-                   ) : msg.content?.trim() && !isTechnicalPlaceholder(msg.content) ? (
-                     <div className="text-[15px] leading-relaxed break-words">
-                        <MessageBody
-                          content={msg.content}
-                          isMe={isMe}
-                          onOpenConversation={onOpenConversationByJid}
-                          ranges={rangesByMessageId.get(msg.id) ?? EMPTY_RANGES}
-                          resolveMention={resolverNomeDaMencao}
-                        />
-                       <span
-  className={`inline-flex translate-y-[30%] items-center gap-1 whitespace-nowrap ${
-    isMe ? 'float-right ml-3' : 'ml-1'
-  }`}>
-                         {msg.edited_at && (
-                           <span className="text-[10px] text-chat-muted/60">(editado)</span>
-                         )}
-                         {msg.revoked_at && (
-                           <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-red-400">
-                             <Trash2 className="h-3 w-3" /> apagada
-                           </span>
-                         )}
-                         {isMe && msg.status === 'sending' && (
-                           <Clock className="h-3 w-3 text-chat-muted/60 shrink-0" />
-                         )}
-                         {isMe && msg.status === 'failed' && (
-                           // Era só o texto "falhou", sem saída nenhuma: a
-                           // pessoa via o problema e não tinha o que fazer. O
-                           // reenvio sai do payload guardado no aparelho, então
-                           // funciona mesmo depois de recarregar a página.
-                           <button
-                             type="button"
-                             disabled={reenviando === msg.id}
-                             onClick={(e) => {
-                               e.preventDefault()
-                               e.stopPropagation()
-                               void reenviarFalha(msg.id)
-                             }}
-                             className="inline-flex items-center gap-0.5 text-[10px] font-medium text-red-400 hover:text-red-300 hover:underline disabled:opacity-60"
-                           >
-                             {reenviando === msg.id ? (
-                               <Loader2 className="h-3 w-3 animate-spin" />
-                             ) : (
-                               <AlertCircle className="h-3 w-3" />
-                             )}
-                             {reenviando === msg.id ? 'reenviando…' : 'falhou · tentar novamente'}
-                           </button>
-                         )}
-                         <span className="text-[10px] font-medium text-chat-muted/70">{timestamp}</span>
-                         <DropdownMenu
-                           open={messageMenuOpenId === msg.id}
-                           onOpenChange={(open) => setMessageMenuOpenId(open ? msg.id : null)}
-                         >
-                           <DropdownMenuTrigger asChild>
-                             <button
-                               type="button"
-                               onClick={(e) => e.stopPropagation()}
-                               onMouseDown={(e) => e.stopPropagation()}
-                               onPointerDown={(e) => e.stopPropagation()}
-                               className={`text-chat-muted/50 hover:text-chat-muted transition-all duration-150 p-0.5 rounded hover:bg-chat-hover ${
-                                 messageMenuOpenId === msg.id
-                                   ? 'opacity-100 pointer-events-auto'
-                                   : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'
-                               }`}
-                             >
-                               <MoreVertical className="h-3.5 w-3.5" />
-                             </button>
-                           </DropdownMenuTrigger>
-                           <MessageActionsMenu
-                             msg={msg}
-                             isMe={isMe}
-                             podeEditar={isMe && podeEditarNoWhatsapp(msg)}
-                             onReply={setReplyingTo}
-                             onCopy={handleCopyMessage}
-                             onEdit={handleEditMessage}
-                             onDelete={setDeleteConfirmMsg}
-  onForward={(m: any) => setMsgsParaEncaminhar([m])}
-  onSelecionar={iniciarSelecaoCom}
-  onReplyPrivately={handleReplyPrivately}
-  podeResponderPrivadamente={isGroupContact && !isMe && !!msg.group_participant}
-  onInfo={setMsgInfoAberta}
-                           />
-                         </DropdownMenu>
-                       </span>
-                     </div>
-                    ) : null}
-                    {msg.reactions && msg.reactions.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1.5">
-                        {Array.from(
-                          msg.reactions.reduce((acc: Map<string, number>, r: any) => {
-                            acc.set(r.emoji, (acc.get(r.emoji) || 0) + 1)
-                            return acc
-                          }, new Map())
-                        ).map(([emoji, count]) => (
-                          <span
-                             key={emoji}
-                              className="text-[11px] px-1 py-0.5 rounded-full border border-chat-text/10 bg-chat-text/5"
-                          >
-                            {emoji}{count > 1 ? String(count) : ''}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {(msg.deleted_at || !msg.content?.trim() || isTechnicalPlaceholder(msg.content)) && (
-                      <div className="mt-1.5 flex items-center justify-end gap-1">
-                        {msg.edited_at && (
-                          <span className="text-[10px] text-chat-muted/60">(editado)</span>
-                        )}
-                        {/* Mídia sem legenda cai neste ramo (o conteúdo vira um
-                            rótulo técnico tipo "[Imagem]"), então o badge do ramo
-                            de texto nunca aparecia para imagem/áudio/vídeo — era
-                            metade da queixa. O `!msg.deleted_at` evita o sinal
-                            duplicado: mensagem apagada pelo próprio operador já
-                            mostra "[Mensagem apagada]" e não deve ganhar o badge
-                            de revoke por cima. */}
-                        {!msg.deleted_at && msg.revoked_at && (
-                          <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-red-400">
-                            <Trash2 className="h-3 w-3" /> apagada
-                          </span>
-                        )}
-                        <span className="text-[10px] font-medium text-chat-muted/70 translate-y-[1px]">
-                          {timestamp}
-                        </span>
-                        {!msg.deleted_at && (
-                          <DropdownMenu
-                            open={messageMenuOpenId === msg.id}
-                            onOpenChange={(open) => setMessageMenuOpenId(open ? msg.id : null)}
-                          >
-                            <DropdownMenuTrigger asChild>
-                              <button
-                                type="button"
-                                onClick={(e) => e.stopPropagation()}
-                                onMouseDown={(e) => e.stopPropagation()}
-                                onPointerDown={(e) => e.stopPropagation()}
-                                className={`text-chat-muted/50 hover:text-chat-muted transition-all duration-150 p-0.5 rounded hover:bg-chat-hover ${
-                                  messageMenuOpenId === msg.id
-                                    ? 'opacity-100 pointer-events-auto'
-                                    : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'
-                                }`}
-                              >
-                                <MoreVertical className="h-3.5 w-3.5" />
-                              </button>
-                            </DropdownMenuTrigger>
-                            <MessageActionsMenu
-                              msg={msg}
-                              isMe={isMe}
-                              podeEditar={isMe && podeEditarNoWhatsapp(msg)}
-                              onReply={setReplyingTo}
-                              onCopy={handleCopyMessage}
-                              onEdit={handleEditMessage}
-                              onDelete={setDeleteConfirmMsg}
-  onForward={(m: any) => setMsgsParaEncaminhar([m])}
-  onSelecionar={iniciarSelecaoCom}
-  onReplyPrivately={handleReplyPrivately}
-  podeResponderPrivadamente={isGroupContact && !isMe && !!msg.group_participant}
-  onInfo={setMsgInfoAberta}
-                            />
-                          </DropdownMenu>
-                        )}
-                      </div>
-                    )}
-                     {!msg.deleted_at && (
-                       <div className={`absolute top-1/2 z-10 -translate-y-1/2 ${isMe ? '-left-8' : '-right-8'}`}>
-                         <button
-                           type="button"
-                           aria-label="Adicionar reação"
-                           title="Adicionar reação"
-                           aria-haspopup="menu"
-                           aria-expanded={reactionPopoverMessageId === msg.id}
-                           onClick={(e) => {
-                             e.preventDefault()
-                             e.stopPropagation()
-                             setReactionPopoverMessageId(
-                               reactionPopoverMessageId === msg.id ? null : msg.id,
-                             )
-                           }}
-                           onMouseDown={(e) => e.stopPropagation()}
-                           onPointerDown={(e) => e.stopPropagation()}
-                           className={`flex h-8 w-8 items-center justify-center rounded-full border border-chat-border bg-chat-panel text-chat-muted shadow-chat transition-all duration-150 hover:bg-chat-hover hover:text-chat-text ${
-                             reactionPopoverMessageId === msg.id
-                               ? 'opacity-100 pointer-events-auto scale-100'
-                               : 'opacity-0 pointer-events-none scale-95 group-hover:opacity-100 group-hover:pointer-events-auto group-hover:scale-100 group-focus-within:opacity-100 group-focus-within:pointer-events-auto group-focus-within:scale-100'
-                           }`}
-                         >
-                           <Smile className="h-4 w-4" />
-                         </button>
-
-                         {reactionPopoverMessageId === msg.id && (
-                           <MenuRadialDeReacoes
-                             usoPorEmoji={usoDeReacoes}
-                             paraEsquerda={isMe}
-                             aoFechar={() => setReactionPopoverMessageId(null)}
-                             aoEscolher={async (emoji) => {
-                               try {
-                                 await reactToMessage(msg.id, emoji, device.id, user.id)
-                                 setReactionPopoverMessageId(null)
-                                 // Só conta o que deu certo, e sem esperar: a
-                                 // estatística não pode atrasar nem derrubar o
-                                 // ato de reagir.
-                                 void registrarUsoDeReacao(emoji)
-                                 setUsoDeReacoes((antes) => ({
-                                   ...(antes || {}),
-                                   [emoji]: ((antes || {})[emoji] || 0) + 1,
-                                 }))
-                               } catch (err: any) {
-                                 toast({ title: err.message || 'Erro ao reagir', variant: 'destructive' })
-                               }
-                             }}
-                           />
-                         )}
-                       </div>
-                     )}
-                 </div>
-                {isMe && (
-                  <div className="w-7 flex-shrink-0 hidden sm:block" />
-                )}
-              </div>
-            </div>
-          </React.Fragment>
-          )
-        }))}
+          baloesDaConversa
+        )}
         {/* Tentativas de envio em aberto — DEPOIS das mensagens reais de propósito
             (são as mais recentes por definição). `tipo === 'edicao'` fica de fora:
             editar não é mensagem nova, e um balão vermelho aqui para uma edição que
@@ -5650,17 +6103,10 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           </div>
         )}
         <form onSubmit={handleSend} className="flex flex-col gap-2.5 max-w-4xl mx-auto w-full">
-          {uploadProgress !== null && (
-            <div className="flex items-center gap-2 px-3 py-2 bg-blue-500/10 border border-blue-500/20 rounded-xl">
-              <div className="flex-1 h-1.5 rounded-full bg-blue-500/20 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-blue-500 transition-all duration-300"
-                  style={{ width: `${uploadProgress}%` }}
-                />
-              </div>
-              <span className="text-xs text-blue-400 font-medium shrink-0">{uploadProgress}%</span>
-            </div>
-          )}
+          {/* A barra de progresso global saiu daqui: o compositor agora esvazia
+              no mesmo frame do envio, e o progresso passou a morar DENTRO de
+              cada balão, ao lado da foto que está subindo. Uma barra sobre um
+              compositor vazio não dizia mais a que arquivo se referia. */}
           {attachments.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-chat-panel border border-chat-border rounded-xl">
               {attachments.map((file, index) => {
