@@ -4198,6 +4198,10 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
    * para "memorizar melhor": o preço seria a lista mostrar dado velho.
    */
   const baloesDaConversa = useMemo(() =>
+          // Mesma guarda do cabeçalho logo abaixo: a fábrica roda antes do
+          // `if (!device || !contact)`. Aqui o array vazio já protegia por
+          // acaso, mas depender disso foi o que derrubou a produção uma vez.
+          !device || !contact ? null :
           messages.map((msg: any, index: number) => {
           const isMe = msg.direction === 'outbound' || msg.sender_id === user?.id
           const estaMarcada = estaSelecionada(msg.id)
@@ -4933,8 +4937,10 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     // que fica logo abaixo. Sem a interrogação, abrir o chat sem conversa
     // selecionada quebraria a tela com "cannot read properties of null".
     messages,
-    device?.id,
-    device?.instance_key,
+    // `device` inteiro cobre `device.id` e `device.instance_key` usados lá
+    // dentro. E nada de `device.algo` aqui: este array é avaliado a CADA render,
+    // inclusive antes da guarda `if (!device || !contact)` logo abaixo.
+    device,
     contact,
     user?.id,
     isGroupContact,
@@ -4976,7 +4982,27 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
    * botoes de atendimento e o painel lateral inteiro, redesenhados a cada letra
    * digitada no compositor. Nenhum deles depende do texto que esta sendo escrito.
    */
-  const cabecalhoDaConversa = useMemo(() => (
+  const cabecalhoDaConversa = useMemo(() => {
+    /**
+     * SEM CONVERSA ABERTA NÃO HÁ CABEÇALHO — e esta guarda não é zelo.
+     *
+     * A fábrica de um `useMemo` roda durante o render, aqui em cima, ANTES do
+     * `if (!device || !contact)` que fica logo abaixo. Montar este JSX avalia
+     * `device.name`, `device.id` e `user.id` na hora; com a tela do chat aberta
+     * e nenhuma conversa selecionada — que é o estado logo depois de entrar —
+     * `device` é indefinido e o render estourava
+     * `Cannot read properties of undefined (reading 'name')`.
+     *
+     * O efeito não era uma tela de erro: o ErrorBoundary remontava a árvore, o
+     * render estourava de novo, e o app ficava preso em "Entrando…" em laço.
+     * Foi assim que a produção caiu em 24/09/2026, logo depois do deploy.
+     *
+     * A lista de balões (`baloesDaConversa`, acima) sobreviveu por acaso —
+     * `messages.map` não executa o corpo com array vazio. A guarda foi posta lá
+     * também, pelo mesmo motivo.
+     */
+    if (!device || !contact) return null
+    return (
         <div className="h-[64px] border-b border-chat-border bg-chat-header shadow-chat flex items-center justify-between px-4 sm:px-5 sticky top-0 z-10 flex-shrink-0">
         <div className="flex items-center gap-3 min-w-0">
           {/*
@@ -5655,7 +5681,8 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           </Sheet>
         </div>
         </div>
-  ), [
+    )
+  }, [
     // Dados do contato e da conversa
     device, user, contact, contactRecord, contactIndex, convKey, displayName, isGroupContact,
     assignment, donoFixo, labels, etiquetasDoContato, contactTags, contactNotes, viewers,
