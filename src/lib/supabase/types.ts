@@ -16,6 +16,19 @@ export interface Profile {
    */
   notification_prefs?: Record<string, { sound: boolean; background: boolean }>
   /**
+   * Modo pessoal: responder um contato SEM DONO me atribui esse contato?
+   *
+   * ⚠️ Quem lê isto é o BANCO, não o app. A atribuição automática acontece no
+   * gatilho `tg_atribuir_conversa_ao_responder` de `messages`, depois que a
+   * mensagem já foi gravada — o app só desenha o interruptor e grava a coluna.
+   * Mexer nesta flag pelo cliente não muda nada sozinho.
+   *
+   * Ausente = ligado (a coluna é `not null default true` no banco; o `?` aqui
+   * cobre só perfil carregado antes da migration). Ver
+   * `src/hooks/use-atribuicao-automatica.ts`.
+   */
+  atribuir_ao_responder?: boolean
+  /**
    * Ajustes pessoais do Email Hub. Hoje só a assinatura.
    *
    * ⚠️ `signature`, logo acima, é OUTRA COISA: é a do WhatsApp, texto puro,

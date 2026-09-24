@@ -130,6 +130,7 @@ import { getLabels, createLabel, updateLabel, deleteLabel, podeEditarEtiqueta } 
 import { getContactTags, toggleContactTag } from '@/services/contact_tags'
 import { useRealtime } from '@/hooks/use-realtime'
 import { useAuth } from '@/hooks/use-auth'
+import { useAtribuicaoAutomatica } from '@/hooks/use-atribuicao-automatica'
 import { sendMessage, reactToMessage, deleteMessage, editMessage } from '@/services/messages'
 import { MenuRadialDeReacoes } from '@/components/chat/MenuRadialDeReacoes'
 import { DialogoDeContatoFixo } from '@/components/chat/DialogoDeContatoFixo'
@@ -1101,6 +1102,15 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const { user } = useAuth()
   const { toast } = useToast()
   const navigate = useNavigate()
+  /**
+   * Modo "atribuir a mim ao responder" — GLOBAL da pessoa, não da conversa.
+   *
+   * Vive no perfil e quem o consulta é o gatilho do banco; o toggle aqui embaixo
+   * só liga e desliga. Por ser um modo, ele NÃO entra no reset de troca de
+   * conversa mais abaixo (ao contrário do `semAssinatura`, que é por conversa):
+   * vazar de um contato para o outro é exatamente o comportamento pedido.
+   */
+  const atribuicaoAutomatica = useAtribuicaoAutomatica()
 
   const [msgText, setMsgText] = useState('')
   const [isEmojiOpen, setIsEmojiOpen] = useState(false)
@@ -3545,6 +3555,21 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const isGroupContact = isGroupJid(contact)
 
   /**
+   * A barra de ajustes acima do compositor.
+   *
+   * Ela era do toggle "sem assinatura" e só aparecia quando havia assinatura
+   * salva. Com o toggle de atribuição ao lado, a barra passa a aparecer quando
+   * QUALQUER um dos dois se aplica — senão o interruptor de atribuição sumiria
+   * justamente para os aparelhos sem assinatura configurada.
+   *
+   * Atribuição não vale em grupo: o gatilho do banco ignora `@g.us` de propósito
+   * (em grupo várias pessoas respondem, e a primeira a digitar viraria dona do
+   * grupo inteiro). Mostrar ali uma chave sem efeito seria pior que não mostrar.
+   */
+  const temAssinatura = Boolean(device?.signature || user?.signature)
+  const podeAtribuirAoResponder = !isGroupContact
+
+  /**
    * Troca o número por nome ao EXIBIR. O texto guardado e enviado continua com o
    * número — é ele que faz o WhatsApp notificar a pessoa. Mesma precedência do
    * resto do app: apelido > nome > número.
@@ -5615,37 +5640,77 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
       </Dialog>
 
       <div className="flex flex-col bg-chat-composer border-t border-chat-border shadow-chat flex-shrink-0 px-4 py-3 z-10 relative">
-        {(device?.signature || user?.signature) && (
+        {(temAssinatura || podeAtribuirAoResponder) && (
           <div className="px-2 pb-2 text-[11px] text-chat-muted/75 flex flex-col gap-1">
-            <div className="flex items-center gap-1.5">
-              <Info className="h-3 w-3 text-chat-muted/35" />
-              <span>
-                {semAssinatura ? 'Enviando SEM assinatura' : 'Enviando como'}
-                {!semAssinatura && (
-                  <>
-                    {' '}
-                    <span className="font-semibold text-chat-text/70">
-                      {device?.signature || user?.signature}
-                    </span>
-                  </>
-                )}
-              </span>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {temAssinatura && (
+                <>
+                  <Info className="h-3 w-3 text-chat-muted/35" />
+                  <span>
+                    {semAssinatura ? 'Enviando SEM assinatura' : 'Enviando como'}
+                    {!semAssinatura && (
+                      <>
+                        {' '}
+                        <span className="font-semibold text-chat-text/70">
+                          {device?.signature || user?.signature}
+                        </span>
+                      </>
+                    )}
+                  </span>
+                </>
+              )}
               <div className="flex-1" />
               {/* ITEM 7: toggle "sem assinatura" — nasce desligado (assina
                   como sempre) e só vale para esta conversa; ver o reset em
                   `setSemAssinatura(false)` na troca de conversa acima. */}
-              <Label
-                htmlFor="toggle-sem-assinatura"
-                className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-chat-muted/75"
-              >
-                Sem assinatura
-                <Switch
-                  id="toggle-sem-assinatura"
-                  checked={semAssinatura}
-                  onCheckedChange={setSemAssinatura}
-                  className="scale-75"
-                />
-              </Label>
+              {temAssinatura && (
+                <Label
+                  htmlFor="toggle-sem-assinatura"
+                  className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-chat-muted/75"
+                >
+                  Sem assinatura
+                  <Switch
+                    id="toggle-sem-assinatura"
+                    checked={semAssinatura}
+                    onCheckedChange={setSemAssinatura}
+                    className="scale-75"
+                  />
+                </Label>
+              )}
+              {/* Atribuição automática: o VIZINHO DE CIMA é por conversa e nasce
+                  desligado; este é um MODO da pessoa e nasce ligado. Por isso o
+                  rótulo é afirmativo ("Atribuir a mim") em vez de negativo, e
+                  por isso ele não é zerado na troca de conversa. */}
+              {podeAtribuirAoResponder && (
+                <Label
+                  htmlFor="toggle-atribuir-a-mim"
+                  title="Ligado: responder um contato sem dono passa esse contato para você. Desligado: você responde sem assumir o atendimento."
+                  className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-chat-muted/75"
+                >
+                  Atribuir a mim
+                  <Switch
+                    id="toggle-atribuir-a-mim"
+                    checked={atribuicaoAutomatica.ligado}
+                    disabled={atribuicaoAutomatica.salvando}
+                    onCheckedChange={(valor) => {
+                      // A escrita vai para o perfil, e é o BANCO que lê essa
+                      // preferência na hora de atribuir. Se ela não subir, a
+                      // chavinha voltaria sozinha e a pessoa seguiria herdando
+                      // contatos achando que tinha desligado — daí o aviso.
+                      void atribuicaoAutomatica.definir(valor).then((ok) => {
+                        if (ok) return
+                        toast({
+                          title: 'Não foi possível salvar',
+                          description:
+                            'A atribuição automática continua como estava. Tente de novo em instantes.',
+                          variant: 'destructive',
+                        })
+                      })
+                    }}
+                    className="scale-75"
+                  />
+                </Label>
+              )}
             </div>
           </div>
         )}
