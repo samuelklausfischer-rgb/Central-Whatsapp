@@ -730,6 +730,79 @@ function getListInfo(msgObj: Record<string, unknown>): ListInfo | null {
   }
 }
 
+type TemplateButton = { label: string; url: string | null }
+type TemplateHeaderImage = { mimetype: string; fileName?: string }
+type TemplateInfo = { text: string; buttons: TemplateButton[]; headerImage: TemplateHeaderImage | null }
+
+/**
+ * A "mensagem com botão" que o usuário reportou. É `templateMessage`, e por não
+ * ter parser caía no `[Mensagem de mídia]` do fim do `extractContent` — 2.162
+ * mensagens nesse estado no banco, a primeira em 20/10/2025.
+ *
+ * Estrutura real (colhida da Evolution, sem `title`/`footer` nos exemplos
+ * vistos): `templateMessage.interactiveMessageTemplate.body.text` é o texto
+ * principal; `nativeFlowMessage.buttons` é a lista de botões, mas o rótulo
+ * visível e a URL NÃO estão em `buttons[].name` (que é o TIPO do botão, ex.
+ * `cta_url`) — estão dentro de `buttons[].buttonParamsJson`, uma STRING JSON de
+ * terceiro (o próprio WhatsApp) que pode vir malformada. Por isso o parse é
+ * sempre em try/catch: uma vírgula a mais nesse JSON não pode derrubar a
+ * ingestão da empresa inteira. Falhando o parse, cai para `name` como rótulo —
+ * pior que o rótulo certo, mas infinitamente melhor que perder o botão.
+ *
+ * A imagem do header (`header.imageMessage`) só é devolvida aqui como DADO
+ * (mimetype/fileName); quem decide se vale a pena baixá-la é
+ * `buildTemplateAttachments`, mais abaixo.
+ *
+ * PENDÊNCIA: só entende o formato novo (`interactiveMessageTemplate`). O
+ * formato legado (`hydratedFourRowTemplate`, campos `hydratedContentText` /
+ * `hydratedButtons`) ainda cai no `return null` abaixo — vira mensagem de tipo
+ * desconhecido (com a SONDA de log), não um balão vazio. Extrair esse formato
+ * também fica para quando houver um exemplo real da Evolution para validar o
+ * parser contra ele.
+ */
+function getTemplateInfo(msgObj: Record<string, unknown>): TemplateInfo | null {
+  const m = msgObj as Record<string, any>
+  const tm = m.templateMessage
+  if (!tm || typeof tm !== 'object') return null
+
+  const template = tm.interactiveMessageTemplate || {}
+  const text = typeof template?.body?.text === 'string' ? template.body.text : ''
+
+  const botoesBrutos = Array.isArray(template?.nativeFlowMessage?.buttons)
+    ? template.nativeFlowMessage.buttons
+    : []
+
+  const buttons: TemplateButton[] = botoesBrutos.map((b: any) => {
+    let label = typeof b?.name === 'string' && b.name ? b.name : 'Opção'
+    let url: string | null = null
+    if (typeof b?.buttonParamsJson === 'string') {
+      try {
+        const params = JSON.parse(b.buttonParamsJson)
+        if (typeof params?.display_text === 'string' && params.display_text) label = params.display_text
+        if (typeof params?.url === 'string' && params.url) url = params.url
+      } catch {
+        // `buttonParamsJson` é string de terceiro — segue com `name` como rótulo.
+      }
+    }
+    return { label, url }
+  })
+
+  const headerImageRaw = template?.header?.imageMessage
+  const headerImage: TemplateHeaderImage | null =
+    headerImageRaw && typeof headerImageRaw === 'object'
+      ? { mimetype: headerImageRaw.mimetype || 'image/jpeg', fileName: headerImageRaw.fileName || undefined }
+      : null
+
+  // Sem texto e sem nenhum botão extraído (ex.: `templateMessage` legado em
+  // `hydratedFourRowTemplate`, que este parser ainda não entende) não há nada
+  // de real para desenhar — devolver um objeto vazio aqui é o que produzia a
+  // caixa com borda e nada dentro. `null` joga a mensagem no caminho de tipo
+  // desconhecido, que é honesto: loga a SONDA e não inventa conteúdo.
+  if (!text && buttons.length === 0) return null
+
+  return { text, buttons, headerImage }
+}
+
 function findBase64(value: unknown, depth = 0): string | null {
   if (depth > 5 || value == null) return null
   if (typeof value === 'string') {
@@ -916,6 +989,47 @@ async function fetchMediaAttachment(
     mediaWarn('attachment_processing_failed', { messageId: messageData.key?.id, error: String(err) })
     return null
   }
+}
+
+/**
+ * Anexos de um `templateMessage`. O de botões é OBRIGATÓRIO e segue o
+ * contrato combinado com o front:
+ *   { type: 'buttons', body, footer: null, buttons: [{ label, url }] }
+ *
+ * A imagem do header é MELHOR ESFORÇO: reaproveita `fetchMediaAttachment` — o
+ * MESMO caminho de download usado por qualquer mídia comum — mandando o
+ * `messageData` inteiro, que já carrega o `templateMessage` com o header
+ * dentro. Nem `fetchMediaAttachment` nem `buildMediaDownloadAttempts` foram
+ * tocados: se a Evolution/Baileys não souber localizar a mídia aninhada nesse
+ * formato, a função falha exatamente como falha para qualquer mídia sem
+ * base64 (`download_without_base64`) e devolve `null` — o anexo de botões sai
+ * sozinho, sem imagem, em vez de a mensagem inteira falhar.
+ */
+async function buildTemplateAttachments(
+  templateInfo: TemplateInfo,
+  instanceName: string,
+  messageData: Record<string, any>,
+): Promise<Record<string, unknown>[]> {
+  const buttonsAttachment = {
+    type: 'buttons',
+    body: templateInfo.text || '',
+    footer: null,
+    buttons: templateInfo.buttons.map((b) => ({ label: b.label, url: b.url })),
+  }
+
+  if (!templateInfo.headerImage) return [buttonsAttachment]
+
+  const mime = templateInfo.headerImage.mimetype || 'image/jpeg'
+  const headerMediaInfo: MediaInfo = {
+    type: 'image',
+    label: '[Imagem]',
+    caption: '',
+    mime,
+    name: ensureExtension(templateInfo.headerImage.fileName || 'template_header', mime),
+    convertToMp4: false,
+  }
+  const headerAttachment = await fetchMediaAttachment(instanceName, messageData, headerMediaInfo)
+  return headerAttachment ? [buttonsAttachment, headerAttachment] : [buttonsAttachment]
 }
 
 // Vocabulário de status persistido em `devices.status`. Espelha EXATAMENTE o
@@ -1278,6 +1392,70 @@ async function tratarWebhook(req: Request): Promise<Response> {
     )
   }
 
+  /**
+   * `messageHistoryNotice` e `senderKeyDistributionMessage` são protocolo puro do
+   * WhatsApp/Baileys (sincronização de histórico, distribuição de chave de
+   * grupo). MAS o WhatsApp ANEXA o `senderKeyDistributionMessage` ao LADO do
+   * conteúdo real na primeira mensagem de um participante depois de uma
+   * rotação de chave de grupo — ele não vem sempre sozinho. Medido agora na
+   * instância "Financeiro PRN", grupo `120363404897880160@g.us`: de 50
+   * registros, 2 trazem `senderKeyDistributionMessage` JUNTO com
+   * `conversation` com texto de verdade. Ignorar pela simples PRESENÇA da
+   * chave de protocolo derrubaria ~4% das mensagens de grupo, em silêncio.
+   *
+   * Por isso o corte é: tirando as chaves puramente de protocolo/metadados
+   * (`senderKeyDistributionMessage`, `messageHistoryNotice`,
+   * `messageContextInfo` — esta última acompanha praticamente toda mensagem,
+   * com ou sem conteúdo, e por isso também não conta), sobrou ALGUMA chave no
+   * objeto? Se sim, há conteúdo (`conversation`, `imageMessage`, o que for) e o
+   * fluxo normal segue — o extrator de conteúdo/mídia é quem decide o que
+   * fazer com ele. Só quando NADA sobra é que a mensagem é pura notificação de
+   * protocolo e pode ser ignorada com segurança.
+   *
+   * De propósito NÃO é uma lista de tipos de conteúdo conhecidos: um tipo novo
+   * do WhatsApp que ainda não tem parser cai no lado de INSERIR (e no pior caso
+   * vira `[Mensagem de mídia]` com a SONDA de log), nunca no lado de descartar
+   * silenciosamente — descartar é o erro caro aqui.
+   *
+   * Mesmo padrão do `secretEncryptedMessage` logo acima quando REALMENTE é só
+   * protocolo: em vez de gravar um rótulo que o front não vai renderizar, a
+   * mensagem nem chega a ser inserida. Só o TIPO vai pro log — nunca o
+   * payload, que carrega conversa de paciente.
+   */
+  const METADADOS_DE_PROTOCOLO = new Set([
+    'senderKeyDistributionMessage',
+    'messageHistoryNotice',
+    'messageContextInfo',
+  ])
+  const temSinalDeProtocolo =
+    (msgObj as Record<string, any>).messageHistoryNotice ||
+    (msgObj as Record<string, any>).senderKeyDistributionMessage
+  if (temSinalDeProtocolo) {
+    const chavesDeConteudo = Object.keys(msgObj as Record<string, unknown>).filter(
+      (chave) => !METADADOS_DE_PROTOCOLO.has(chave),
+    )
+    if (chavesDeConteudo.length === 0) {
+      const tipoProtocolo = (msgObj as Record<string, any>).messageHistoryNotice
+        ? 'messageHistoryNotice'
+        : 'senderKeyDistributionMessage'
+      console.log(
+        JSON.stringify({
+          scope: 'protocolo_ignorado',
+          messageId: externalId,
+          tipo: tipoProtocolo,
+          build: BUILD_MARKER,
+        }),
+      )
+      return new Response(
+        JSON.stringify({ status: 'ignored', reason: tipoProtocolo, build: BUILD_MARKER }),
+        { status: 200 },
+      )
+    }
+    // Sobrou chave de conteúdo ao lado do sinal de protocolo (ex.: `conversation`
+    // + `senderKeyDistributionMessage` na 1ª mensagem após rotação de chave) —
+    // segue o fluxo normal, sem logar o conteúdo.
+  }
+
   // ---- Reaction handling: update original message instead of creating a new one ----
   const reactionMsg = msgObj.reactionMessage
   if (reactionMsg) {
@@ -1329,6 +1507,7 @@ async function tratarWebhook(req: Request): Promise<Response> {
   const mediaInfo = getMediaInfo(msgObj)
   const sharedContactInfos = getContactInfos(msgObj)
   const listInfo = getListInfo(msgObj)
+  const templateInfo = getTemplateInfo(msgObj)
   const content = extractContent(msgObj)
   const nameToUse = !isWeakSenderName(pushName) ? pushName : ''
   let contactName = (!isFromMe && !isGroup) ? nameToUse : ''
@@ -1385,6 +1564,8 @@ async function tratarWebhook(req: Request): Promise<Response> {
           ? sharedContactInfos.map((c) => ({ type: 'contact', name: c.name, phone: c.phone }))
           : listInfo && currentAttachments.length === 0
           ? [{ type: 'list', title: listInfo.title, description: listInfo.description, buttonText: listInfo.buttonText, sections: listInfo.sections }]
+          : templateInfo && currentAttachments.length === 0
+          ? await buildTemplateAttachments(templateInfo, body.instance, messageData)
           : []
       const patchData: Record<string, unknown> = {}
 
@@ -1434,12 +1615,23 @@ async function tratarWebhook(req: Request): Promise<Response> {
   const listAttachment = listInfo
     ? { type: 'list', title: listInfo.title, description: listInfo.description, buttonText: listInfo.buttonText, sections: listInfo.sections }
     : null
+  // Só entra na disputa se NINGUÉM de prioridade maior (mídia, contato, lista)
+  // já resolveu o anexo — mesma ordem usada no `attachments` logo abaixo. Sem
+  // esta guarda, o `await` baixava a imagem do header do template mesmo nos
+  // casos (hipotéticos, mas baratos de evitar) em que o resultado seria
+  // descartado pela prioridade de outro tipo de anexo.
+  const templateAttachments =
+    templateInfo && !mediaAttachment && !(contactAttachments && contactAttachments.length > 0) && !listAttachment
+      ? await buildTemplateAttachments(templateInfo, body.instance, messageData)
+      : null
   const attachments = mediaAttachment
     ? [mediaAttachment]
     : contactAttachments && contactAttachments.length > 0
     ? contactAttachments
     : listAttachment
     ? [listAttachment]
+    : templateAttachments && templateAttachments.length > 0
+    ? templateAttachments
     : undefined
 
   if (mediaInfo && !mediaAttachment) {
@@ -1578,6 +1770,19 @@ function extractContent(msgObj: Record<string, unknown>): string {
   if (m.extendedTextMessage?.text) return m.extendedTextMessage.text
   if (mediaInfo) return mediaInfo.caption || mediaInfo.label
   if (m.reactionMessage) return '[Reação]'
+  // Evento de fixar mensagem: sem conteúdo de usuário nenhum e sem anexo. O
+  // front vai renderizar este rótulo como linha de sistema centralizada, não
+  // como balão.
+  if (m.pinInChatMessage) return '[Mensagem fixada]'
+  const templateInfo = getTemplateInfo(m)
+  // MESMO padrão do `listMessage` logo abaixo: o `content` vira só o
+  // rótulo/prévia — o texto de verdade continua vivo em `body`, dentro do
+  // anexo de botões (ver `buildTemplateAttachments`). Gravar o texto aqui
+  // TAMBÉM duplicava a mensagem na tela (balão de texto + bloco de botões).
+  // PREFIXO OBRIGATORIAMENTE "[Botões: " — é por ele que o front reconhece
+  // este rótulo como técnico e o esconde do balão, deixando só o bloco rico
+  // aparecer (contrato combinado com o front).
+  if (templateInfo) return `[Botões: ${templateInfo.text || 'Opções'}]`
   const contactInfos = getContactInfos(m)
   if (contactInfos && contactInfos.length > 0) {
     // PREFIXO OBRIGATORIAMENTE "[Contato: ". O front esconde o rótulo técnico
