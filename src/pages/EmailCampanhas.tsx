@@ -242,7 +242,25 @@ export default function EmailCampanhas() {
           : 'outline'
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-6">
+    /*
+      `h-full overflow-y-auto` não é enfeite: sem os dois esta tela não rola,
+      e o que passa da primeira dobra fica inalcançável.
+
+      O `Layout` liga `overflow-hidden` no `<main>` para TODA rota que começa
+      com `/email` (`Layout.tsx:45-48`), porque a Caixa de Entrada é de altura
+      fixa e cuida da própria rolagem, como o chat. `/email/campanhas` entra
+      nessa regra por tabela, mas é uma página COMPRIDA e comum — media 3384px
+      dentro de uma janela de 600px, com 2784px simplesmente cortados.
+
+      Resolvido aqui, e não no `Layout`: ele é arquivo de fronteira,
+      compartilhado com outras janelas, e mudar a regra dele afetaria a Caixa
+      de Entrada e as ferramentas embutidas. Assumir a própria rolagem é
+      exatamente o que o `isFullBleed` espera da página.
+
+      A tela irmã `EmailNotasFiscais.tsx` nasceu com o mesmo defeito, copiado
+      daqui, e foi corrigida junto em 25/09/2026.
+    */
+    <div className="mx-auto h-full max-w-5xl space-y-6 overflow-y-auto p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Disparo de e-mail</h1>
