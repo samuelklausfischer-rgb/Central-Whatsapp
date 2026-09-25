@@ -18,7 +18,7 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { format, startOfDay, differenceInCalendarDays } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { Check, CheckCheck, Smartphone, Search, X, MessageCircle, Pin, RefreshCw, UserCheck, UsersRound, BellOff, Eye, EyeOff } from 'lucide-react'
+import { Check, CheckCheck, Smartphone, Search, X, MessageCircle, Pin, RefreshCw, UserCheck, UsersRound, BellOff, Eye, EyeOff, PanelTopClose, PanelTopOpen } from 'lucide-react'
 import {
   AlertDialog,
   AlertDialogContent,
@@ -183,9 +183,6 @@ const ChatRow = memo(function ChatRow({
     sender_name: conv.sender_name
   })
   const conversationDeviceId = selectedDeviceId || conv.lastMessage?.device_id
-  // Sem supressão local: ela existia para o botão verde sumir na hora do clique.
-  // O menu ⋮ já chama `onStateChange`, que rebusca e atualiza sozinho.
-  const isPendingReply = conv.pendingReply
   const isUnread = conv.unread_count > 0
   const unreadBadgeCount = Math.max(1, conv.unread_count)
 
@@ -205,7 +202,6 @@ const ChatRow = memo(function ChatRow({
           className={cn(
             'group relative grid grid-cols-[auto_1fr_auto] items-center gap-2.5 px-2.5 py-2.5 rounded-md transition-colors duration-150 text-left w-full hover:bg-chat-hover cursor-pointer',
             isSelected ? 'bg-chat-active' : '',
-            isPendingReply ? 'border-l-2 border-chat-text/10' : '',
           )}
         >
       <SmartAvatar
@@ -310,9 +306,6 @@ const ChatRow = memo(function ChatRow({
           >
             {hasDraft ? draftPreview : previewLabel(conv.lastMessage.content)}
           </p>
-          {isPendingReply && (
-            <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse shrink-0 inline-block" />
-          )}
         </div>
       </div>
 
@@ -332,10 +325,10 @@ const ChatRow = memo(function ChatRow({
             </div>
           ) : null}
           {/*
-            A bolinha verde pulsante saiu daqui. Ela dizia "Finalizar conversa" no
-            title mas chamava `toggleResponded` — marcar como respondida, que é
-            outra coisa. A função continua a um clique de distância, no menu ⋮ ao
-            lado ("Marcar como respondido").
+            As bolinhas (verde, depois azul) que ficavam aqui sinalizando conversa
+            sem resposta saíram — resto do fluxo antigo de "finalizar conversa",
+            substituído pelo Pegar/Designar/Finalizar atual. Quem avisa hoje é o
+            selo de status acima do nome ("Aguardando", "Atribuída a você" etc.).
           */}
           {conversationDeviceId && (
             <ConversationActionsMenu
@@ -346,7 +339,6 @@ const ChatRow = memo(function ChatRow({
               onOpenInfo={onOpenInfo}
               isSelected={isSelected}
               isMobile={isMobile}
-              isPendingReply={isPendingReply}
               onStateChange={onStateChange}
             />
           )}
@@ -363,7 +355,6 @@ const ChatRow = memo(function ChatRow({
             unreadCount={conv.unread_count}
             onOpenInfo={onOpenInfo}
             mode="context-menu"
-            isPendingReply={isPendingReply}
             onStateChange={onStateChange}
           />
         </ContextMenuContent>
@@ -404,6 +395,8 @@ function matchesPeriod(dateStr: string | undefined | null, filter: string): bool
   }
 }
 
+const HEADER_COLLAPSED_KEY = 'central-whats.chatHeaderCollapsed.v1'
+
 export function ChatList({
   devices,
   selectedDeviceId,
@@ -430,7 +423,24 @@ export function ChatList({
   const deferredSearch = useDeferredValue(searchQuery)
   const [activePeriodFilter, setActivePeriodFilter] = useState<'all' | 'today' | 'yesterday' | 'last3' | 'last7'>('all')
   const [activeStatusFilter, setActiveStatusFilter] = useState<'all' | 'unread' | 'pinned'>('all')
-  const [showUnrespondedOnly, setShowUnrespondedOnly] = useState(false)
+  /**
+   * Colapsa o bloco de filtros/busca do topo da sidebar (Select de aparelho, abas
+   * Geral/Minhas, busca e a linha Filtros/Atribuídas/Remover). Mesmo padrão de
+   * persistência do `sidebarWidth` em `ChatHub.tsx`: `localStorage` puro, sem
+   * zustand (o projeto não usa). O título e os ícones — inclusive o botão que
+   * alterna este estado — nunca colapsam, e os chips de filtro ativo (mais
+   * abaixo) também não: um filtro ligado não pode ficar escondido sem aviso.
+   */
+  const [headerCollapsed, setHeaderCollapsed] = useState(
+    () => localStorage.getItem(HEADER_COLLAPSED_KEY) === '1',
+  )
+  const toggleHeaderCollapsed = useCallback(() => {
+    setHeaderCollapsed((prev) => {
+      const next = !prev
+      localStorage.setItem(HEADER_COLLAPSED_KEY, next ? '1' : '0')
+      return next
+    })
+  }, [])
   // Criar grupo é ação restrita — decisão do usuário: para quem não é admin o
   // ponto de entrada fica OCULTO (não desabilitado), então nem o estado do
   // diálogo precisa existir para o não-admin ver botão nenhum.
@@ -558,17 +568,39 @@ export function ChatList({
     let count = 0
     if (activePeriodFilter !== 'all') count++
     if (activeStatusFilter !== 'all') count++
-    if (showUnrespondedOnly) count++
     if (showArchived) count++
     if (labelFilter !== 'all') count++
     if (searchQuery.trim()) count++
     return count
-  }, [activePeriodFilter, activeStatusFilter, showUnrespondedOnly, showArchived, labelFilter, searchQuery])
+  }, [activePeriodFilter, activeStatusFilter, showArchived, labelFilter, searchQuery])
+
+  /**
+   * Só importa com o cabeçalho colapsado: acende o pontinho no botão de toggle
+   * avisando que há estado ativo escondido ali dentro.
+   *
+   * Conta SÓ o que o colapso realmente esconde. Busca e abas Geral/Minhas
+   * ficaram fora do colapso, então não entram aqui — sinalizar algo que está à
+   * vista treina a pessoa a ignorar o pontinho. Por isso a conta não reusa
+   * `activeFilterCount`, que inclui a busca: aqui entram apenas os filtros que
+   * moram na linha colapsada.
+   *
+   * `!selectedDeviceId` entra pelo mesmo motivo do `inert` acima: o cabeçalho
+   * colapsado nunca pode esconder um estado que o usuário precisa ver — e "sem
+   * aparelho" é justamente o controle que resolve o problema ficando fora de
+   * vista. Só conta com `devices.length > 0`: sem nenhum aparelho cadastrado
+   * não há o que escolher, e o pontinho acenderia por algo que o toggle não
+   * resolve.
+   */
+  const headerHasHiddenState =
+    activePeriodFilter !== 'all' ||
+    activeStatusFilter !== 'all' ||
+    showArchived ||
+    labelFilter !== 'all' ||
+    (!selectedDeviceId && devices.length > 0)
 
   const handleClearAllFilters = useCallback(() => {
     setActivePeriodFilter('all')
     setActiveStatusFilter('all')
-    setShowUnrespondedOnly(false)
     setLabelFilter('all')
     if (showArchived) onToggleArchived()
     setSearchQuery('')
@@ -675,9 +707,6 @@ export function ChatList({
         return !state?.archived
       })
     }
-    if (showUnrespondedOnly) {
-      filtered = filtered.filter((conv) => conv.pendingReply)
-    }
     if (deferredSearch.trim()) {
       const lowerQuery = deferredSearch.toLowerCase()
       filtered = filtered.filter((conv) => {
@@ -688,7 +717,7 @@ export function ChatList({
       })
     }
     return filtered
-  }, [deferredSearch, showUnrespondedOnly, showArchived, conversations, contactIndex, statesByKey, selectedDeviceId, activePeriodFilter, activeStatusFilter, escopoLista, ehMinha, esconderAtribuidas, ehAtribuida, labelFilter, tagsByContact])
+  }, [deferredSearch, showArchived, conversations, contactIndex, statesByKey, selectedDeviceId, activePeriodFilter, activeStatusFilter, escopoLista, ehMinha, esconderAtribuidas, ehAtribuida, labelFilter, tagsByContact])
 
   const isSearching = deferredSearch !== searchQuery
 
@@ -731,153 +760,220 @@ export function ChatList({
                 <RefreshCw className={cn('h-4 w-4', isRefreshingAll && 'animate-spin')} />
               </button>
             )}
+            {/*
+              Único ícone deste grupo que nunca some — é ele que reabre o que
+              acabou de colapsar. O pontinho só aparece com os blocos FECHADOS:
+              avisa que há filtro ativo, ou nenhum aparelho escolhido, escondidos
+              ali dentro.
+            */}
+            <button
+              onClick={toggleHeaderCollapsed}
+              className="relative text-chat-muted hover:text-chat-text transition-colors"
+              title={headerCollapsed ? 'Mostrar filtros' : 'Esconder filtros'}
+              aria-label={headerCollapsed ? 'Mostrar filtros' : 'Esconder filtros'}
+              aria-pressed={headerCollapsed}
+            >
+              {headerCollapsed ? <PanelTopClose className="h-4 w-4" /> : <PanelTopOpen className="h-4 w-4" />}
+              {headerCollapsed && headerHasHiddenState && (
+                <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true" />
+              )}
+            </button>
           </div>
         </div>
-        <Select value={selectedDeviceId ?? ''} onValueChange={onSelectDevice}>
-          <SelectTrigger className="w-full bg-chat-sidebar border-chat-border h-12">
-            <SelectValue placeholder="Selecione um dispositivo..." />
-          </SelectTrigger>
-          <SelectContent>
-            {devices.map((device) => (
-              <SelectItem key={device.id} value={device.id} className="py-3">
-                <div className="flex items-center gap-3">
-                  {/*
-                    Foto real do WhatsApp do aparelho, com o globo do PRN como
-                    fallback (nunca iniciais — "Financeiro PRN" viraria "FI",
-                    que não identifica nada). Mesmo componente/shape usado no
-                    dashboard (Index.tsx), já resolve resync de avatar expirado.
-                  */}
-                  <SmartAvatar
-                    isInstance
-                    deviceRecord={device}
-                    name={device.name}
-                    className="h-8 w-8 bg-chat-panel"
-                  />
-                  <div className="flex flex-col text-left">
-                    <span className="text-sm font-medium leading-none text-chat-text">
-                      {device.name}
-                    </span>
-                    {device.department && (
-                      <span className="text-xs text-chat-muted mt-1.5">
-                        {device.department}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
 
         {/*
-          Duas listas do mesmo aparelho. Fica ACIMA da busca porque troca o
-          conjunto sobre o qual a busca e os filtros trabalham — o inverso
-          confundiria quem procura alguém e não acha porque estava em "Minhas".
+          Só DUAS coisas colapsam: o Select de aparelho (aqui) e a linha
+          Filtros/Atribuídas/Remover (mais abaixo). A busca e as abas
+          Geral/Minhas ficam SEMPRE visíveis — são o que mais se usa no dia a
+          dia, e escondê-las trocava limpeza por um clique a mais.
+
+          Truque do `grid-rows-[0fr]/[1fr]` para animar até a altura do conteúdo
+          sem medir nada em JS — o `overflow-hidden` mora no filho, não aqui,
+          porque é ele quem precisa ficar clipado enquanto a track anima de 0
+          para 1fr. O `-mt-3` de quando está fechado cancela o `gap-3` que o pai
+          põe ANTES deste bloco: sem ele, um bloco de altura zero ainda deixaria
+          12px de respiro sobrando, e a sidebar não ficaria mais enxuta.
+          Altura zero não tira o conteúdo do tab order sozinha, por isso `inert`
+          quando colapsado: ele já cobre foco, ponteiro E leitor de tela, então
+          `aria-hidden` separado ficaria redundante (e podia dessincronizar).
         */}
-        <div className="flex items-center gap-1 p-1 rounded-lg bg-chat-panel border border-chat-border">
-          {([
-            { id: 'geral' as const, rotulo: 'Geral' },
-            { id: 'minhas' as const, rotulo: 'Minhas' },
-          ]).map((aba) => (
-            <button
-              key={aba.id}
-              onClick={() => setEscopoLista(aba.id)}
-              aria-pressed={escopoLista === aba.id}
-              className={cn(
-                'flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
-                escopoLista === aba.id
-                  ? 'bg-chat-hover text-chat-text'
-                  : 'text-chat-muted hover:text-chat-text',
-              )}
-            >
-              {aba.rotulo}
-              {aba.id === 'minhas' && totalMinhas > 0 && (
-                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/15 text-blue-400">
-                  {totalMinhas}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-chat-muted" />
-          <Input
-            placeholder="Procurar contatos..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9 pr-9 bg-chat-panel border-chat-border text-chat-text placeholder:text-chat-muted h-10"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-chat-muted hover:text-chat-text transition-colors"
-              title="Limpar busca"
-            >
-              <X className="h-4 w-4" />
-            </button>
+        <div
+          className={cn(
+            'grid transition-all duration-200 ease-in-out',
+            headerCollapsed ? 'grid-rows-[0fr] opacity-0 -mt-3' : 'grid-rows-[1fr] opacity-100',
           )}
+          inert={headerCollapsed}
+        >
+          <div className="overflow-hidden min-h-0">
+            <Select value={selectedDeviceId ?? ''} onValueChange={onSelectDevice}>
+              <SelectTrigger className="w-full bg-chat-sidebar border-chat-border h-12">
+                <SelectValue placeholder="Selecione um dispositivo..." />
+              </SelectTrigger>
+              <SelectContent>
+                {devices.map((device) => (
+                  <SelectItem key={device.id} value={device.id} className="py-3">
+                    <div className="flex items-center gap-3">
+                      {/*
+                        Foto real do WhatsApp do aparelho, com o globo do PRN como
+                        fallback (nunca iniciais — "Financeiro PRN" viraria "FI",
+                        que não identifica nada). Mesmo componente/shape usado no
+                        dashboard (Index.tsx), já resolve resync de avatar expirado.
+                      */}
+                      <SmartAvatar
+                        isInstance
+                        deviceRecord={device}
+                        name={device.name}
+                        className="h-8 w-8 bg-chat-panel"
+                      />
+                      <div className="flex flex-col text-left">
+                        <span className="text-sm font-medium leading-none text-chat-text">
+                          {device.name}
+                        </span>
+                        {device.department && (
+                          <span className="text-xs text-chat-muted mt-1.5">
+                            {device.department}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 px-1 flex-wrap">
-          <ConversationFilters
-            periodFilter={activePeriodFilter}
-            statusFilter={activeStatusFilter}
-            showUnresponded={showUnrespondedOnly}
-            showArchived={showArchived}
-            labels={labels}
-            labelFilter={labelFilter}
-            onPeriodFilterChange={setActivePeriodFilter}
-            onStatusFilterChange={setActiveStatusFilter}
-            onUnrespondedChange={setShowUnrespondedOnly}
-            onArchivedChange={(v) => { if (v !== showArchived) onToggleArchived() }}
-            onLabelFilterChange={setLabelFilter}
-            onClearAll={handleClearAllFilters}
-            isMobile={isMobile}
-            filterCount={activeFilterCount}
-          />
-          {/*
-            Fora do popover de propósito — ver comentário de `esconderAtribuidas`
-            acima. Desabilitado em "Minhas" porque lá toda conversa já é minha
-            por definição: escondê-las esvaziaria a aba sem explicar por quê.
-          */}
-          <button
-            onClick={() => setEsconderAtribuidas((v) => !v)}
-            disabled={escopoLista !== 'geral'}
-            aria-pressed={esconderAtribuidas}
-            title={
-              escopoLista !== 'geral'
-                ? 'Só vale na aba Geral — em Minhas todas já são suas'
-                : esconderAtribuidas
-                  ? 'Escondendo conversas já atribuídas. Toque para mostrar essas também.'
-                  : 'Mostrando conversas atribuídas também. Toque para esconder de novo.'
-            }
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all border',
-              escopoLista !== 'geral'
-                ? 'text-chat-muted/40 border-transparent cursor-not-allowed'
-                : esconderAtribuidas
-                  ? 'text-chat-text border-chat-border bg-chat-hover'
-                  : 'text-chat-muted border-chat-border hover:bg-chat-hover hover:text-chat-text',
-            )}
-          >
-            {esconderAtribuidas ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-            Atribuídas
-          </button>
-          <button
-            onClick={handleClearAllFilters}
-            disabled={activeFilterCount === 0}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all border',
-              activeFilterCount > 0
-                ? 'text-chat-muted border-chat-border hover:bg-chat-hover hover:text-chat-text'
-                : 'text-chat-muted/40 border-transparent cursor-not-allowed',
-            )}
-          >
-            <X className="h-3.5 w-3.5" />
-            Remover
-          </button>
+        {/* Fora do colapso: abas e busca, sempre à mão. */}
+        <div className="flex flex-col gap-3">
+            {/*
+              Duas listas do mesmo aparelho. Fica ACIMA da busca porque troca o
+              conjunto sobre o qual a busca e os filtros trabalham — o inverso
+              confundiria quem procura alguém e não acha porque estava em "Minhas".
+            */}
+            <div className="flex items-center gap-1 p-1 rounded-lg bg-chat-panel border border-chat-border">
+              {([
+                { id: 'geral' as const, rotulo: 'Geral' },
+                { id: 'minhas' as const, rotulo: 'Minhas' },
+              ]).map((aba) => (
+                <button
+                  key={aba.id}
+                  onClick={() => setEscopoLista(aba.id)}
+                  aria-pressed={escopoLista === aba.id}
+                  className={cn(
+                    'flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
+                    escopoLista === aba.id
+                      ? 'bg-chat-hover text-chat-text'
+                      : 'text-chat-muted hover:text-chat-text',
+                  )}
+                >
+                  {aba.rotulo}
+                  {aba.id === 'minhas' && totalMinhas > 0 && (
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/15 text-blue-400">
+                      {totalMinhas}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-chat-muted" />
+              <Input
+                placeholder="Procurar contatos..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 pr-9 bg-chat-panel border-chat-border text-chat-text placeholder:text-chat-muted h-10"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-chat-muted hover:text-chat-text transition-colors"
+                  title="Limpar busca"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
         </div>
+
+        {/*
+          Segundo bloco que colapsa: a linha Filtros/Atribuídas/Remover. Mesmo
+          `-mt-3` do bloco do aparelho, e pelo mesmo motivo.
+        */}
+        <div
+          className={cn(
+            'grid transition-all duration-200 ease-in-out',
+            headerCollapsed ? 'grid-rows-[0fr] opacity-0 -mt-3' : 'grid-rows-[1fr] opacity-100',
+          )}
+          inert={headerCollapsed}
+        >
+          <div className="overflow-hidden min-h-0">
+            <div className="flex items-center gap-2 px-1 flex-wrap">
+              <ConversationFilters
+                periodFilter={activePeriodFilter}
+                statusFilter={activeStatusFilter}
+                showArchived={showArchived}
+                labels={labels}
+                labelFilter={labelFilter}
+                onPeriodFilterChange={setActivePeriodFilter}
+                onStatusFilterChange={setActiveStatusFilter}
+                onArchivedChange={(v) => { if (v !== showArchived) onToggleArchived() }}
+                onLabelFilterChange={setLabelFilter}
+                onClearAll={handleClearAllFilters}
+                isMobile={isMobile}
+                filterCount={activeFilterCount}
+              />
+              {/*
+                Fora do popover de propósito — ver comentário de `esconderAtribuidas`
+                acima. Desabilitado em "Minhas" porque lá toda conversa já é minha
+                por definição: escondê-las esvaziaria a aba sem explicar por quê.
+              */}
+              <button
+                onClick={() => setEsconderAtribuidas((v) => !v)}
+                disabled={escopoLista !== 'geral'}
+                aria-pressed={esconderAtribuidas}
+                title={
+                  escopoLista !== 'geral'
+                    ? 'Só vale na aba Geral — em Minhas todas já são suas'
+                    : esconderAtribuidas
+                      ? 'Escondendo conversas já atribuídas. Toque para mostrar essas também.'
+                      : 'Mostrando conversas atribuídas também. Toque para esconder de novo.'
+                }
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all border',
+                  escopoLista !== 'geral'
+                    ? 'text-chat-muted/40 border-transparent cursor-not-allowed'
+                    : esconderAtribuidas
+                      ? 'text-chat-text border-chat-border bg-chat-hover'
+                      : 'text-chat-muted border-chat-border hover:bg-chat-hover hover:text-chat-text',
+                )}
+              >
+                {esconderAtribuidas ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                Atribuídas
+              </button>
+              <button
+                onClick={handleClearAllFilters}
+                disabled={activeFilterCount === 0}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all border',
+                  activeFilterCount > 0
+                    ? 'text-chat-muted border-chat-border hover:bg-chat-hover hover:text-chat-text'
+                    : 'text-chat-muted/40 border-transparent cursor-not-allowed',
+                )}
+              >
+                <X className="h-3.5 w-3.5" />
+                Remover
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/*
+          Chips de filtro ativo: SEMPRE visíveis, fora do colapso acima — um
+          filtro ligado não pode ficar invisível só porque o cabeçalho está
+          fechado. Com tudo limpo (sem filtro e cabeçalho colapsado) esta linha
+          simplesmente não renderiza, e a sidebar fica no seu estado mais enxuto.
+        */}
         {activeFilterCount > 0 && (
           <div className="flex items-center gap-1.5 px-1 flex-wrap">
             {activePeriodFilter !== 'all' && (
@@ -885,9 +981,6 @@ export function ChatList({
             )}
             {activeStatusFilter !== 'all' && (
               <FilterChip label={FILTER_LABELS[activeStatusFilter]} onRemove={() => setActiveStatusFilter('all')} />
-            )}
-            {showUnrespondedOnly && (
-              <FilterChip label="Não respondidas" onRemove={() => setShowUnrespondedOnly(false)} />
             )}
             {showArchived && (
               <FilterChip label="Arquivadas" onRemove={() => onToggleArchived()} />

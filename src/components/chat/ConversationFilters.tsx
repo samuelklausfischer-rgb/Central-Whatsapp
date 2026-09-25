@@ -8,13 +8,11 @@ import type { Label as EtiquetaLabel } from '@/lib/supabase/types'
 interface ConversationFiltersProps {
   periodFilter: string
   statusFilter: string
-  showUnresponded: boolean
   showArchived: boolean
   labels: EtiquetaLabel[]
   labelFilter: string
   onPeriodFilterChange: (v: string) => void
   onStatusFilterChange: (v: string) => void
-  onUnrespondedChange: (v: boolean) => void
   onArchivedChange: (v: boolean) => void
   onLabelFilterChange: (v: string) => void
   onClearAll: () => void
@@ -25,13 +23,11 @@ interface ConversationFiltersProps {
 export default function ConversationFilters({
   periodFilter,
   statusFilter,
-  showUnresponded,
   showArchived,
   labels,
   labelFilter,
   onPeriodFilterChange,
   onStatusFilterChange,
-  onUnrespondedChange,
   onArchivedChange,
   onLabelFilterChange,
   onClearAll,
@@ -74,15 +70,6 @@ export default function ConversationFilters({
         )}
       </div>
       <div className="border-t border-border pt-4 space-y-2.5">
-        <label className="flex items-center gap-2.5 text-sm cursor-pointer">
-          <input
-            type="checkbox"
-            checked={showUnresponded}
-            onChange={(e) => onUnrespondedChange(e.target.checked)}
-            className="rounded border-muted-foreground/30 accent-primary"
-          />
-          <span>Não respondidas</span>
-        </label>
         <label className="flex items-center gap-2.5 text-sm cursor-pointer">
           <input
             type="checkbox"

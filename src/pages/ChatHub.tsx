@@ -30,7 +30,7 @@ import {
   aplicarEventoDeMensagem,
   type EstadoDaConversa,
 } from '@/stores/conversationMessages'
-import { getMyStates, getDeviceAssignments, getConversationAssignment, respondidaEm, cursorDeLeitura, mesclarNomesDaAtribuicao, type ConversationUserState } from '@/services/conversation_states'
+import { getMyStates, getDeviceAssignments, getConversationAssignment, cursorDeLeitura, mesclarNomesDaAtribuicao, type ConversationUserState } from '@/services/conversation_states'
 import type { ConversationAssignment } from '@/lib/supabase/types'
 import { registrarVoltar } from '@/lib/android-back'
 import { definirConversaAberta } from '@/stores/mobileChrome'
@@ -813,7 +813,7 @@ export default function ChatHub() {
    * ÚNICO caminho de escrita de uma atribuição no que a tela enxerga.
    *
    * O mapa `assignments` decide a aba Minhas/Geral (`ehMinha` no ChatList), o
-   * `pinned` que sobe a conversa, o `pendingReply` e o cursor de leitura. Ele
+   * `pinned` que sobe a conversa e o cursor de leitura. Ele
    * nascia com três donos — a carga do aparelho, o snapshot e o Realtime — e os
    * botões de atendimento não eram nenhum deles: `handleActionTake` e companhia
    * mexiam só no estado interno do ChatWindow, então a lista ficava esperando o
@@ -899,10 +899,10 @@ export default function ChatHub() {
     // De tudo que `conversation_assignments` guarda, a RPC `get_conversation_summaries`
     // lê UMA coluna só: `global_read_at`, no `GREATEST` que forma o cursor de leitura.
     // Todo o resto que a tela deriva da atribuição — `pinned` (assumida por mim),
-    // `pendingReply` (via `global_responded_at`), a aba Minhas/Geral, a ordenação — já
-    // é calculado aqui no cliente, e agora o cursor de leitura também é (ver
-    // `cursorDeLeitura` no `useMemo` de `conversations`). Então o `setAssignments`
-    // acima é suficiente: a lista se corrige no mesmo quadro, sem rede.
+    // a aba Minhas/Geral, a ordenação — já é calculado aqui no cliente, e agora o
+    // cursor de leitura também é (ver `cursorDeLeitura` no `useMemo` de
+    // `conversations`). Então o `setAssignments` acima é suficiente: a lista se
+    // corrige no mesmo quadro, sem rede.
     //
     // O refetch que estava aqui custava caro. Abrir uma conversa chama
     // `mark_conversation_read_global`, que faz UPDATE nesta tabela — 6.574 aberturas
@@ -1273,8 +1273,6 @@ export default function ChatHub() {
           }
         }
 
-        const respondedAt = respondidaEm(state?.responded_at, assignment?.global_responded_at)
-
         return {
           remote_sender: summary.remote_sender,
           sender_name: summary.sender_name,
@@ -1291,7 +1289,6 @@ export default function ChatHub() {
           message_count: summary.message_count,
           pinned: (state?.pinned ?? false) || assignedToMe,
           archived: state?.archived ?? false,
-          pendingReply: summary.last_message_direction === 'inbound' && (!respondedAt || new Date(summary.last_message_created_at) > new Date(respondedAt)),
         }
       })
 
@@ -1353,8 +1350,6 @@ export default function ChatHub() {
         if (conv.lastMessage?.sender_name && conv.lastMessage.direction === 'inbound') {
           conv.sender_name = conv.lastMessage.sender_name
         }
-        const respondedAt = respondidaEm(state?.responded_at, assignment?.global_responded_at)
-        conv.pendingReply = conv.lastMessage?.direction === 'inbound' && (!respondedAt || new Date(conv.lastMessage.created_at) > new Date(respondedAt))
         return conv
       })
       .sort((a, b) => {

@@ -1,5 +1,5 @@
-import { Pin, PinOff, Check, Mail, Info, Archive, ArchiveRestore, MessageCircle } from 'lucide-react'
-import { togglePin, toggleArchive, markConversationRead, markConversationUnread, toggleResponded } from '@/services/conversation_states'
+import { Pin, PinOff, Check, Mail, Info, Archive, ArchiveRestore } from 'lucide-react'
+import { togglePin, toggleArchive, markConversationRead, markConversationUnread } from '@/services/conversation_states'
 import type { ConversationUserState } from '@/services/conversation_states'
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu'
 import { ContextMenuItem } from '@/components/ui/context-menu'
@@ -13,7 +13,6 @@ interface ConversationActionsContentProps {
   unreadCount: number
   onOpenInfo: (deviceId: string, remoteSender: string) => void
   mode: 'dropdown' | 'context-menu'
-  isPendingReply?: boolean
   onStateChange?: () => void
 }
 
@@ -27,7 +26,6 @@ export function ConversationActionsContent({
   unreadCount,
   onOpenInfo,
   mode,
-  isPendingReply,
   onStateChange,
 }: ConversationActionsContentProps) {
   const Item = mode === 'context-menu' ? ContextMenuItem : DropdownMenuItem
@@ -118,22 +116,6 @@ export function ConversationActionsContent({
           }}
         >
           <Archive className="h-3.5 w-3.5 mr-2.5 text-chat-muted" /> Arquivar
-        </Item>
-      )}
-
-      <Separator className={separatorClass} />
-
-      {(isPendingReply || state?.responded_at) && (
-        <Item
-          className={itemClass}
-          onClick={async (e) => {
-            e.stopPropagation()
-            await toggleResponded(deviceId, remoteSender)
-            onStateChange?.()
-          }}
-        >
-          <MessageCircle className="h-3.5 w-3.5 mr-2.5 text-chat-muted" />
-          {state?.responded_at ? 'Desfazer respondido' : 'Marcar como respondido'}
         </Item>
       )}
     </>
