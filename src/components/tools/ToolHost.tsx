@@ -151,11 +151,15 @@ export function ToolHost() {
       )}
     >
       {/*
-        Barra de abas: só com mais de uma ferramenta aberta. Com uma só não
-        informaria nada e seria mais uma faixa ocupando o topo — o pedido era
-        algo discreto.
+        Barra de abas: aparece com QUALQUER ferramenta aberta, inclusive uma só.
+        Era `vivas.length > 1`, por uma escolha de ser discreto — e o preço disso
+        foi ninguém descobrir o recurso: quem abria uma ferramenta não via barra
+        nenhuma e concluía que a página tinha trocado, sem imaginar que dava para
+        manter várias. Em 17/09/2026 uma usuária chegou a PEDIR abas de navegação
+        pelo widget de report, um mês depois de elas existirem e estarem no ar.
+        Uma aba só já informa: diz o que está aberto e oferece o ✕ para fechar.
       */}
-      {!escondido && vivas.length > 1 && (
+      {!escondido && vivas.length > 0 && (
         <div className="flex items-center gap-1 px-4 pt-3 pb-2 flex-wrap flex-shrink-0">
           {vivas.map((slug) => {
             const f = FERRAMENTAS_HOSPEDADAS[slug]
