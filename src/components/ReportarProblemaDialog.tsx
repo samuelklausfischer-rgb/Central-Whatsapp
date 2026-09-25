@@ -1,6 +1,6 @@
-import { useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useLocation } from 'react-router-dom'
-import { MessageSquarePlus, MessageSquareWarning, Lightbulb } from 'lucide-react'
+import { MessageSquarePlus, MessageSquareWarning, Lightbulb, ImagePlus, X } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,7 +9,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { useAuth } from '@/hooks/use-auth'
 import { useToast } from '@/hooks/use-toast'
-import { enviarHubReport, type HubReportTipo } from '@/services/hub_reports'
+import { enviarHubReport, enviarHubReportAnexo, type HubReportTipo } from '@/services/hub_reports'
+import { converterImagemParaWebp } from '@/lib/imagem-para-webp'
 import { releaseNotes } from '@/data/release-notes'
 import { MeusHubReports } from '@/components/MeusHubReports'
 import { subscreverFerramentas, lerFerramentas } from '@/stores/ferramentasVivas'
@@ -19,6 +20,17 @@ const tipos: { value: HubReportTipo; label: string; icon: React.ElementType; hin
   { value: 'problema', label: 'Problema', icon: MessageSquareWarning, hint: 'Algo não está funcionando' },
   { value: 'ideia', label: 'Ideia', icon: Lightbulb, hint: 'Sugestão de melhoria' },
 ]
+
+/** Prints por report — o mesmo teto que a fila do Hub já usa para os anexos. */
+const MAX_PRINTS = 5
+
+interface PrintSelecionado {
+  /** Chave estável para `key` e remoção — o `File` sozinho não serve (dois arquivos podem ser `===` iguais). */
+  id: string
+  arquivo: File
+  /** Prévia local; revogada assim que o print sai da lista (remoção, reset ou fechar o diálogo). */
+  url: string
+}
 
 /**
  * `open`/`onOpenChange` são OPCIONAIS: sem eles o diálogo traz o próprio botão,
@@ -52,6 +64,22 @@ export function ReportarProblemaDialog({
   const [descricao, setDescricao] = useState('')
   const [enviando, setEnviando] = useState(false)
   const [aba, setAba] = useState<'reportar' | 'meus'>('reportar')
+  const [prints, setPrints] = useState<PrintSelecionado[]>([])
+  // Só para a mensagem "Enviando print X de Y..." durante o envio.
+  const [progressoPrint, setProgressoPrint] = useState<{ atual: number; total: number } | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Espelha `prints` para o cleanup de desmonte, que não pode depender do
+  // valor capturado no primeiro render (senão revogaria uma lista vazia).
+  const printsRef = useRef<PrintSelecionado[]>([])
+  useEffect(() => {
+    printsRef.current = prints
+  }, [prints])
+  useEffect(() => {
+    return () => {
+      for (const p of printsRef.current) URL.revokeObjectURL(p.url)
+    }
+  }, [])
 
   // O Header só renderiza autenticado, mas sem usuário não há como identificar
   // quem reportou — e a identificação é o ponto do recurso.
@@ -64,11 +92,90 @@ export function ReportarProblemaDialog({
   // própria etiqueta não ganha uma segunda, e o selo some para mostrar isso.
   const selo = onde.etiqueta && !titulo.trim().startsWith('[') ? onde.etiqueta : null
 
+  function limparPrints() {
+    for (const p of prints) URL.revokeObjectURL(p.url)
+    setPrints([])
+  }
+
   function resetar() {
     setTipo('problema')
     setTitulo('')
     setDescricao('')
     setAba('reportar')
+    limparPrints()
+  }
+
+  /**
+   * Ponto único de entrada de prints — vale para os dois caminhos (seletor de
+   * arquivo e colar). Filtra o que não for imagem, aplica o teto de
+   * `MAX_PRINTS` e avisa por toast quando alguma coisa fica de fora.
+   */
+  function adicionarPrints(arquivos: File[]) {
+    const imagens = arquivos.filter((f) => f.type.startsWith('image/'))
+    if (imagens.length === 0) {
+      if (arquivos.length > 0) {
+        toast({ title: 'Só é possível anexar imagens como print', variant: 'destructive' })
+      }
+      return
+    }
+    if (imagens.length < arquivos.length) {
+      toast({ title: 'Alguns arquivos não eram imagem e foram ignorados', variant: 'destructive' })
+    }
+
+    const espaco = MAX_PRINTS - prints.length
+    if (espaco <= 0) {
+      toast({ title: `Máximo de ${MAX_PRINTS} prints por report`, variant: 'destructive' })
+      return
+    }
+    const aceitos = imagens.slice(0, espaco)
+    if (aceitos.length < imagens.length) {
+      toast({
+        title: `Só cabia${espaco === 1 ? ' mais 1 print' : ` mais ${espaco} prints`} — o restante foi ignorado`,
+        variant: 'destructive',
+      })
+    }
+
+    const novos: PrintSelecionado[] = aceitos.map((arquivo) => ({
+      id: crypto.randomUUID(),
+      arquivo,
+      url: URL.createObjectURL(arquivo),
+    }))
+    setPrints((prev) => [...prev, ...novos])
+  }
+
+  function removerPrint(id: string) {
+    setPrints((prev) => {
+      const alvo = prev.find((p) => p.id === id)
+      if (alvo) URL.revokeObjectURL(alvo.url)
+      return prev.filter((p) => p.id !== id)
+    })
+  }
+
+  function handleFileInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    if (e.target.files) adicionarPrints(Array.from(e.target.files))
+    // Sem isto, escolher o MESMO arquivo duas vezes seguidas não dispara `onChange`.
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  // Mesmo estilo do `onPaste` do compositor de mensagens (`ChatWindow.tsx`):
+  // só ENTRA na frente do Ctrl+V quando o clipboard tem imagem. Sem imagem,
+  // não chama `preventDefault` — o colar de texto normal no título/descrição
+  // segue intocado.
+  function handlePaste(e: React.ClipboardEvent<HTMLDivElement>) {
+    if (aba !== 'reportar' || enviando) return
+    const items = e.clipboardData?.items
+    if (!items) return
+    const imagens: File[] = []
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const arquivo = item.getAsFile()
+        if (arquivo) imagens.push(arquivo)
+      }
+    }
+    if (imagens.length === 0) return
+    e.preventDefault()
+    adicionarPrints(imagens)
   }
 
   async function handleEnviar() {
@@ -81,8 +188,9 @@ export function ReportarProblemaDialog({
     }
 
     setEnviando(true)
+    setProgressoPrint(null)
     try {
-      await enviarHubReport({
+      const { id: reportId } = await enviarHubReport({
         tipo,
         // `[Agenda] não consigo criar evento`. A mesma função monta o selo que
         // aparece ao lado do campo, para prévia e envio não divergirem.
@@ -104,7 +212,40 @@ export function ReportarProblemaDialog({
           ferramenta_titulo: onde.lugar,
         },
       })
-      toast({ title: tipo === 'ideia' ? 'Ideia enviada. Obrigado!' : 'Problema reportado. Obrigado!' })
+
+      // O REPORT JÁ EXISTE a partir daqui. Cada print sobe isolado no próprio
+      // try/catch — um print ruim (imagem grande demais, rede falhando no
+      // meio) não pode fazer o report inteiro parecer perdido para quem
+      // reportou, porque ele NÃO foi perdido.
+      let falhas = 0
+      for (let i = 0; i < prints.length; i++) {
+        setProgressoPrint({ atual: i + 1, total: prints.length })
+        try {
+          const convertido = await converterImagemParaWebp(prints[i].arquivo)
+          await enviarHubReportAnexo({
+            reportId,
+            ordem: i + 1,
+            arquivo: convertido.blob,
+            mime: convertido.blob.type || 'image/webp',
+            nomeArquivo: prints[i].arquivo.name || `print-${i + 1}.webp`,
+            largura: convertido.largura,
+            altura: convertido.altura,
+          })
+        } catch (erroPrint) {
+          falhas++
+          console.error('[ReportarProblemaDialog] falha ao subir print', erroPrint)
+        }
+      }
+
+      if (falhas > 0) {
+        toast({
+          title: tipo === 'ideia' ? 'Ideia enviada, mas houve falha nos prints' : 'Problema reportado, mas houve falha nos prints',
+          description: `${falhas} de ${prints.length} print(s) não subiram. O relato em si foi enviado normalmente.`,
+          variant: 'destructive',
+        })
+      } else {
+        toast({ title: tipo === 'ideia' ? 'Ideia enviada. Obrigado!' : 'Problema reportado. Obrigado!' })
+      }
       resetar()
       setOpen(false)
     } catch (error) {
@@ -114,6 +255,7 @@ export function ReportarProblemaDialog({
       })
     } finally {
       setEnviando(false)
+      setProgressoPrint(null)
     }
   }
 
@@ -137,7 +279,7 @@ export function ReportarProblemaDialog({
           </Button>
         </DialogTrigger>
       )}
-      <DialogContent className="max-w-md bg-background/95 backdrop-blur-xl border-muted">
+      <DialogContent className="max-w-md bg-background/95 backdrop-blur-xl border-muted" onPaste={handlePaste}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-lg">
             <MessageSquarePlus className="h-5 w-5 text-primary" />
@@ -223,8 +365,72 @@ export function ReportarProblemaDialog({
             />
           </div>
 
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <Label>Prints (opcional)</Label>
+              <span className="text-[11px] text-muted-foreground">
+                {prints.length}/{MAX_PRINTS}
+              </span>
+            </div>
+
+            {/*
+              Miniatura + X no mesmo estilo da galeria de anexos do compositor
+              de mensagens (`ChatWindow.tsx`): `URL.createObjectURL` para a
+              prévia, revogado em `removerPrint`/`limparPrints`/desmonte —
+              nunca deixado para o garbage collector.
+            */}
+            {prints.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {prints.map((print) => (
+                  <div key={print.id} className="group relative">
+                    <img
+                      src={print.url}
+                      alt={print.arquivo.name}
+                      className="h-16 w-16 rounded-lg border border-border object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removerPrint(print.id)}
+                      disabled={enviando}
+                      aria-label={`Remover ${print.arquivo.name}`}
+                      className="absolute -right-1.5 -top-1.5 rounded-full bg-background p-0.5 text-muted-foreground shadow ring-1 ring-border transition-colors hover:text-destructive disabled:pointer-events-none disabled:opacity-50"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={handleFileInputChange}
+            />
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={enviando || prints.length >= MAX_PRINTS}
+              >
+                <ImagePlus className="h-4 w-4 mr-1.5" />
+                Anexar print
+              </Button>
+              <span className="text-[11px] text-muted-foreground">ou cole com Ctrl+V</span>
+            </div>
+          </div>
+
           <Button className="w-full" onClick={handleEnviar} disabled={enviando}>
-            {enviando ? 'Enviando...' : 'Enviar'}
+            {enviando
+              ? progressoPrint
+                ? `Enviando print ${progressoPrint.atual} de ${progressoPrint.total}...`
+                : 'Enviando...'
+              : 'Enviar'}
           </Button>
 
           {/*

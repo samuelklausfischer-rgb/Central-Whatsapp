@@ -45,6 +45,11 @@ export interface EnviarHubReportInput {
   metadata?: Record<string, unknown>
 }
 
+/** Só o que quem chama precisa: o id, para anexar prints logo em seguida. */
+export interface EnviarHubReportResultado {
+  id: string
+}
+
 export const enviarHubReport = async ({
   tipo,
   titulo,
@@ -52,7 +57,7 @@ export const enviarHubReport = async ({
   reportadoPor,
   projetoSlug,
   metadata,
-}: EnviarHubReportInput) => {
+}: EnviarHubReportInput): Promise<EnviarHubReportResultado> => {
   const slug = projetoSlug || PROJETO_PADRAO
   // `hub_projetos` é fechada para `anon`; a RPC (SECURITY DEFINER) devolve
   // só o id daquele slug, sem expor mais nada do projeto.
@@ -70,10 +75,20 @@ export const enviarHubReport = async ({
 
   // `status` e `prioridade` são omitidos de propósito: os defaults da tabela
   // ('novo' / 'media') são exatamente o que a policy de insert exige.
+  //
+  // `id` GERADO NO CLIENTE — não dá para usar `Prefer: return=representation`
+  // para recuperar o id de volta: o grant do `anon` nesta tabela é por
+  // COLUNA e não inclui SELECT, e `return=representation` faz um RETURNING
+  // por baixo, que a Prod já provou responder 401 "permission denied for
+  // table hub_reports". `return=minimal` continua sendo o único caminho que
+  // funciona — por isso o id precisa nascer aqui, e `id` está na lista de
+  // colunas que o `anon` PODE inserir.
+  const id = crypto.randomUUID()
   const res = await fetch(`${HUB_SUPABASE_URL}/rest/v1/hub_reports`, {
     method: 'POST',
     headers: { ...hubHeaders, Prefer: 'return=minimal' },
     body: JSON.stringify({
+      id,
       projeto_id: projetoId,
       tipo,
       titulo,
@@ -85,7 +100,90 @@ export const enviarHubReport = async ({
     }),
   })
 
+  // `return=minimal` devolve corpo vazio — não dá para chamar `.json()` aqui.
   if (!res.ok) throw new Error(`Falha ao enviar o report (erro ${res.status}).`)
+  return { id }
+}
+
+/** Bucket de Storage onde os prints do widget ficam — policy anon de INSERT já existe lá. */
+const HUB_REPORT_PRINTS_BUCKET = 'hub-report-prints'
+
+/** Mesmo teto que a policy de INSERT em `hub_report_anexos` impõe. */
+const HUB_REPORT_ANEXO_MAX_BYTES = 5 * 1024 * 1024
+
+/** MIME aceitos pela policy de INSERT em `hub_report_anexos`. */
+const HUB_REPORT_ANEXO_MIME_ACEITOS = ['image/webp', 'image/png', 'image/jpeg'] as const
+
+export interface EnviarHubReportAnexoInput {
+  reportId: string
+  /** Começa em 1 — é o que compõe o caminho no Storage. */
+  ordem: number
+  arquivo: Blob
+  mime: string
+  nomeArquivo: string
+  largura: number
+  altura: number
+}
+
+/**
+ * Sobe um print para o Storage e registra o anexo em `hub_report_anexos`.
+ *
+ * Duas chamadas, não uma RPC: o bucket e a tabela têm policies de INSERT
+ * `anon` separadas, e é assim que o widget oficial do Hub já faz. Se o
+ * upload subir mas o insert da linha falhar (ou vice-versa), quem chamou
+ * decide o que fazer — este helper só propaga o erro, nunca esconde.
+ */
+export const enviarHubReportAnexo = async ({
+  reportId,
+  ordem,
+  arquivo,
+  mime,
+  nomeArquivo,
+  largura,
+  altura,
+}: EnviarHubReportAnexoInput): Promise<void> => {
+  if (arquivo.size <= 0 || arquivo.size > HUB_REPORT_ANEXO_MAX_BYTES) {
+    throw new Error('O print excede o limite de 5 MB.')
+  }
+  if (!HUB_REPORT_ANEXO_MIME_ACEITOS.includes(mime as (typeof HUB_REPORT_ANEXO_MIME_ACEITOS)[number])) {
+    throw new Error(`Formato de imagem não aceito (${mime}).`)
+  }
+
+  // Padrão que o Hub já usa: `<report_id>/<ordem>-image.webp`, começando em 1.
+  // A policy de INSERT em `hub_report_anexos` exige que `caminho` comece com
+  // o id do report — por isso ele vem primeiro, não depois.
+  const caminho = `${reportId}/${ordem}-image.webp`
+
+  const upRes = await fetch(`${HUB_SUPABASE_URL}/storage/v1/object/${HUB_REPORT_PRINTS_BUCKET}/${caminho}`, {
+    method: 'POST',
+    headers: {
+      apikey: HUB_SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${HUB_SUPABASE_ANON_KEY}`,
+      'Content-Type': mime,
+    },
+    body: arquivo,
+  })
+  if (!upRes.ok) {
+    throw new Error(`Falha ao subir o print (erro ${upRes.status}).`)
+  }
+
+  const anexoRes = await fetch(`${HUB_SUPABASE_URL}/rest/v1/hub_report_anexos`, {
+    method: 'POST',
+    headers: { ...hubHeaders, Prefer: 'return=minimal' },
+    body: JSON.stringify({
+      report_id: reportId,
+      caminho,
+      nome_arquivo: nomeArquivo,
+      mime,
+      tamanho_bytes: arquivo.size,
+      largura,
+      altura,
+      ordem,
+    }),
+  })
+  if (!anexoRes.ok) {
+    throw new Error(`Falha ao registrar o print (erro ${anexoRes.status}).`)
+  }
 }
 
 export type HubReportStatus =
