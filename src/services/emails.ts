@@ -179,6 +179,93 @@ export async function archiveEmail(id: string): Promise<void> {
   if (error) throw error
 }
 
+/**
+ * Resultado de uma operação em lote: quantos deram certo e, de cada falha,
+ * o id e o motivo.
+ *
+ * Não é `throw` na primeira falha de propósito — ver `marcarEmailsEmLote`.
+ */
+export interface ResultadoLote {
+  ok: number
+  falhas: { id: string; motivo: string }[]
+}
+
+/** Máximo de chamadas simultâneas do fan-out abaixo. */
+const CONCORRENCIA_MAXIMA_LOTE = 6
+
+/**
+ * Marca (lido/estrela) uma lista de e-mails, um por um.
+ *
+ * NÃO existe uma rota de "marcar em massa": `email-microsoft/marcar` (a mesma
+ * que `markEmailRead`/`markEmailStarred` chamam) só aceita um `email_id` por
+ * requisição, porque é ela quem fala com o Graph da Microsoft, e o Graph
+ * marca mensagem por mensagem. Selecionar 40 e-mails e apertar "marcar como
+ * lido" vira 40 chamadas — daí "em lote" aqui significa fan-out, não uma
+ * única requisição com uma lista de ids.
+ *
+ * A concorrência é limitada a `CONCORRENCIA_MAXIMA_LOTE` (um pool simples de
+ * workers, não `Promise.all` direto) para não disparar dezenas de requisições
+ * ao mesmo tempo contra a mesma caixa — o Graph tem limite de taxa por conta,
+ * e a edge function é a mesma para todo mundo.
+ *
+ * Nunca lança exceção por causa de UM e-mail que falhou: se lançasse, uma
+ * falha no meio (rede, token expirado, mensagem apagada no Outlook) perderia
+ * o resultado de todas as outras que já tinham dado certo. Em vez disso cada
+ * falha é coletada, e quem chamou decide como avisar — inclusive avisar que
+ * foi "38 de 40", nunca "pronto" quando sobrou gente de fora.
+ */
+export async function marcarEmailsEmLote(
+  ids: string[],
+  mudanca: { is_read?: boolean; is_starred?: boolean },
+  aoProgredir?: (feitos: number, total: number) => void,
+): Promise<ResultadoLote> {
+  const falhas: ResultadoLote['falhas'] = []
+  let ok = 0
+  let feitos = 0
+  let proximoIndice = 0
+
+  async function processarFila(): Promise<void> {
+    while (proximoIndice < ids.length) {
+      const indice = proximoIndice++
+      const id = ids[indice]
+      try {
+        await chamarEmailMicrosoft('marcar', { email_id: id, ...mudanca })
+        ok++
+      } catch (err) {
+        falhas.push({ id, motivo: err instanceof Error ? err.message : 'Falha desconhecida' })
+      } finally {
+        feitos++
+        aoProgredir?.(feitos, ids.length)
+      }
+    }
+  }
+
+  const trabalhadores = Array.from(
+    { length: Math.min(CONCORRENCIA_MAXIMA_LOTE, ids.length) },
+    () => processarFila(),
+  )
+  await Promise.all(trabalhadores)
+
+  return { ok, falhas }
+}
+
+/**
+ * Arquiva vários e-mails de uma vez.
+ *
+ * Diferente de `marcarEmailsEmLote`, isto é uma chamada só: `archiveEmail`
+ * já é um `update` direto na nossa tabela (não fala com a Microsoft — ver o
+ * comentário de `archiveEmail`), e um `update` aceita `.in('id', ids)` sem
+ * precisar de fan-out nenhum.
+ */
+export async function arquivarEmailsEmLote(ids: string[]): Promise<void> {
+  if (ids.length === 0) return
+  const { error } = await supabase
+    .from('emails')
+    .update({ is_archived: true })
+    .in('id', ids)
+  if (error) throw error
+}
+
 export async function moveEmailToFolder(id: string, folder_id: string | null): Promise<void> {
   const { error } = await supabase
     .from('emails')

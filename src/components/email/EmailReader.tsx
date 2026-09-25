@@ -26,6 +26,7 @@ import { CrossChannelPanel } from './CrossChannelPanel'
 import { AiSuggestionPanel } from './AiSuggestionPanel'
 import type { Email, EmailState } from '@/lib/supabase/email-types'
 import type { Contact, AiPrompt } from '@/lib/supabase/types'
+import type { Fixado } from '@/services/email_fixados'
 
 function sanitizeHtml(html: string): string {
   // Remove scripts e elementos potencialmente perigosos, mantém layout
@@ -68,6 +69,12 @@ interface Props {
    * que se escolhe em quase toda vez.
    */
   setorDaCaixa?: string | null
+  /** O pin visível para este e-mail (meu ou de um colega compartilhado) — `null` se ninguém fixou. */
+  fixado?: Fixado | null
+  /** O pin acima é MEU? Só decide o texto da dica no botão — ver `EmailActionsBar`. */
+  souMeuPin?: boolean
+  /** Nome de quem é o dono hoje (`email_states.assigned_to`) — `null` se ninguém. */
+  donoNome?: string | null
   /** Fecha a mensagem e traz a lista de volta — ela some enquanto se lê. */
   onVoltar: () => void
   onReply: (email: Email) => void
@@ -77,6 +84,8 @@ interface Props {
   onToggleStar: (emailId: string) => void
   onSetWaiting: (emailId: string) => void
   onUseSuggestion: (text: string) => void
+  onFixar: () => void
+  onAtribuir: () => void
 }
 
 export function EmailReader({
@@ -86,6 +95,9 @@ export function EmailReader({
   aiPrompts,
   carregandoCorpo = false,
   setorDaCaixa = null,
+  fixado = null,
+  souMeuPin = false,
+  donoNome = null,
   onVoltar,
   onReply,
   onForward,
@@ -94,6 +106,8 @@ export function EmailReader({
   onToggleStar,
   onSetWaiting,
   onUseSuggestion,
+  onFixar,
+  onAtribuir,
 }: Props) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   /*
@@ -220,12 +234,17 @@ export function EmailReader({
           <EmailActionsBar
             email={email}
             state={state}
+            fixado={fixado}
+            souMeuPin={souMeuPin}
+            donoNome={donoNome}
             onReply={() => onReply(email)}
             onForward={() => onForward(email)}
             onClose={() => onClose(email.id)}
             onArchive={() => onArchive(email.id)}
             onToggleStar={() => onToggleStar(email.id)}
             onSetWaiting={() => onSetWaiting(email.id)}
+            onFixar={onFixar}
+            onAtribuir={onAtribuir}
           />
         </div>
         {email.web_link && (
