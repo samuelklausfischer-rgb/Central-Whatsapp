@@ -156,6 +156,7 @@ import { isPdfFile, isExcelFile } from '@/lib/file-type'
 import { DocumentBubble } from '@/components/chat/DocumentBubble'
 import { ContactShareBubble } from '@/components/chat/ContactShareBubble'
 import { ListMessageBubble } from '@/components/chat/ListMessageBubble'
+import { ButtonsMessageBubble } from '@/components/chat/ButtonsMessageBubble'
 import { MessageSearchBar } from '@/components/chat/MessageSearchBar'
 import { MessageSelectionBar } from '@/components/chat/MessageSelectionBar'
 import { useMessageSelection } from '@/hooks/use-message-selection'
@@ -457,13 +458,23 @@ const isMediaPlaceholder = (content?: string) => {
       '[Música]',
       '[Figurinha]',
       '[Mensagem de mídia]',
+      '[Mensagem de midia]',
       '[Documento]',
       '[Mídia]',
       '[Contato]',
+      // Botões (templateMessage) sem texto — mesma convenção de
+      // "[Mensagem com botões]" que o webhook grava quando não há
+      // `body`. Ver `isMensagemDeMidiaDesconhecida` mais abaixo e o
+      // contrato descrito junto ao balão de botões em `baloesDaConversa`.
+      '[Mensagem com botões]',
     ].includes(cleaned) ||
     cleaned.startsWith('[Documento:') ||
     cleaned.startsWith('[Contato:') ||
-    cleaned.startsWith('[Lista:')
+    cleaned.startsWith('[Lista:') ||
+    // Botões COM texto — mesmo padrão de prefixo que `[Lista: ...]`. O
+    // rótulo cru fica escondido e só o bloco rico (ButtonsMessageBubble)
+    // aparece, sem duplicar o texto do `body`.
+    cleaned.startsWith('[Botões:')
   )
 }
 
@@ -531,12 +542,39 @@ const isTechnicalPlaceholder = (content?: string) => {
   if (!content) return false
   const trimmed = content.trim()
   if (isMediaPlaceholder(trimmed)) return true
+  // A linha de sistema abaixo (aviso de fixação) ganha tratamento PRÓPRIO no
+  // balão — ver o retorno antecipado em `baloesDaConversa`. Entra aqui só
+  // para o resto do arquivo que já usa `isTechnicalPlaceholder` como "não é
+  // texto de conversa de verdade" (a busca, que não deve achar ocorrência
+  // dentro dela, e a prévia de citação).
+  if (trimmed === '[Mensagem fixada]') return true
   const normalized = trimmed.toLowerCase().replace(/[\u0080-\u009F]/g, '')
   return (
     ['[audio]', '[áudio]', '[ãudio]', 'audio', 'áudio', 'ãudio', 'mensagem de audio', 'mensagem de áudio'].includes(
       normalized,
     )
   )
+}
+
+/**
+ * As DUAS grafias do rótulo de tipo REALMENTE desconhecido — a única situação
+ * em que "Mensagem não suportada neste aplicativo" é uma frase verdadeira.
+ * `[Mensagem de mídia]` é a grafia atual (webhook/`extractContent`, fim de
+ * linha); `[Mensagem de midia]`, sem acento, é dado histórico — as duas
+ * medidas no banco.
+ *
+ * Todo o RESTO que `isTechnicalPlaceholder` reconhece (`[Imagem]`, `[Áudio]`,
+ * `[Figurinha]`, `[Contato]`, `[Lista: ...]`, `[Mensagem com botões]`...) é
+ * mídia/estrutura que o app SUPORTA — o rótulo cru ali normalmente significa
+ * só que o download daquele anexo falhou (comum neste projeto: milhares de
+ * `[Imagem]`/`[Áudio]`/`[Figurinha]` sem anexo, herança do servidor de mídia
+ * desligado). Misturar os dois casos é dizer "não suportada" para uma foto
+ * que o WhatsApp e o app suportam perfeitamente.
+ */
+const isMensagemDeMidiaDesconhecida = (content?: string) => {
+  if (!content) return false
+  const cleaned = content.trim().replace(/[\u0080-\u009F]/g, '')
+  return cleaned === '[Mensagem de mídia]' || cleaned === '[Mensagem de midia]'
 }
 
 interface HighlightRange {
@@ -1558,11 +1596,44 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     }
   }, [toast])
 
+  /**
+   * Devolve o foco ao compositor no quadro seguinte — MESMO padrão do
+   * `insertEmoji` logo abaixo, com `requestAnimationFrame`.
+   *
+   * Sem isto, fechar o menu ⋮ (Responder/Editar) devolve o foco ao PRÓPRIO
+   * botão ⋮: é o comportamento padrão do Radix ao fechar um `DropdownMenu`.
+   * Com o foco ali, a primeira tecla que a pessoa aperta — inclusive espaço —
+   * ATIVA aquele botão e reabre o menu daquele balão, em vez de chegar ao
+   * texto. `posicaoCursor` (usado ao editar) posiciona o cursor no fim do
+   * texto carregado; sem argumento, só foca (Responder não precisa mover o
+   * cursor).
+   */
+  const focarComposer = useCallback((posicaoCursor?: number) => {
+    requestAnimationFrame(() => {
+      const textarea = msgTextareaRef.current
+      if (!textarea) return
+      textarea.focus()
+      if (posicaoCursor !== undefined) {
+        textarea.setSelectionRange(posicaoCursor, posicaoCursor)
+      }
+    })
+  }, [])
+
   const handleEditMessage = useCallback((msg: any) => {
     setEditingMessageId(msg.id)
     setMsgText(msg.content)
     setReplyingTo(null)
-  }, [])
+    focarComposer((msg.content || '').length)
+  }, [focarComposer])
+
+  /**
+   * "Responder": mesma lacuna de foco que a edição tinha — `setReplyingTo`
+   * sozinho nunca levava o foco ao compositor. Ver `focarComposer`.
+   */
+  const handleReply = useCallback((msg: any) => {
+    setReplyingTo(msg)
+    focarComposer()
+  }, [focarComposer])
 
   /**
    * Responder no privado a quem escreveu no grupo — o grupo não recebe nada.
@@ -3838,6 +3909,80 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const isGroupContact = isGroupJid(contact)
 
   /**
+   * Participantes do grupo aberto, indexados pelos MESMOS dígitos crus que
+   * aparecem no texto de uma menção (`@109728512372987`) — nunca por
+   * `normalizeToDigits`, que prefixa "55" em qualquer coisa de 10-13 dígitos e
+   * já confundiu 2 LIDs com contato errado em 181 medidos (ver `services/groups`).
+   * Guarda telefone (para casar com `contacts`) e o `senderName` (pushName) que
+   * `getParticipantesDoGrupo` já traz cruzado com o banco.
+   *
+   * UMA chamada por grupo ABERTO, não por balão: o efeito abaixo depende só de
+   * device/instância/grupo, nunca de `messages`. E como `getParticipantesDoGrupo`
+   * tem cache próprio de 10 min por `deviceId|groupJid`, reabrir a mesma
+   * conversa — ou o autocomplete de `@`, ou o painel de participantes já terem
+   * carregado antes — não gera chamada de rede nova nenhuma.
+   */
+  interface ParticipanteDoGrupoInfo {
+    telefone: string
+    senderName?: string | null
+  }
+  const [participantesDoGrupo, setParticipantesDoGrupo] = useState<Map<string, ParticipanteDoGrupoInfo>>(
+    () => new Map(),
+  )
+
+  useEffect(() => {
+    if (!isGroupContact || !device?.id || !device?.instance_key || !contact) {
+      setParticipantesDoGrupo(new Map())
+      return
+    }
+    let vivo = true
+    getParticipantesDoGrupo(device.id, device.instance_key, contact)
+      .then((info) => {
+        if (!vivo) return
+        const mapa = new Map<string, ParticipanteDoGrupoInfo>()
+        for (const p of info.participantes) {
+          // Dígitos crus do LID (antes do "@lid") — sem normalização de telefone.
+          const lid = p.id ? p.id.replace(/@.*$/, '').replace(/\D/g, '') : ''
+          const dados: ParticipanteDoGrupoInfo = { telefone: p.phone || '', senderName: p.senderName ?? null }
+          if (lid) mapa.set(lid, dados)
+          if (p.phone) mapa.set(p.phone.replace(/\D/g, ''), dados)
+        }
+        setParticipantesDoGrupo(mapa)
+      })
+      .catch(() => {
+        // A Evolution fica indisponível para ~18% dos grupos (ver
+        // `services/groups.ts`). Nesse caso a resolução por participante
+        // simplesmente não acontece — o fallback de `resolverNomeDaMencao`
+        // (telefone direto, depois número cru) segue valendo. Nunca quebra a
+        // tela nem trava em loading.
+        if (vivo) setParticipantesDoGrupo(new Map())
+      })
+    return () => {
+      vivo = false
+    }
+  }, [isGroupContact, device?.id, device?.instance_key, contact])
+
+  /**
+   * `sender_name` (pushName) já visto nas mensagens CARREGADAS desta conversa,
+   * por LID — sem nenhuma chamada nova: é o mesmo `messages` que já está em
+   * memória para desenhar os balões. Cobre o participante mencionado que nunca
+   * apareceu na resposta da Evolution (ou ela está fora do ar para este grupo)
+   * mas já falou dentro da janela carregada. Último a aparecer na iteração
+   * (mensagens em ordem cronológica ascendente) vence — é o pushName mais
+   * recente.
+   */
+  const nomePorParticipanteEmMemoria = useMemo(() => {
+    const mapa = new Map<string, string>()
+    if (!isGroupContact) return mapa
+    for (const m of messages) {
+      if (!m?.group_participant || !m?.sender_name) continue
+      const lid = String(m.group_participant).replace(/@.*$/, '').replace(/\D/g, '')
+      if (lid) mapa.set(lid, m.sender_name)
+    }
+    return mapa
+  }, [isGroupContact, messages])
+
+  /**
    * A barra de ajustes acima do compositor.
    *
    * Ela era do toggle "sem assinatura" e só aparecia quando havia assinatura
@@ -3873,11 +4018,36 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   }, [msgText])
 
   const resolverNomeDaMencao = useCallback(
-    (telefone: string) => {
-      const contato = findContactByIdentifier(telefone, contactIndex)
-      return contato?.nickname || contato?.name || telefone
+    (identificador: string) => {
+      // 1) participante do grupo — o mapa acima já sabe se aquele dígito é LID
+      // ou telefone (veio da própria Evolution), então é a ÚNICA via segura
+      // para o identificador de 14-15 dígitos.
+      if (isGroupContact) {
+        const participante = participantesDoGrupo.get(identificador)
+        if (participante) {
+          if (participante.telefone) {
+            const contato = findContactByIdentifier(participante.telefone, contactIndex)
+            if (contato?.nickname) return contato.nickname
+            if (contato?.name) return contato.name
+          }
+          if (participante.senderName) return participante.senderName
+        }
+      }
+      // 2) até 13 dígitos pode ser telefone puro — tenta o índice de contatos
+      // diretamente. Acima disso é sempre LID e NUNCA deve passar por aqui: é
+      // exatamente o caminho que prefixa "55" e casa com o contato errado.
+      if (identificador.length <= 13) {
+        const contato = findContactByIdentifier(identificador, contactIndex)
+        if (contato?.nickname) return contato.nickname
+        if (contato?.name) return contato.name
+      }
+      // 3) pushName já visto nas mensagens carregadas, sem chamada nova.
+      const nomeEmMemoria = isGroupContact ? nomePorParticipanteEmMemoria.get(identificador) : undefined
+      if (nomeEmMemoria) return nomeEmMemoria
+      // 4) número cru, como hoje.
+      return identificador
     },
-    [contactIndex],
+    [isGroupContact, participantesDoGrupo, contactIndex, nomePorParticipanteEmMemoria],
   )
 
   /**
@@ -4225,6 +4395,25 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           const previousMsg = messages[index - 1]
           const shouldShowDateSeparator =
             !previousMsg || getDateKey(previousMsg.created_at) !== getDateKey(msg.created_at)
+          // Aviso de "mensagem fixada": linha de sistema centralizada e
+          // discreta, no mesmo estilo do divisor de data — nunca um balão (um
+          // balão aqui sugeriria que alguém "disse" isto).
+          if (!msg.deleted_at && msg.content?.trim() === '[Mensagem fixada]') {
+            return (
+              <React.Fragment key={msg.chaveRender ?? msg.id}>
+                {shouldShowDateSeparator && (
+                  <div className="flex justify-center py-2">
+                    <span className="rounded-full border border-chat-border bg-chat-panel/90 px-3 py-1 text-[12px] font-medium text-chat-muted shadow-chat backdrop-blur">
+                      {getDateLabel(msg.created_at)}
+                    </span>
+                  </div>
+                )}
+                <div className="flex justify-center py-1">
+                  <span className="text-[12px] italic text-chat-muted/60">📌 Mensagem fixada</span>
+                </div>
+              </React.Fragment>
+            )
+          }
           const previousIsMe = previousMsg
             ? previousMsg.direction === 'outbound' || previousMsg.sender_id === user?.id
             : false
@@ -4445,6 +4634,16 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                                 buttonText={att.buttonText || 'Ver opções'}
                                 sections={Array.isArray(att.sections) ? att.sections : []}
                                 onSelectOption={(optionTitle) => sendListOptionAsText(optionTitle, msg)}
+                              />
+                            )
+                          }
+                          if (att && typeof att === 'object' && att.type === 'buttons') {
+                            return (
+                              <ButtonsMessageBubble
+                                key={idx}
+                                body={att.body || ''}
+                                footer={att.footer || null}
+                                buttons={Array.isArray(att.buttons) ? att.buttons : []}
                               />
                             )
                           }
@@ -4683,15 +4882,37 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                      <div className="text-[13px] italic text-chat-muted/60">
                        [Mensagem apagada]
                      </div>
-                   ) : msg.content?.trim() && !isTechnicalPlaceholder(msg.content) ? (
+                   ) : msg.content?.trim() &&
+                       (!isTechnicalPlaceholder(msg.content) ||
+                         (isMensagemDeMidiaDesconhecida(msg.content) && messageAttachments.length === 0)) ? (
                      <div className="text-[15px] leading-relaxed break-words">
-                        <MessageBody
-                          content={msg.content}
-                          isMe={isMe}
-                          onOpenConversation={onOpenConversationByJid}
-                          ranges={rangesByMessageId.get(msg.id) ?? EMPTY_RANGES}
-                          resolveMention={resolverNomeDaMencao}
-                        />
+                        {isMensagemDeMidiaDesconhecida(msg.content) ? (
+                          // SÓ para o rótulo de tipo REALMENTE desconhecido
+                          // (`[Mensagem de mídia]` / `[Mensagem de midia]`) e
+                          // SEM anexo — o extrator não reconheceu o tipo e não
+                          // há nada para desenhar. Era exatamente aqui que o
+                          // balão ficava em branco: `null` sem aviso nenhum.
+                          // NUNCA para `[Imagem]`/`[Áudio]`/`[Figurinha]`/etc.
+                          // sem anexo — aquilo é mídia que o app SUPORTA e só
+                          // não baixou (muito comum neste projeto); dizer "não
+                          // suportada" ali seria falso. Esses continuam sem
+                          // renderizar nada aqui, como sempre foi (ver a
+                          // condição acima e o rodapé isolado mais abaixo).
+                          // Com anexo o fluxo NEM chega a este ramo (a condição
+                          // acima barra), e o anexo segue aparecendo sozinho,
+                          // como hoje.
+                          <span className="italic text-chat-muted/60">
+                            Mensagem não suportada neste aplicativo
+                          </span>
+                        ) : (
+                          <MessageBody
+                            content={msg.content}
+                            isMe={isMe}
+                            onOpenConversation={onOpenConversationByJid}
+                            ranges={rangesByMessageId.get(msg.id) ?? EMPTY_RANGES}
+                            resolveMention={resolverNomeDaMencao}
+                          />
+                        )}
                        <span
   className={`inline-flex translate-y-[30%] items-center gap-1 whitespace-nowrap ${
     isMe ? 'float-right ml-3' : 'ml-1'
@@ -4754,7 +4975,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                              msg={msg}
                              isMe={isMe}
                              podeEditar={isMe && podeEditarNoWhatsapp(msg)}
-                             onReply={setReplyingTo}
+                             onReply={handleReply}
                              onCopy={handleCopyMessage}
                              onEdit={handleEditMessage}
                              onDelete={setDeleteConfirmMsg}
@@ -4785,7 +5006,18 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                         ))}
                       </div>
                     )}
-                    {(msg.deleted_at || !msg.content?.trim() || isTechnicalPlaceholder(msg.content)) && (
+                    {(msg.deleted_at ||
+                      !msg.content?.trim() ||
+                      // Rótulo técnico QUALQUER (ex.: "[Imagem]" sem anexo,
+                      // "[Áudio]" ao lado do áudio, etc.): só o rodapé, nunca
+                      // texto — exatamente como sempre foi. A ÚNICA exceção é
+                      // o rótulo de tipo desconhecido
+                      // (`isMensagemDeMidiaDesconhecida`) quando não há
+                      // anexo: aquele caso sai junto do aviso "Mensagem não
+                      // suportada" no ramo de texto acima, e duplicaria aqui
+                      // se a condição não o excluísse.
+                      (isTechnicalPlaceholder(msg.content) &&
+                        (!isMensagemDeMidiaDesconhecida(msg.content) || messageAttachments.length > 0))) && (
                       <div className="mt-1.5 flex items-center justify-end gap-1">
                         {msg.edited_at && (
                           <span className="text-[10px] text-chat-muted/60">(editado)</span>
@@ -4855,7 +5087,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                               msg={msg}
                               isMe={isMe}
                               podeEditar={isMe && podeEditarNoWhatsapp(msg)}
-                              onReply={setReplyingTo}
+                              onReply={handleReply}
                               onCopy={handleCopyMessage}
                               onEdit={handleEditMessage}
                               onDelete={setDeleteConfirmMsg}
@@ -4963,6 +5195,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     cancelarLongPress,
     handleCopyMessage,
     handleEditMessage,
+    handleReply,
     handleReplyPrivately,
     sendListOptionAsText,
     pularParaMensagemOriginal,

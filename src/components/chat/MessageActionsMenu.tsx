@@ -70,7 +70,28 @@ export function MessageActionsMenu({
   onInfo,
 }: MessageActionsMenuProps) {
   return (
-    <DropdownMenuContent align="end" className="bg-chat-panel border-chat-border shadow-chat min-w-[170px]">
+    <DropdownMenuContent
+      align="end"
+      className="bg-chat-panel border-chat-border shadow-chat min-w-[170px]"
+      /**
+       * NÃO devolve o foco ao botão "⋮" ao fechar.
+       *
+       * Por padrão o `DropdownMenuContent` do Radix chama `triggerRef.focus()`
+       * no fechamento — e como este menu tem animação de saída
+       * (`data-[state=closed]:animate-out` no wrapper de `ui/dropdown-menu`),
+       * o Radix só desmonta e só foca o trigger DEPOIS que a animação acaba.
+       *
+       * Isso produzia um sintoma que enganava: "Responder" já focava o
+       * compositor no quadro seguinte ao clique, dava para digitar por um
+       * instante, e então o foco pulava de volta para o "⋮". Quem digitasse
+       * um espaço ou Enter a partir dali reabria o menu daquela mensagem,
+       * porque o trigger é um `<button>` e essas teclas o ativam.
+       *
+       * Prevenir o comportamento padrão aqui é o que faz o foco posto por
+       * `handleReply`/`handleEditMessage` sobreviver ao fechamento.
+       */
+      onCloseAutoFocus={(e) => e.preventDefault()}
+    >
       <DropdownMenuItem
         className="cursor-pointer focus:bg-chat-hover"
         onClick={(e) => {
