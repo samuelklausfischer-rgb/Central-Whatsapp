@@ -56,6 +56,10 @@ interface Entrada {
   tabela: string
   filtro?: string
   canal: ReturnType<typeof supabase.channel> | null
+  // Verdadeiro do início de abrirCanal() até `canal` ser atribuído (ou a
+  // entrada morrer no meio do caminho). Existe só por causa do `await` do
+  // setAuth() dentro de abrirCanal() — ver o comentário lá para o porquê.
+  abrindoCanal: boolean
   assinantes: Map<number, Assinante>
   inscrito: boolean
   retry: number
@@ -104,71 +108,204 @@ function despacharParaTodos(entrada: Entrada, payload: RealtimePostgresChangesPa
   }
 }
 
-function abrirCanal(entrada: Entrada) {
-  if (entrada.descartada) return
-  const channelName = `${entrada.tabela}-changes-${Math.random().toString(36).slice(2)}`
-  entrada.canal = supabase
-    .channel(channelName)
-    .on(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: entrada.tabela,
-        ...(entrada.filtro ? { filter: entrada.filtro } : {}),
-      },
-      (payload) => despacharParaTodos(entrada, payload),
-    )
-    .subscribe((status) => {
-      if (entrada.descartada) return
-      if (status === 'SUBSCRIBED') {
-        entrada.inscrito = true
-        entrada.retry = 0
-        // Fan-out para TODOS os registrados: se o canal caiu, o dado de
-        // todo mundo pode estar desatualizado, não só o de quem estava
-        // olhando quando caiu.
-        for (const assinante of [...entrada.assinantes.values()]) {
-          assinante.onSubscribedRef.current?.()
-          if (assinante.jaCaiu) {
-            assinante.jaCaiu = false
-            assinante.aoReconectarRef.current?.()
-          }
-        }
-      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-        entrada.inscrito = false
-        for (const assinante of entrada.assinantes.values()) assinante.jaCaiu = true
-        agendarReinscricao(entrada)
-      }
-    })
+/**
+ * Confirma que o `setAuth()` anterior REALMENTE aplicou o token no socket
+ * do Realtime, e corrige UMA vez se não aplicou.
+ *
+ * Achado na revisão adversarial (o motivo de este código existir): por
+ * baixo dos panos, `setAuth()` sem argumento chama o callback de
+ * `accessToken` da supabase-js, que é `getSession()`. `getSession()`
+ * adquire um lock via `navigator.locks` EXCLUSIVO por ORIGEM —
+ * compartilhado entre TODAS as abas do mesmo domínio — com timeout de 5s
+ * (auth-js `GoTrueClient.ts`, `_acquireLock`/`lockAcquireTimeout`). Se
+ * outra aba estiver segurando esse lock por mais de 5s (a equipe usa
+ * várias abas — ver nota no topo do arquivo sobre o incidente de 02/09 —
+ * então isso VAI acontecer), o `getSession()` interno rejeita por
+ * timeout. E `RealtimeClient._performAuth` ENGOLE essa rejeição num
+ * try/catch e cai em `tokenToSend = this.accessTokenValue` (o valor
+ * antigo, possivelmente `null`) — SEM relançar. Resultado: `setAuth()`
+ * resolve com SUCESSO sem ter aplicado nada. O catch em volta do await
+ * em `abrirCanal`/`subscribe` nunca dispara, e o canal nasceria anon de
+ * novo, agora em silêncio total — o mesmo bug, invisível.
+ *
+ * Por isso comparamos aqui `accessTokenValue` (campo público e tipado em
+ * `RealtimeClient`, ver `@supabase/realtime-js` `RealtimeClient.d.ts`:
+ * `accessTokenValue: string | null`) com o token da sessão atual, e
+ * tentamos `setAuth()` mais UMA vez se divergirem — sem laço. Se não
+ * houver sessão nenhuma (usuário deslogado, tela de login), isso é o
+ * ESPERADO — `accessTokenValue` null é correto ali — e não logamos nada,
+ * para não gerar warning em toda renderização da tela de login.
+ */
+async function garantirTokenRealtime(rotulo: string): Promise<void> {
+  try {
+    const { data } = await supabase.auth.getSession()
+    const session = data.session
+    if (!session) return // deslogado: accessTokenValue null é o certo, não é falha
+    if (supabase.realtime.accessTokenValue === session.access_token) return // já está certo
 
-  // Os listeners de reconexão vivem por ENTRADA (uma vez, não um por
-  // assinante) — anexados na primeira vez que o canal abre, removidos só
-  // quando a entrada é descartada de vez.
-  if (!entrada.removerListeners) {
-    const reconectarSeParado = () => {
-      if (entrada.descartada || entrada.inscrito) return
-      if (entrada.timerRetry) {
-        clearTimeout(entrada.timerRetry)
-        entrada.timerRetry = null
+    console.warn(
+      `${rotulo} token não aplicado ao socket; canal pode nascer mudo — tentando setAuth() mais uma vez`,
+    )
+    try {
+      await supabase.realtime.setAuth()
+    } catch (erroRetry) {
+      console.error(`${rotulo} segunda tentativa de setAuth também falhou; seguindo mesmo assim`, erroRetry)
+    }
+  } catch (erro) {
+    // getSession() pode rejeitar pelo MESMO motivo descrito acima (lock de
+    // origem ocupado por outra aba). Sem sessão pra comparar não há o que
+    // confirmar — seguimos mesmo assim (degradado é melhor que travar a
+    // assinatura por causa de uma checagem que também pode falhar).
+    console.error(`${rotulo} não foi possível confirmar a sessão após setAuth; seguindo mesmo assim`, erro)
+  }
+}
+
+async function abrirCanal(entrada: Entrada) {
+  if (entrada.descartada) return
+  // Guarda de "abertura em andamento". O `await` do setAuth() logo abaixo
+  // abre uma janela em que `entrada.canal` continua `null`; sem esta
+  // guarda, uma segunda chamada concorrente (registrar() vendo "sem
+  // canal", agendarReinscricao() ou reconectarSeParado() via
+  // 'online'/'focus'/'visibilitychange', todos definidos neste arquivo)
+  // enxergaria a mesma entrada "sem canal" e tentaria abrir OUTRO — o
+  // canal duplicado que o refactor de 02/09 (ver comentário no topo do
+  // arquivo) existe para evitar. Marcada ANTES do primeiro await e só
+  // liberada depois que `entrada.canal` já foi atribuído (ou a entrada
+  // morreu no meio do caminho).
+  if (entrada.abrindoCanal) return
+  entrada.abrindoCanal = true
+
+  // TUDO que segue vai num try/catch/finally: `.subscribe()` chama
+  // `socket.connect()` por baixo, que pode lançar SÍNCRONO (ex.:
+  // `VITE_SUPABASE_URL` malformado joga "WebSocket not available" — já
+  // aconteceu neste projeto). Sem o `finally`, uma exceção aqui deixaria
+  // `entrada.abrindoCanal` travado em `true` PARA SEMPRE, e os três
+  // chamadores (registrar(), agendarReinscricao(), reconectarSeParado())
+  // virariam no-op silencioso, sem nunca mais tentar abrir canal nenhum.
+  // O `catch` evita, além disso, que a rejeição escape como unhandled
+  // promise rejection (abrirCanal() é async e ninguém dá await/catch nas
+  // chamadas). A atribuição de `entrada.canal` fica DENTRO do try, então o
+  // `finally` só libera a guarda depois que o canal (se deu certo) já
+  // está atribuído — nunca antes.
+  try {
+    // Por que este await existe — bug do canal preso em claims_role='anon':
+    // `RealtimeChannel.subscribe()` lê `socket.accessTokenValue` de forma
+    // SÍNCRONA ao montar o `phx_join` (realtime-js RealtimeChannel.js:130).
+    // Em supabase-js, `_handleTokenChanged` só reage a TOKEN_REFRESHED e
+    // SIGNED_IN — nunca a INITIAL_SESSION — e mesmo quando reage, dispara
+    // `realtime.setAuth(token)` SEM esperar a conclusão. Se o `.subscribe()`
+    // abaixo corresse antes da sessão do Supabase Auth resolver, o
+    // `phx_join` sairia sem JWT, o servidor gravaria `claims_role='anon'` e
+    // a RLS de `messages` (exige `auth.uid()`) passaria a devolver zero
+    // linhas — o canal reporta SUBSCRIBED e nunca mais recebe evento, mesmo
+    // depois do token chegar (o `setAuth` tardio da troca de token é
+    // ignorado enquanto o canal está 'joining', e o que dispara ao fim do
+    // join morre na guarda `accessTokenValue == tokenToSend` porque o valor
+    // já tinha sido setado como anon). `setAuth()` chamado SEM argumento
+    // reexecuta o callback interno da supabase-js que aguarda
+    // `getSession()` — aguardá-lo aqui garante `accessTokenValue` correto
+    // ANTES da leitura síncrona dentro de `.subscribe()`. Se a sessão já
+    // estava certa, a guarda interna do socket torna isto um no-op barato.
+    try {
+      await supabase.realtime.setAuth()
+    } catch (erro) {
+      // setAuth() NÃO pode derrubar a assinatura — a própria supabase-js não
+      // trata rejeição nesse caminho, e um canal degradado (talvez ainda
+      // anon) é melhor que nenhum canal. Só registramos e seguimos.
+      console.error('[use-realtime] setAuth falhou antes de abrir canal; seguindo mesmo assim', erro)
+    }
+
+    // setAuth() pode ter "resolvido com sucesso" sem aplicar nada (lock de
+    // sessão ocupado por outra aba — ver comentário de garantirTokenRealtime).
+    // Confirma e corrige antes de seguir.
+    await garantirTokenRealtime('[use-realtime]')
+
+    // Entre os awaits acima e aqui a entrada pode ter sido descartada
+    // (último assinante saiu e a carência expirou, componente desmontou).
+    // Sem este re-check criaríamos canal para uma entrada já morta.
+    if (entrada.descartada) return
+
+    const channelName = `${entrada.tabela}-changes-${Math.random().toString(36).slice(2)}`
+    entrada.canal = supabase
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: entrada.tabela,
+          ...(entrada.filtro ? { filter: entrada.filtro } : {}),
+        },
+        (payload) => despacharParaTodos(entrada, payload),
+      )
+      .subscribe((status) => {
+        if (entrada.descartada) return
+        if (status === 'SUBSCRIBED') {
+          entrada.inscrito = true
+          entrada.retry = 0
+          // Fan-out para TODOS os registrados: se o canal caiu, o dado de
+          // todo mundo pode estar desatualizado, não só o de quem estava
+          // olhando quando caiu.
+          for (const assinante of [...entrada.assinantes.values()]) {
+            assinante.onSubscribedRef.current?.()
+            if (assinante.jaCaiu) {
+              assinante.jaCaiu = false
+              assinante.aoReconectarRef.current?.()
+            }
+          }
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          entrada.inscrito = false
+          for (const assinante of entrada.assinantes.values()) assinante.jaCaiu = true
+          agendarReinscricao(entrada)
+        }
+      })
+
+    // Os listeners de reconexão vivem por ENTRADA (uma vez, não um por
+    // assinante) — anexados na primeira vez que o canal abre, removidos só
+    // quando a entrada é descartada de vez.
+    if (!entrada.removerListeners) {
+      const reconectarSeParado = () => {
+        if (entrada.descartada || entrada.inscrito) return
+        if (entrada.timerRetry) {
+          clearTimeout(entrada.timerRetry)
+          entrada.timerRetry = null
+        }
+        entrada.retry = 0
+        if (entrada.canal) {
+          supabase.removeChannel(entrada.canal)
+          entrada.canal = null
+        }
+        abrirCanal(entrada)
       }
-      entrada.retry = 0
-      if (entrada.canal) {
-        supabase.removeChannel(entrada.canal)
-        entrada.canal = null
+      const aoFicarVisivel = () => {
+        if (document.visibilityState === 'visible') reconectarSeParado()
       }
-      abrirCanal(entrada)
+      window.addEventListener('online', reconectarSeParado)
+      window.addEventListener('focus', reconectarSeParado)
+      document.addEventListener('visibilitychange', aoFicarVisivel)
+      entrada.removerListeners = () => {
+        window.removeEventListener('online', reconectarSeParado)
+        window.removeEventListener('focus', reconectarSeParado)
+        document.removeEventListener('visibilitychange', aoFicarVisivel)
+      }
     }
-    const aoFicarVisivel = () => {
-      if (document.visibilityState === 'visible') reconectarSeParado()
-    }
-    window.addEventListener('online', reconectarSeParado)
-    window.addEventListener('focus', reconectarSeParado)
-    document.addEventListener('visibilitychange', aoFicarVisivel)
-    entrada.removerListeners = () => {
-      window.removeEventListener('online', reconectarSeParado)
-      window.removeEventListener('focus', reconectarSeParado)
-      document.removeEventListener('visibilitychange', aoFicarVisivel)
-    }
+  } catch (erro) {
+    // Cobre o throw SÍNCRONO de `.channel()...subscribe()` (ver comentário
+    // grande acima). Todo chamador já zera `entrada.canal` antes de invocar
+    // abrirCanal(), e a atribuição de `entrada.canal` nunca chega a rodar
+    // quando o lado direito lança — mas fixamos `null` aqui explicitamente
+    // por clareza, para não depender desse invariante externo.
+    entrada.canal = null
+    console.error(
+      '[use-realtime] falha ao abrir canal; sem canal até a próxima tentativa (registrar/reconexão)',
+      erro,
+    )
+  } finally {
+    // Libera a guarda em QUALQUER saída (sucesso, `return` por descartada,
+    // ou exceção) — é isso que impede o travamento permanente do defeito
+    // 1. Como está em `finally` e a atribuição de `entrada.canal` está
+    // DENTRO do try, nunca liberamos a guarda antes do canal existir.
+    entrada.abrindoCanal = false
   }
 }
 
@@ -203,6 +340,7 @@ function registrar(tabela: string, filtro: string | undefined, assinante: Assina
       tabela,
       filtro,
       canal: null,
+      abrindoCanal: false,
       assinantes: new Map(),
       inscrito: false,
       retry: 0,
@@ -276,6 +414,12 @@ function assinarSozinho<T extends Record<string, unknown>>(
   let retryTimer: ReturnType<typeof setTimeout> | null = null
   let disposed = false
   let joined = false
+  // Mesmo papel de `entrada.abrindoCanal` em abrirCanal() (ver o
+  // comentário grande lá para o mecanismo completo): impede que
+  // scheduleResubscribe()/reconnectIfStale() reabram um segundo canal
+  // enquanto este `subscribe()` ainda está esperando o `setAuth()` e
+  // `channel` continua `null`.
+  let abrindoCanal = false
   // Local ao ciclo de vida desta chamada (mount → unmount): marca se o
   // canal já passou por CHANNEL_ERROR/TIMED_OUT/CLOSED desde a última vez
   // que ficou SUBSCRIBED, para `aoReconectar` distinguir "primeira
@@ -289,42 +433,91 @@ function assinarSozinho<T extends Record<string, unknown>>(
     })
   }
 
-  const subscribe = () => {
-    if (disposed) return
-    const channelName = `${tableName}-changes-${Math.random().toString(36).slice(2)}`
-    channel = supabase
-      .channel(channelName)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: tableName,
-          ...(filter ? { filter } : {}),
-        },
-        handlePayload,
-      )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          joined = true
-          retry = 0
-          onSubscribedRef.current?.()
-          // Só conta como reconexão se já tinha caído antes — o mount
-          // inicial nunca dispara `aoReconectar`.
-          if (jaCaiu) {
-            jaCaiu = false
-            aoReconectarRef.current?.()
+  const subscribe = async () => {
+    if (disposed || abrindoCanal) return
+    abrindoCanal = true
+
+    // try/catch/finally pelo mesmo motivo de abrirCanal() (defeito 1 da
+    // revisão adversarial): `.subscribe()` pode lançar SÍNCRONO
+    // (`socket.connect()` joga se `VITE_SUPABASE_URL` estiver malformado).
+    // Sem `finally`, `abrindoCanal` travaria em `true` para sempre e
+    // `scheduleResubscribe()`/`reconnectIfStale()` virariam no-op mudo. A
+    // atribuição de `channel` fica DENTRO do try, então o `finally` só
+    // libera a guarda depois que `channel` já existe (ou a chamada foi
+    // encerrada) — nunca antes.
+    try {
+      // Mesmo mecanismo e mesmo motivo do await em abrirCanal() (topo deste
+      // arquivo): `messages` — a própria tabela que este caminho legado
+      // atende — é a que mais sofre com claims_role='anon', porque sua RLS
+      // de SELECT/UPDATE exige `auth.uid()`. Sem aguardar aqui, o join
+      // síncrono do realtime-js pode sair antes da sessão resolver e o canal
+      // fica mudo para sempre, reportando SUBSCRIBED.
+      try {
+        await supabase.realtime.setAuth()
+      } catch (erro) {
+        // Nunca derruba a assinatura: degradado (possivelmente anon) é
+        // melhor que nenhuma assinatura.
+        console.error(
+          '[use-realtime] setAuth falhou antes de assinar (legado); seguindo mesmo assim',
+          erro,
+        )
+      }
+
+      // setAuth() pode ter "resolvido com sucesso" sem aplicar nada (lock de
+      // sessão ocupado por outra aba) — ver comentário de garantirTokenRealtime.
+      await garantirTokenRealtime('[use-realtime]')
+
+      // Pode ter desmontado (cleanup chamado) enquanto esperávamos a sessão
+      // resolver — sem este re-check criaríamos canal para uma chamada já
+      // encerrada.
+      if (disposed) return
+
+      const channelName = `${tableName}-changes-${Math.random().toString(36).slice(2)}`
+      channel = supabase
+        .channel(channelName)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: tableName,
+            ...(filter ? { filter } : {}),
+          },
+          handlePayload,
+        )
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            joined = true
+            retry = 0
+            onSubscribedRef.current?.()
+            // Só conta como reconexão se já tinha caído antes — o mount
+            // inicial nunca dispara `aoReconectar`.
+            if (jaCaiu) {
+              jaCaiu = false
+              aoReconectarRef.current?.()
+            }
+          } else if (
+            status === 'CHANNEL_ERROR' ||
+            status === 'TIMED_OUT' ||
+            status === 'CLOSED'
+          ) {
+            joined = false
+            jaCaiu = true
+            scheduleResubscribe()
           }
-        } else if (
-          status === 'CHANNEL_ERROR' ||
-          status === 'TIMED_OUT' ||
-          status === 'CLOSED'
-        ) {
-          joined = false
-          jaCaiu = true
-          scheduleResubscribe()
-        }
-      })
+        })
+    } catch (erro) {
+      // Cobre o throw síncrono de `.channel()...subscribe()`.
+      channel = null
+      console.error(
+        '[use-realtime] falha ao assinar (legado); sem canal até a próxima tentativa',
+        erro,
+      )
+    } finally {
+      // Libera a guarda em QUALQUER saída — é isso que impede o travamento
+      // permanente do defeito 1.
+      abrindoCanal = false
+    }
   }
 
   const scheduleResubscribe = () => {
