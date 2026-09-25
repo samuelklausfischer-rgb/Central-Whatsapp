@@ -6,6 +6,7 @@ import {
   Zap,
   CalendarClock,
   CalendarDays,
+  Receipt,
   Bell,
   BarChart3,
   Percent,
@@ -140,6 +141,20 @@ export const FERRAMENTAS_DO_APP: DestinoNav[] = [
     description: 'Assinatura de e-mail',
     icon: PenLine,
     url: '/ferramentas/assinaturas',
+  },
+  /*
+    ITEM 4: envio mensal de nota fiscal. "Campanhas de e-mail" (a referência
+    pedida para este item) não é uma entrada desta lista — ela é um link
+    interno dentro do próprio `EmailHub.tsx`, que está fora do escopo desta
+    tarefa. Notas Fiscais entra aqui, junto de Assinaturas, por ser a mesma
+    categoria (ferramenta interna ligada a e-mail, atrás do porteiro
+    `tela-email` — ver `App.tsx`), e não por baixo de "Campanhas".
+  */
+  {
+    title: 'Notas Fiscais',
+    description: 'Envio mensal por e-mail',
+    icon: Receipt,
+    url: '/email/notas-fiscais',
   },
 ]
 

@@ -40,6 +40,7 @@ const Index = lazy(() => import('./pages/Index'))
 const ChatHub = lazy(() => import('./pages/ChatHub'))
 const EmailHub = lazy(() => import('./pages/EmailHub'))
 const EmailCampanhas = lazy(() => import('./pages/EmailCampanhas'))
+const EmailNotasFiscais = lazy(() => import('./pages/EmailNotasFiscais'))
 const EmailAccountSettings = lazy(() => import('./pages/settings/EmailAccountSettings'))
 const CRM = lazy(() => import('./pages/CRM'))
 const Agenda = lazy(() => import('./pages/Agenda'))
@@ -157,6 +158,16 @@ const App = () => {
                     cabem no mesmo esqueleto. Por ser irmã, tem bloqueio próprio. */}
                 <Route element={<FerramentaRoute slug="tela-email-campanhas" />}>
                   <Route path="/email/campanhas" element={<EmailCampanhas />} />
+                </Route>
+                {/*
+                  Item 4 da fila de 25/09/2026: envio mensal de nota fiscal. Rota
+                  irmã de `/email`, atrás do MESMO porteiro que a Caixa de Entrada
+                  (nenhum slug novo — mexer no catálogo está fora do escopo desta
+                  tarefa). A proteção que importa de verdade é a RLS de
+                  `pode_enviar_nf()` no banco, não esta rota.
+                */}
+                <Route element={<FerramentaRoute slug="tela-email" />}>
+                  <Route path="/email/notas-fiscais" element={<EmailNotasFiscais />} />
                 </Route>
                 <Route element={<FerramentaRoute slug="tela-crm" />}>
                   <Route path="/crm" element={<CRM />} />
