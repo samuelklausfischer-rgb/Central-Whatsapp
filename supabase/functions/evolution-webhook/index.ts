@@ -13,7 +13,7 @@ const STORAGE_BUCKET = 'chat-attachments'
 // Trocar A CADA deploy. É o único jeito de provar que o isolate do Deno recarregou:
 // conferir o arquivo dentro do container mostra o que está em disco, não o que está
 // rodando. A verificação é um POST à função conferindo este campo na resposta.
-const BUILD_MARKER = 'participant-alt-figurinha-lid-2026-09-03'
+const BUILD_MARKER = 'botoes-pin-skdm-2026-09-25'
 
 type MediaType = 'image' | 'video' | 'audio' | 'document' | 'sticker'
 
