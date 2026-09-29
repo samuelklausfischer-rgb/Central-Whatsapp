@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react'
-import { Download } from 'lucide-react'
+import { Download, File } from 'lucide-react'
 import { downloadFile, nomeParaDownload } from '@/lib/download'
-import { getFileTypeMeta, isPdfFile, isExcelFile } from '@/lib/file-type'
+import { getFileTypeMeta, getFileExtension, isPdfFile, isExcelFile } from '@/lib/file-type'
 import { getPdfPreview } from '@/lib/pdf-thumbnail'
 import { getExcelPreview, type ExcelPreview } from '@/lib/excel-preview'
 import { getFileSize, formatFileSize } from '@/lib/file-size'
 
 /**
- * Balão de documento no chat, estilo WhatsApp: card branco com prévia real do
- * conteúdo (primeira página do PDF, recorte da planilha do Excel) + barra com
- * ícone/nome/tamanho por baixo. Outros tipos (Word, ZIP etc.) mostram só a
- * barra com ícone.
+ * Balão de documento no chat, estilo WhatsApp: cartão um tom mais escuro que o
+ * próprio balão (sem sombra, borda nem fundo branco), largura fixa de 330px,
+ * com prévia real do conteúdo (primeira página do PDF, recorte da planilha do
+ * Excel) + barra com ícone cinza (sigla do tipo), nome, "EXT • tamanho" e
+ * download. Outros tipos (Word, ZIP etc.) mostram só a barra.
  */
 export function DocumentBubble({
   url,
@@ -23,9 +24,11 @@ export function DocumentBubble({
 }) {
   const meta = getFileTypeMeta(name)
   const Icon = meta.icon
+  // Sigla do tipo (ZIP, PDF, XLSX…), no máximo 4 letras: vai escrita no ícone e
+  // no subtítulo. O rótulo amigável ("Compactado") não aparece mais aqui.
+  const sigla = getFileExtension(name).slice(0, 4).toUpperCase()
   const isPdf = isPdfFile(name)
   const isExcel = isExcelFile(name)
-  const hasThumbnailArea = isPdf || isExcel
 
   const [thumbnail, setThumbnail] = useState<string | null>(null)
   const [pageCount, setPageCount] = useState<number | null>(null)
@@ -56,16 +59,16 @@ export function DocumentBubble({
     }
   }, [url, isPdf, isExcel])
 
-  const metaParts = [meta.label]
+  const metaParts: string[] = []
   if (isPdf && pageCount) metaParts.push(`${pageCount} página${pageCount > 1 ? 's' : ''}`)
+  metaParts.push(sigla || meta.label)
   if (sizeLabel) metaParts.push(sizeLabel)
-  if (!hasThumbnailArea && onOpenPreview) metaParts.push('toque para visualizar')
 
   return (
     <button
       type="button"
       onClick={() => (onOpenPreview ? onOpenPreview() : downloadFile(url, nomeParaDownload(name, 'documento')))}
-      className="block w-full max-w-[280px] overflow-hidden rounded-xl border border-black/10 bg-white text-left shadow-sm transition-opacity hover:opacity-90"
+      className="block w-[330px] max-w-full overflow-hidden rounded-[6px] bg-black/[0.04] text-left transition-opacity hover:opacity-90 dark:bg-white/[0.05]"
     >
       {isPdf && (
         <div className="flex h-[170px] w-full items-center justify-center overflow-hidden bg-gray-100">
@@ -97,18 +100,20 @@ export function DocumentBubble({
           )}
         </div>
       )}
-      <div className={`flex items-center gap-2.5 p-2.5 ${hasThumbnailArea ? 'border-t border-gray-200' : ''}`}>
-        <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${meta.bgClass}`}>
-          <Icon className={`h-5 w-5 ${meta.iconClass}`} />
+      <div className="flex items-center gap-2.5 p-2.5">
+        {/* Documento cinza com a sigla escrita embaixo, sem o quadrado colorido. */}
+        <span className="relative flex h-8 w-8 flex-shrink-0 items-center justify-center text-chat-muted">
+          <File className="h-8 w-8" strokeWidth={1.5} />
+          <span className="absolute bottom-[5px] text-[8px] font-bold leading-none">{sigla}</span>
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium text-gray-900" title={name}>
+          <span className="line-clamp-2 break-all text-[14.2px] leading-[19px] text-chat-text" title={name}>
             {name}
           </span>
-          <span className="block truncate text-xs text-gray-500">{metaParts.join(' · ')}</span>
+          <span className="block truncate text-[12px] text-chat-muted">{metaParts.join(' • ')}</span>
         </span>
         <Download
-          className="h-4 w-4 flex-shrink-0 text-gray-400"
+          className="h-[22px] w-[22px] flex-shrink-0 text-chat-muted"
           onClick={(e) => {
             e.stopPropagation()
             downloadFile(url, nomeParaDownload(name, 'documento'))

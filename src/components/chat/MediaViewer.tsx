@@ -1,8 +1,38 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Download, ZoomIn, ZoomOut, RotateCcw, Loader2, Star } from 'lucide-react'
+import {
+  X,
+  Download,
+  ZoomIn,
+  ZoomOut,
+  Loader2,
+  Star,
+  ChevronLeft,
+  ChevronRight,
+  Play,
+  FileText,
+  FileSpreadsheet,
+  FileArchive,
+  MessageSquareText,
+  Reply,
+  Smile,
+  Forward,
+  MoreVertical,
+  Info,
+} from 'lucide-react'
+import { format } from 'date-fns'
+import { ptBR } from 'date-fns/locale'
 import * as XLSX from 'xlsx'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { MenuRadialDeReacoes } from '@/components/chat/MenuRadialDeReacoes'
 import { downloadFile, nomeParaDownload, type TipoArquivoDownload } from '@/lib/download'
+import { baixarComoZip } from '@/lib/zip'
+import { toast } from '@/hooks/use-toast'
 
 /**
  * `'sticker'` é tratado como imagem em tudo (zoom, pan, download) — o que muda é
@@ -14,6 +44,33 @@ export type ViewerMedia = {
   url: string
   type: 'image' | 'video' | 'pdf' | 'excel' | 'sticker'
   name?: string
+  /** Habilita as ações de mensagem (ir, responder, reagir, encaminhar, info). */
+  messageId?: string
+  /** "Você" ou o nome do contato. */
+  autor?: string
+  /** ISO; exibido como "dd/MM/yyyy às HH:mm". */
+  enviadaEm?: string
+  /** Já renderizado pelo pai (SmartAvatar). */
+  avatar?: React.ReactNode
+  /** 1-based; mostra "atual de total" abaixo da mídia. */
+  album?: { atual: number; total: number }
+  /**
+   * Id do álbum a que o item pertence (id da 1ª mensagem do álbum). Itens
+   * soltos ficam sem. É o que limita o "Baixar álbum (.zip)" ao álbum, e não à
+   * conversa inteira que vem em `lista`.
+   */
+  grupoId?: string
+}
+
+/** Ações de mensagem que o pai libera no visualizador. Todas opcionais. */
+export type AcoesDoVisualizador = {
+  aoIrParaMensagem?: (messageId: string) => void
+  aoResponder?: (messageId: string) => void
+  aoReagir?: (messageId: string, emoji: string) => Promise<void> | void
+  aoEncaminhar?: (messageId: string) => void
+  aoVerInfo?: (messageId: string) => void
+  /** Repassado ao MenuRadialDeReacoes (`{emoji: vezes}`). */
+  usoDeReacoes?: Record<string, number>
 }
 
 const EXCEL_ROW_LIMIT = 500
@@ -53,18 +110,59 @@ function tipoParaDownload(tipo: ViewerMedia['type']): TipoArquivoDownload {
   return 'documento'
 }
 
+/** Nome do arquivo dentro do zip: o mesmo que o botão "Baixar" daria, com extensão garantida. */
+function nomeNoZip(m: ViewerMedia): string {
+  const nome = nomeParaDownload(m.name, tipoParaDownload(m.type))
+  if (/\.[a-z0-9]{1,8}$/i.test(nome)) return nome
+  // Nome genérico sem extensão: tenta a do endereço do arquivo, para o zip não
+  // ficar cheio de arquivos que o sistema não sabe abrir.
+  try {
+    const ext = /\.([a-z0-9]{1,8})$/i.exec(new URL(m.url, window.location.href).pathname)?.[1]
+    if (ext) return `${nome}.${ext.toLowerCase()}`
+  } catch {
+    /* URL inválida: fica sem extensão */
+  }
+  return nome
+}
+
+/** Nome do .zip: "fotos" se só há imagens, "midias" se há mistura, mais o carimbo local. */
+function nomeDoZipDe(lista: ViewerMedia[]): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  const d = new Date()
+  const carimbo = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+  const soImagens = lista.every((m) => m.type === 'image' || m.type === 'sticker')
+  return `${soImagens ? 'fotos' : 'midias'}-whatsapp-${carimbo}.zip`
+}
+
 /**
  * Visualizador in-app de imagem/vídeo (lightbox).
  * - Imagem: zoom (roda do mouse + botões +/−, duplo-clique alterna) e pan (arrastar quando zoom > 1).
  * - Vídeo: player com controles + autoplay.
  * - Fechar (X / clique no fundo / ESC) e baixar.
+ * - Com `lista` (> 1 item): navega entre os itens (botões, setas do teclado,
+ *   faixa de miniaturas) e ganha "Baixar todas" em .zip.
  */
 export function MediaViewer({
-  media,
+  media: mediaProp,
+  lista,
+  indiceInicial,
+  acoes,
   onClose,
   aoSalvarFigurinha,
 }: {
   media: ViewerMedia | null
+  /**
+   * Itens navegáveis. Opcional: sem ela (ou com 1 item) o visualizador é o de
+   * sempre. O item inicial é o de `media` (achado pela `url`; 0 se não achar).
+   */
+  lista?: ViewerMedia[]
+  /**
+   * Posição de abertura dentro de `lista`. Se vier (inteiro válido), tem
+   * precedência sobre a busca por `url` — necessário quando itens repetem URL.
+   */
+  indiceInicial?: number
+  /** Ações de mensagem (ir, responder, reagir, encaminhar, info). Sem elas, a barra só tem zoom/baixar/fechar. */
+  acoes?: AcoesDoVisualizador
   onClose: () => void
   /**
    * Guardar a figurinha na coleção da pessoa. Opcional: quem abre o
@@ -72,6 +170,104 @@ export function MediaViewer({
    */
   aoSalvarFigurinha?: (media: ViewerMedia) => void
 }) {
+  const temLista = !!lista && lista.length > 1
+  const total = temLista ? lista.length : 1
+  // O índice é guardado JUNTO do `media` a que se refere. Quando o pai abre o
+  // visualizador em outra mídia, `nav.para !== mediaProp` e o índice inicial é
+  // recalculado no próprio render — sem efeito, então não há um quadro
+  // mostrando o item da abertura anterior. E como só `mediaProp` entra na
+  // comparação, o pai pode passar um array novo a cada render sem zerar a
+  // navegação.
+  const [nav, setNav] = useState<{ para: ViewerMedia | null; i: number }>({ para: null, i: 0 })
+  // `indiceInicial` do pai vence a busca por URL: duas mensagens podem apontar
+  // para a mesma URL (foto reencaminhada), e o findIndex cairia na primeira.
+  const indiceDeAbertura = !temLista
+    ? 0
+    : Number.isInteger(indiceInicial) && indiceInicial! >= 0 && indiceInicial! < total
+      ? indiceInicial!
+      : Math.max(0, lista.findIndex((m) => m.url === mediaProp?.url))
+  const indice = nav.para === mediaProp ? Math.min(nav.i, total - 1) : indiceDeAbertura
+  const media = temLista ? lista[indice] : mediaProp
+
+  const irPara = useCallback(
+    (novo: number) => setNav({ para: mediaProp, i: Math.max(0, Math.min(total - 1, novo)) }),
+    [mediaProp, total],
+  )
+
+  const faixaRef = useRef<HTMLDivElement>(null)
+  const [zipando, setZipando] = useState(false)
+  const [aviso, setAviso] = useState<string | null>(null)
+  /**
+   * Número da "abertura" atual. O componente nunca desmonta (só devolve null),
+   * então `zipando`/`aviso`/`nav` sobreviveriam ao fechamento: fechar no meio
+   * de um zip e reabrir deixaria o botão travado. Ao fechar, zera-se tudo e
+   * incrementa-se este número; um zip que termina depois vê que o número mudou
+   * e descarta o resultado.
+   */
+  const sessaoRef = useRef(0)
+  useEffect(() => {
+    if (mediaProp) return
+    sessaoRef.current += 1
+    setZipando(false)
+    setAviso(null)
+    setNav({ para: null, i: 0 })
+    setMenuReacao(false)
+    setMenuMais(false)
+    zipAbortRef.current?.abort()
+    zipAbortRef.current = null
+    faixaRolouRef.current = false
+  }, [mediaProp])
+
+  /** Menu radial de reações aberto (ancorado no botão da barra). */
+  const [menuReacao, setMenuReacao] = useState(false)
+  /** Menu ⋮ (baixar todas / informações) aberto. */
+  const [menuMais, setMenuMais] = useState(false)
+  /** Instante em que o menu de reações fechou: evita fechar-e-reabrir no clique do botão. */
+  const menuReacaoFechouEmRef = useRef(0)
+  /** O menu de reações estava aberto quando o ponteiro desceu? (ver `aoClicarFundo`) */
+  const menuReacaoAbertoNoDownRef = useRef(false)
+  /** Aborta o zip em andamento quando o visualizador fecha. */
+  const zipAbortRef = useRef<AbortController | null>(null)
+  /** Já rolou a faixa nesta abertura? A 1ª rolagem é instantânea; as seguintes, suaves. */
+  const faixaRolouRef = useRef(false)
+  const fecharMenuReacao = useCallback(() => {
+    menuReacaoFechouEmRef.current = Date.now()
+    setMenuReacao(false)
+  }, [])
+
+  /**
+   * CLIQUE NO FUNDO FECHA — sem engolir o clique nos contêineres.
+   *
+   * Antes, cada contêiner ao redor da mídia dava `stopPropagation`, e o fundo
+   * "de verdade" só existia nas bordas. Agora nada engole o clique: quem NÃO
+   * deve fechar leva o atributo `data-nao-fecha` (barras, setas, miniaturas,
+   * a própria mídia, os menus) e é reconhecido aqui por `closest`. Isso vale
+   * também para o menu ⋮, que vive num portal mas borbulha pela árvore do React.
+   *
+   * ARRASTO: com zoom, o pan começa na imagem e pode terminar no fundo, e o
+   * navegador então dispara `click` no fundo. Guardamos onde o ponteiro desceu
+   * e só fechamos se o clique terminou a menos de 5px de lá.
+   */
+  const inicioCliqueRef = useRef<{ x: number; y: number } | null>(null)
+  const aoPressionarFundo = (e: React.PointerEvent) => {
+    inicioCliqueRef.current = { x: e.clientX, y: e.clientY }
+    // O menu de reações fecha no `mousedown` (que vem DEPOIS do pointerdown);
+    // quando o `click` chega ao fundo ele já está fechado. Por isso o estado é
+    // gravado aqui: clique que FECHOU o menu não pode fechar o visualizador.
+    menuReacaoAbertoNoDownRef.current = menuReacao
+  }
+  const aoClicarFundo = (e: React.MouseEvent) => {
+    const inicio = inicioCliqueRef.current
+    inicioCliqueRef.current = null
+    const fechavaMenu =
+      menuReacaoAbertoNoDownRef.current || Date.now() - menuReacaoFechouEmRef.current < 400
+    menuReacaoAbertoNoDownRef.current = false
+    if (fechavaMenu) return
+    if ((e.target as Element | null)?.closest?.('[data-nao-fecha]')) return
+    if (inicio && Math.hypot(e.clientX - inicio.x, e.clientY - inicio.y) >= 5) return
+    onClose()
+  }
+
   const [vista, setVista] = useState<Vista>(VISTA_INICIAL)
   /** Verdadeiro enquanto há dedo/botão pressionado — desliga a transição. */
   const [interagindo, setInteragindo] = useState(false)
@@ -95,10 +291,31 @@ export function MediaViewer({
   const [excelLoading, setExcelLoading] = useState(false)
   const [excelError, setExcelError] = useState<string | null>(null)
 
-  // Reseta o transform sempre que a mídia muda.
+  // Reseta o transform sempre que a mídia muda (inclui trocar de item da lista).
   useEffect(() => {
     setVista(VISTA_INICIAL)
-  }, [url])
+    setMenuReacao(false)
+  }, [url, indice])
+
+  // Miniatura atual sempre visível na faixa. Na ABERTURA o salto é instantâneo:
+  // uma rolagem suave do início até a atual passaria por dezenas de miniaturas
+  // e dispararia o carregamento (lazy) de todas elas em tamanho cheio. Suave só
+  // quando a pessoa navega de um item para o vizinho.
+  useEffect(() => {
+    if (!mediaProp || !temLista) return
+    const primeira = !faixaRolouRef.current
+    faixaRolouRef.current = true
+    faixaRef.current
+      ?.querySelector('[data-atual="true"]')
+      ?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: primeira ? 'auto' : 'smooth' })
+  }, [mediaProp, indice, temLista])
+
+  // Aviso do zip some sozinho.
+  useEffect(() => {
+    if (!aviso) return
+    const t = setTimeout(() => setAviso(null), 7000)
+    return () => clearTimeout(t)
+  }, [aviso])
 
   /**
    * Até onde dá para arrastar: metade do que a imagem ESCALADA sobra para fora
@@ -193,15 +410,43 @@ export function MediaViewer({
     }
   }, [isExcel, url])
 
-  // ESC fecha.
+  // ESC fecha o visualizador — e SÓ ele. O ChatHub também escuta Esc para
+  // fechar a conversa, mas respeita `defaultPrevented`; por isso este listener
+  // roda na fase de CAPTURA (chega antes) e marca o evento como tratado.
+  // Com o menu ⋮ aberto não fazemos nada: o Radix fecha o menu por conta própria.
   useEffect(() => {
-    if (!media) return
+    if (!mediaProp) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key !== 'Escape') return
+      if (menuMais) return
+      e.preventDefault()
+      if (menuReacao) fecharMenuReacao()
+      else onClose()
+    }
+    window.addEventListener('keydown', onKey, { capture: true })
+    return () => window.removeEventListener('keydown', onKey, { capture: true })
+  }, [mediaProp, onClose, menuReacao, menuMais, fecharMenuReacao])
+
+  // ← → navegam na lista. Listener próprio, para não misturar com o do Esc.
+  useEffect(() => {
+    if (!mediaProp || !temLista) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+      // Com o menu ⋮ aberto as setas são do menu (Radix), não da lista.
+      if (menuMais) return
+      // Em vídeo, a seta é do player (voltar/avançar); em campo de texto, do cursor.
+      const alvo = e.target as HTMLElement | null
+      if (
+        alvo &&
+        (alvo.tagName === 'VIDEO' || alvo.tagName === 'INPUT' || alvo.tagName === 'TEXTAREA' || alvo.isContentEditable)
+      ) {
+        return
+      }
+      irPara(indice + (e.key === 'ArrowRight' ? 1 : -1))
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [media, onClose])
+  }, [mediaProp, temLista, indice, irPara, menuMais])
 
   // Zoom pela roda do mouse (listener não-passivo p/ permitir preventDefault).
   // Ancorado no cursor: a roda amplia o que está debaixo do ponteiro.
@@ -217,12 +462,53 @@ export function MediaViewer({
     return () => el.removeEventListener('wheel', handler)
   }, [isImage, url, zoomAncorado])
 
-  if (!media) return null
+  if (!media || !mediaProp) return null
+
+  // O zip é do ÁLBUM (itens com o mesmo `grupoId`), não da lista inteira: a lista
+  // é a conversa toda e o botão baixaria centenas de arquivos sem querer.
+  const itensDoAlbum =
+    lista && media.grupoId ? lista.filter((m) => m.grupoId === media.grupoId) : []
+  const temAlbumZip = itensDoAlbum.length > 1
+  const rotuloAlbum = `Baixar álbum (.zip) — ${itensDoAlbum.length} ${
+    itensDoAlbum.every((m) => m.type === 'image' || m.type === 'sticker') ? 'fotos' : 'arquivos'
+  }`
+
+  /** Baixa os itens do álbum num .zip; avisa se algum não veio. */
+  const baixarAlbum = async () => {
+    if (!temAlbumZip || zipando) return
+    const sessao = sessaoRef.current
+    const controle = new AbortController()
+    zipAbortRef.current = controle
+    setZipando(true)
+    setAviso(null)
+    try {
+      const { baixados, total: n } = await baixarComoZip(
+        itensDoAlbum.map((m) => ({ url: m.url, nome: nomeNoZip(m) })),
+        nomeDoZipDe(itensDoAlbum),
+        controle.signal,
+      )
+      if (sessao !== sessaoRef.current) return
+      if (baixados < n) {
+        const texto = `${baixados} de ${n} arquivos baixados`
+        setAviso(texto)
+        // O toast fica atrás do visualizador (z-100 contra z-200), por isso o
+        // aviso também aparece aqui dentro; o toast segue valendo depois de fechar.
+        toast({ title: texto, description: 'Alguns arquivos não puderam ser baixados.' })
+      }
+    } catch (err) {
+      // Abortado porque o visualizador fechou: nada a avisar.
+      if (controle.signal.aborted || sessao !== sessaoRef.current) return
+      const texto = err instanceof Error ? err.message : 'Não foi possível gerar o zip'
+      setAviso(texto)
+      toast({ title: 'Falha ao baixar', description: texto, variant: 'destructive' })
+    } finally {
+      // Só solta o botão se ainda é a mesma abertura; se fechou, o efeito acima já zerou.
+      if (sessao === sessaoRef.current) setZipando(false)
+    }
+  }
 
   /** Botões +/− do topo: sem ponto de âncora, ampliam pelo centro. */
   const zoomBy = (delta: number) => zoomAncorado((s) => s + delta)
-
-  const resetZoom = () => setVista(VISTA_INICIAL)
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (!isImage) return
@@ -284,60 +570,313 @@ export function MediaViewer({
     }
   }
 
-  const toolBtn =
-    'flex h-10 w-10 items-center justify-center rounded-full bg-black/40 text-white ring-1 ring-white/25 hover:bg-black/70 transition-colors'
+  /** Botão redondo das barras (tema do app, sem fundo próprio até o hover). */
+  const barBtn =
+    'flex h-10 w-10 items-center justify-center rounded-full text-chat-text transition-colors hover:bg-chat-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent'
+  /** Setas laterais: círculos que se destacam da mídia. */
+  const setaBtn =
+    'absolute top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-chat-panel/90 text-chat-text shadow-chat transition-colors hover:bg-chat-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600'
+
+  const messageId = media.messageId
+  const podeIr = !!messageId && !!acoes?.aoIrParaMensagem
+  const podeResponder = !!messageId && !!acoes?.aoResponder
+  const podeReagir = !!messageId && !!acoes?.aoReagir
+  const podeEncaminhar = !!messageId && !!acoes?.aoEncaminhar
+  const podeVerInfo = !!messageId && !!acoes?.aoVerInfo
+  // No celular (< sm) "Ir para a mensagem" e "Encaminhar" saem da barra e vão
+  // para o ⋮, senão a barra passa da largura da tela e o ✕ some.
+  const temItensMaisDesktop = temAlbumZip || podeVerInfo
+  const temMenuMais = temItensMaisDesktop || podeIr || podeEncaminhar
+
+  /** Ir/Responder/Encaminhar/Info levam a pessoa de volta à conversa: chama e fecha. */
+  const chamarEFechar = (fn?: (id: string) => void) => {
+    if (!messageId || !fn) return
+    fn(messageId)
+    onClose()
+  }
+
+  /** Reagir NÃO fecha o visualizador: a pessoa segue vendo a foto. */
+  const reagir = async (emoji: string) => {
+    if (!messageId || !acoes?.aoReagir) return
+    const sessao = sessaoRef.current
+    try {
+      await acoes.aoReagir(messageId, emoji)
+    } catch (err) {
+      if (sessao === sessaoRef.current) {
+        const texto = err instanceof Error ? err.message : 'Não foi possível reagir'
+        setAviso(texto)
+        toast({ title: 'Falha ao reagir', description: texto, variant: 'destructive' })
+      }
+    } finally {
+      if (sessao === sessaoRef.current) setMenuReacao(false)
+    }
+  }
+
+  const dataFormatada = (() => {
+    if (!media.enviadaEm) return null
+    const d = new Date(media.enviadaEm)
+    return Number.isNaN(d.getTime()) ? null : format(d, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })
+  })()
+  const temIdentificacao = !!(media.avatar || media.autor || dataFormatada)
+
+  // Texto embaixo da mídia: "atual de total" do álbum tem prioridade; sem ele,
+  // a posição na lista (galeria), para a pessoa saber onde está.
+  const posicao = media.album
+    ? `${media.album.atual} de ${media.album.total}`
+    : temLista
+      ? `${indice + 1} de ${total}`
+      : null
+
+  const textoAviso = aviso ?? (zipando ? 'Gerando zip…' : null)
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[200] flex flex-col bg-black/90 backdrop-blur-sm animate-in fade-in duration-200"
-      onClick={onClose}
+      // Sem preto: só desfoque com uma tinta leve do tema, para a conversa
+      // continuar visível (borrada) atrás. O clique em qualquer lugar que não
+      // seja marcado com `data-nao-fecha` fecha (ver `aoClicarFundo`).
+      role="dialog"
+      aria-modal="true"
+      aria-label="Visualizador de mídia"
+      // Regra da casa (main.css, `.superficie-vidro`): desfoque de no máximo 12px
+      // e NUNCA aninhado — já travou a rolagem no Windows. Por isso só a raiz
+      // desfoca; as barras abaixo são sólidas.
+      className="fixed inset-0 z-[200] flex flex-col bg-chat-conversation/25 text-chat-text backdrop-blur-md animate-in fade-in duration-200"
+      onPointerDown={aoPressionarFundo}
+      onClick={aoClicarFundo}
     >
-      <div className="flex items-center justify-between gap-1.5 p-3" onClick={(e) => e.stopPropagation()}>
-        <span className="min-w-0 truncate text-sm font-medium text-white/80">
-          {media.name || ''}
-        </span>
-        <div className="flex items-center gap-1.5">
-        {isImage && (
-          <>
-            <button type="button" onClick={() => zoomBy(-STEP)} title="Diminuir zoom" className={toolBtn}>
-              <ZoomOut className="h-5 w-5" />
+      <div
+        data-nao-fecha
+        className="relative z-20 flex flex-shrink-0 items-center justify-between gap-2 border-b border-chat-border/60 bg-chat-panel px-3 py-2"
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          {temIdentificacao ? (
+            <>
+              {media.avatar && (
+                <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-full">
+                  {media.avatar}
+                </div>
+              )}
+              <div className="min-w-0 leading-tight">
+                {media.autor && <div className="truncate text-[15px] font-semibold text-chat-text">{media.autor}</div>}
+                {dataFormatada && <div className="truncate text-[13px] text-chat-muted">{dataFormatada}</div>}
+              </div>
+            </>
+          ) : (
+            <span className="min-w-0 truncate text-sm font-medium text-chat-muted">{media.name || ''}</span>
+          )}
+        </div>
+        <div className="flex min-w-0 items-center gap-0.5">
+          {isImage && (
+            <>
+              <button
+                type="button"
+                onClick={() => zoomBy(-STEP)}
+                disabled={vista.scale <= MIN_SCALE}
+                title="Diminuir zoom"
+                aria-label="Diminuir zoom"
+                className={`${barBtn} max-sm:hidden`}
+              >
+                <ZoomOut className="h-[22px] w-[22px]" />
+              </button>
+              <button
+                type="button"
+                onClick={() => zoomBy(STEP)}
+                disabled={vista.scale >= MAX_SCALE}
+                title="Aumentar zoom"
+                aria-label="Aumentar zoom"
+                className={`${barBtn} max-sm:hidden`}
+              >
+                <ZoomIn className="h-[22px] w-[22px]" />
+              </button>
+            </>
+          )}
+          {podeIr && (
+            <button
+              type="button"
+              onClick={() => chamarEFechar(acoes?.aoIrParaMensagem)}
+              title="Ir para a mensagem"
+              aria-label="Ir para a mensagem"
+              className={`${barBtn} max-sm:hidden`}
+            >
+              <MessageSquareText className="h-[22px] w-[22px]" />
             </button>
-            <span className="min-w-[3.5rem] text-center text-sm font-medium tabular-nums text-white/90">
-              {Math.round(vista.scale * 100)}%
-            </span>
-            <button type="button" onClick={() => zoomBy(STEP)} title="Aumentar zoom" className={toolBtn}>
-              <ZoomIn className="h-5 w-5" />
+          )}
+          {podeResponder && (
+            <button
+              type="button"
+              onClick={() => chamarEFechar(acoes?.aoResponder)}
+              title="Responder"
+              aria-label="Responder"
+              className={barBtn}
+            >
+              <Reply className="h-[22px] w-[22px]" />
             </button>
-            <button type="button" onClick={resetZoom} title="Resetar zoom" className={toolBtn}>
-              <RotateCcw className="h-5 w-5" />
+          )}
+          {podeReagir && (
+            // `relative` + `h-0 w-0` abaixo: o menu radial se posiciona a partir
+            // do centro do pai e abre um arco PARA CIMA — na barra do topo isso
+            // sairia da tela. Por isso o ponto de origem fica ~90px abaixo do
+            // botão, e o arco (que sobe ~80px) cai logo abaixo da barra.
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  // O menu fecha no mousedown "fora"; sem esta guarda o clique
+                  // no próprio botão fecharia e reabriria na mesma hora.
+                  if (Date.now() - menuReacaoFechouEmRef.current < 300) return
+                  setMenuReacao((v) => !v)
+                }}
+                title="Reagir"
+                aria-label="Reagir"
+                aria-haspopup="menu"
+                aria-expanded={menuReacao}
+                className={barBtn}
+              >
+                <Smile className="h-[22px] w-[22px]" />
+              </button>
+              {menuReacao && (
+                <div className="absolute left-1/2 top-full h-0 w-0" style={{ marginTop: 90 }}>
+                  <MenuRadialDeReacoes
+                    usoPorEmoji={acoes?.usoDeReacoes}
+                    paraEsquerda
+                    aoEscolher={reagir}
+                    aoFechar={fecharMenuReacao}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+          {podeEncaminhar && (
+            <button
+              type="button"
+              onClick={() => chamarEFechar(acoes?.aoEncaminhar)}
+              title="Encaminhar"
+              aria-label="Encaminhar"
+              className={`${barBtn} max-sm:hidden`}
+            >
+              <Forward className="h-[22px] w-[22px]" />
             </button>
-            <span className="mx-1 h-6 w-px bg-white/20" />
-          </>
-        )}
-        {media.type === 'sticker' && aoSalvarFigurinha && (
+          )}
+          {media.type === 'sticker' && aoSalvarFigurinha && (
+            <button
+              type="button"
+              onClick={() => aoSalvarFigurinha(media)}
+              title="Salvar figurinha"
+              aria-label="Salvar figurinha"
+              className={barBtn}
+            >
+              <Star className="h-[22px] w-[22px]" />
+            </button>
+          )}
           <button
             type="button"
-            onClick={() => aoSalvarFigurinha(media)}
-            title="Salvar figurinha"
-            className={toolBtn}
+            onClick={() => downloadFile(media.url, nomeParaDownload(media.name, tipoParaDownload(media.type)))}
+            title="Baixar"
+            aria-label="Baixar"
+            className={barBtn}
           >
-            <Star className="h-5 w-5" />
+            <Download className="h-[22px] w-[22px]" />
           </button>
-        )}
-        <button
-          type="button"
-          onClick={() => downloadFile(media.url, nomeParaDownload(media.name, tipoParaDownload(media.type)))}
-          title="Baixar"
-          className={toolBtn}
-        >
-          <Download className="h-5 w-5" />
-        </button>
-        <button type="button" onClick={onClose} title="Fechar" className={toolBtn}>
-          <X className="h-5 w-5" />
-        </button>
+          {temMenuMais && (
+            <DropdownMenu open={menuMais} onOpenChange={setMenuMais}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  title="Mais opções"
+                  aria-label="Mais opções"
+                  className={`${barBtn}${temItensMaisDesktop ? '' : ' sm:hidden'}`}
+                >
+                  {zipando ? (
+                    <Loader2 className="h-[22px] w-[22px] animate-spin" />
+                  ) : (
+                    <MoreVertical className="h-[22px] w-[22px]" />
+                  )}
+                </button>
+              </DropdownMenuTrigger>
+              {/* z acima do visualizador (z-[200]); `data-nao-fecha` porque o
+                  clique num item borbulha pela árvore do React até o fundo. */}
+              <DropdownMenuContent align="end" data-nao-fecha className="z-[300]">
+                {podeIr && (
+                  <DropdownMenuItem className="sm:hidden" onSelect={() => chamarEFechar(acoes?.aoIrParaMensagem)}>
+                    <MessageSquareText className="mr-2 h-4 w-4" />
+                    Ir para a mensagem
+                  </DropdownMenuItem>
+                )}
+                {podeEncaminhar && (
+                  <DropdownMenuItem className="sm:hidden" onSelect={() => chamarEFechar(acoes?.aoEncaminhar)}>
+                    <Forward className="mr-2 h-4 w-4" />
+                    Encaminhar
+                  </DropdownMenuItem>
+                )}
+                {temAlbumZip && (
+                  <DropdownMenuItem disabled={zipando} onSelect={() => void baixarAlbum()}>
+                    {zipando ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <FileArchive className="mr-2 h-4 w-4" />
+                    )}
+                    {zipando ? 'Gerando zip…' : rotuloAlbum}
+                  </DropdownMenuItem>
+                )}
+                {podeVerInfo && (
+                  <DropdownMenuItem onSelect={() => chamarEFechar(acoes?.aoVerInfo)}>
+                    <Info className="mr-2 h-4 w-4" />
+                    Informações da mensagem
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            title="Fechar"
+            aria-label="Fechar"
+            className={`${barBtn} flex-shrink-0`}
+          >
+            <X className="h-[22px] w-[22px]" />
+          </button>
         </div>
       </div>
 
+      {/* Contêiner relativo só para ancorar as setas ◀ ▶ nas laterais da área da mídia. */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+      {temLista && indice > 0 && (
+        <button
+          type="button"
+          data-nao-fecha
+          onClick={() => irPara(indice - 1)}
+          title="Anterior"
+          aria-label="Anterior"
+          className={`${setaBtn} left-2 sm:left-4`}
+        >
+          <ChevronLeft className="h-6 w-6" />
+        </button>
+      )}
+      {temLista && indice < total - 1 && (
+        <button
+          type="button"
+          data-nao-fecha
+          onClick={() => irPara(indice + 1)}
+          title="Próxima"
+          aria-label="Próxima"
+          className={`${setaBtn} right-2 sm:right-4`}
+        >
+          <ChevronRight className="h-6 w-6" />
+        </button>
+      )}
+      {textoAviso && (
+        <div
+          role="status"
+          data-nao-fecha
+          className="absolute left-1/2 top-2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-md bg-chat-panel px-3 py-1.5 text-sm text-chat-text shadow-chat ring-1 ring-chat-border"
+        >
+          {zipando && !aviso && <Loader2 className="h-4 w-4 animate-spin" />}
+          {textoAviso}
+        </div>
+      )}
+      {/* Sem stopPropagation aqui: o espaço em volta da mídia é fundo e fecha.
+          Só a própria mídia (img/video/iframe/planilha) leva `data-nao-fecha`. */}
       <div
         ref={wrapRef}
         className={
@@ -345,11 +884,11 @@ export function MediaViewer({
             ? 'flex min-h-0 flex-1 overflow-hidden p-2 sm:p-4'
             : 'flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4 sm:p-8'
         }
-        onClick={(e) => e.stopPropagation()}
       >
         {isImage ? (
           <img
             ref={imgRef}
+            data-nao-fecha
             src={media.url}
             alt={media.name || 'Imagem'}
             draggable={false}
@@ -376,12 +915,13 @@ export function MediaViewer({
           />
         ) : isPdf ? (
           <iframe
+            data-nao-fecha
             src={media.url}
             title={media.name || 'PDF'}
             className="h-full w-full rounded bg-white"
           />
         ) : isExcel ? (
-          <div className="flex h-full w-full min-h-0 flex-col rounded bg-white">
+          <div data-nao-fecha className="flex h-full w-full min-h-0 flex-col rounded bg-white">
             {excelLoading ? (
               <div className="flex flex-1 items-center justify-center gap-2 text-sm text-chat-muted">
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -438,9 +978,67 @@ export function MediaViewer({
             ) : null}
           </div>
         ) : (
-          <video src={media.url} controls autoPlay className="max-h-full max-w-full rounded object-contain" />
+          <video data-nao-fecha key={media.url} src={media.url} controls autoPlay className="max-h-full max-w-full rounded object-contain" />
         )}
       </div>
+      {posicao && (
+        <div
+          data-nao-fecha
+          className="mb-2 self-center rounded-full bg-chat-panel/85 px-2.5 py-0.5 text-[13px] text-chat-muted"
+        >
+          {posicao}
+        </div>
+      )}
+      </div>
+
+      {temLista && lista && (
+        <div
+          ref={faixaRef}
+          data-nao-fecha
+          className="flex flex-shrink-0 gap-1.5 overflow-x-auto border-t border-chat-border/60 bg-chat-panel p-3"
+        >
+          {lista.map((m, i) => (
+            <button
+              key={`${m.url}-${i}`}
+              type="button"
+              data-atual={i === indice ? 'true' : undefined}
+              onClick={() => irPara(i)}
+              title={m.name || `Item ${i + 1}`}
+              aria-label={m.name || `Item ${i + 1}`}
+              aria-current={i === indice ? 'true' : undefined}
+              className={
+                'relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-md bg-chat-hover transition ' +
+                (i === indice
+                  ? 'opacity-100 ring-2 ring-emerald-600'
+                  : 'opacity-70 hover:opacity-100')
+              }
+            >
+              {m.type === 'image' || m.type === 'sticker' ? (
+                <img
+                  src={m.url}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  draggable={false}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                // Vídeo/PDF/planilha: sem miniatura de verdade (carregar o
+                // arquivo inteiro só para a faixa seria caro), só o ícone do tipo.
+                <span className="flex h-full w-full items-center justify-center bg-chat-hover text-chat-text">
+                  {m.type === 'video' ? (
+                    <Play className="h-6 w-6 fill-current" />
+                  ) : m.type === 'excel' ? (
+                    <FileSpreadsheet className="h-6 w-6" />
+                  ) : (
+                    <FileText className="h-6 w-6" />
+                  )}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
     </div>,
     document.body,
   )

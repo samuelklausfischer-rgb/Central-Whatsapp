@@ -126,6 +126,51 @@ export async function downloadFile(url: string, filename: string) {
 }
 
 /**
+ * Salva um Blob que JÁ está na memória (ex.: o .zip montado por `zip.ts`).
+ *
+ * Existe à parte de `downloadFile` porque aquela função recebe uma URL e faz o
+ * fetch sozinha; o zip não tem URL, só bytes. O mecanismo é o mesmo: `<a
+ * download>` na web e folha de compartilhamento no Android (onde o atributo
+ * `download` é ignorado). Devolve `false` se nada conseguiu salvar.
+ */
+export async function salvarBlob(blob: Blob, filename: string): Promise<boolean> {
+  if (isNativeAndroid()) {
+    try {
+      // Mesmo teto do `baixarNoAndroid`: acima dele o base64 derrubaria o WebView.
+      if (blob.size > TETO_BASE64) return false
+      const [{ Filesystem, Directory }, { Share }] = await Promise.all([
+        import('@capacitor/filesystem'),
+        import('@capacitor/share'),
+      ])
+      const escrito = await Filesystem.writeFile({
+        path: sanitizarNome(filename),
+        data: await blobParaBase64(blob),
+        directory: Directory.Cache,
+      })
+      await Share.share({ title: filename, url: escrito.uri })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  const objectUrl = URL.createObjectURL(blob)
+  try {
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    return true
+  } finally {
+    // Revoga só depois: revogar na mesma tick pode cancelar o download em
+    // alguns navegadores antes de ele começar.
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000)
+  }
+}
+
+/**
  * Acima disto o arquivo NÃO passa por base64 na memória.
  *
  * O Filesystem do Capacitor recebe o conteúdo como base64, que incha ~33% e vive
@@ -133,7 +178,7 @@ export async function downloadFile(url: string, filename: string) {
  * string e derrubaria o app no celular. Acima do teto, a URL vai para o
  * navegador do sistema, que baixa em streaming.
  */
-const TETO_BASE64 = 40 * 1024 * 1024
+export const TETO_BASE64 = 40 * 1024 * 1024
 
 async function baixarNoAndroid(url: string, filename: string): Promise<boolean> {
   try {

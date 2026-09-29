@@ -118,7 +118,7 @@ import { classifyFileType, uploadAudio, uploadFile } from '@/services/storage'
 import { traduzErro } from '@/lib/friendly-error'
 import { getParticipantesDoGrupo, escolherConversaDoParticipante } from '@/services/groups'
 import { AudioMessage } from '@/components/chat/AudioMessage'
-import { MediaViewer, type ViewerMedia } from '@/components/chat/MediaViewer'
+import { MediaViewer, type ViewerMedia, type AcoesDoVisualizador } from '@/components/chat/MediaViewer'
 import { downloadFile, nomeParaDownload, tipoPeloNome } from '@/lib/download'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -159,6 +159,11 @@ import { ListMessageBubble } from '@/components/chat/ListMessageBubble'
 import { ButtonsMessageBubble } from '@/components/chat/ButtonsMessageBubble'
 import { MessageSearchBar } from '@/components/chat/MessageSearchBar'
 import { MessageSelectionBar } from '@/components/chat/MessageSelectionBar'
+import { RabinhoDaBolha } from '@/components/chat/RabinhoDaBolha'
+import { agruparAlbuns, ehInicioDeSequencia, rotuloDaData, tipoDoAnexo } from '@/components/chat/visualConversa'
+import { AlbumDeFotos } from '@/components/chat/AlbumDeFotos'
+import { SeparadorDeData } from '@/components/chat/SeparadorDeData'
+import { TextoComLerMais } from '@/components/chat/TextoComLerMais'
 import { useMessageSelection } from '@/hooks/use-message-selection'
 import {
   MAX_SELECIONADAS,
@@ -768,6 +773,10 @@ const renderMessage = (
 // `toLocaleTimeString` — que constrói um Intl.DateTimeFormat novo por chamada.
 // Com 500 balões e a lista re-renderizando a cada tecla digitada, era
 // tipicamente a operação mais cara do laço.
+/** URL pública de um anexo guardado só pelo nome do arquivo (formato antigo). */
+const urlDoAnexoPorNome = (messageId: string, filename: string) =>
+  `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/chat-attachments/${messageId}/${filename}`
+
 const timeFormatter = new Intl.DateTimeFormat([], { hour: '2-digit', minute: '2-digit' })
 
 // Só re-executa o parser de markdown/telefone/emoji quando o conteúdo (ou o
@@ -792,20 +801,6 @@ const MessageBody = React.memo(function MessageBody({
 const getDateKey = (value: string) => {
   const date = new Date(value)
   return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
-}
-
-const getDateLabel = (value: string) => {
-  if (!value) return ''
-  const date = new Date(value)
-  if (isNaN(date.getTime())) return ''
-  const today = new Date()
-  const yesterday = new Date()
-  yesterday.setDate(today.getDate() - 1)
-
-  if (getDateKey(value) === getDateKey(today.toISOString())) return 'Hoje'
-  if (getDateKey(value) === getDateKey(yesterday.toISOString())) return 'Ontem'
-
-  return format(date, 'dd/MM/yyyy')
 }
 
 /**
@@ -1213,6 +1208,34 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   /** Conteúdo da conversa. É a altura DELE que cresce quando a mídia carrega. */
   const conteudoRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
+  /**
+   * Botão "ir para as últimas mensagens". Estado de React (o ref acima não
+   * re-renderiza), mas SÓ muda quando o valor muda — o handler de scroll compara
+   * com o espelho em ref antes de chamar o setter. Não entra nas dependências de
+   * `baloesDaConversa`: só o JSX do botão lê, e a lista memorizada segue idêntica.
+   */
+  const [longeDoFim, setLongeDoFim] = useState(false)
+  const longeDoFimRef = useRef(false)
+  /** Rolagem `smooth` disparada pelo botão em andamento: segura a reativação do botão. */
+  const rolandoProgramaticoRef = useRef(false)
+  const rolandoProgramaticoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** Recebidas que chegaram enquanto a pessoa estava longe do fim (bolinha verde). */
+  const [novasRecebidas, setNovasRecebidas] = useState(0)
+  const novasRecebidasRef = useRef(0)
+  /** Identidade (`chaveRender ?? id`) da última mensagem já contada. */
+  const ultimaChaveContadaRef = useRef<string | null>(null)
+  const zerarBotaoDeRolagem = useCallback(() => {
+    longeDoFimRef.current = false
+    novasRecebidasRef.current = 0
+    // Troca de conversa e clique encerram qualquer rolagem programática pendente.
+    rolandoProgramaticoRef.current = false
+    if (rolandoProgramaticoTimerRef.current) {
+      clearTimeout(rolandoProgramaticoTimerRef.current)
+      rolandoProgramaticoTimerRef.current = null
+    }
+    setLongeDoFim(false)
+    setNovasRecebidas(0)
+  }, [])
   const prevConvKeyRef = useRef<string | null>(null)
 
   const [isNoteOpen, setIsNoteOpen] = useState(false)
@@ -1705,6 +1728,12 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   const [loadingAction, setLoadingAction] = useState<'take' | 'waiting' | 'finish' | 'invite_accept' | 'invite_decline' | null>(null)
   const dismissedRef = useRef(false)
   const [mediaView, setMediaView] = useState<ViewerMedia | null>(null)
+  // Lista para navegar (◀ ▶, miniaturas, zip) quando o item aberto faz parte de
+  // um conjunto: álbum da conversa ou aba Fotos da galeria. `undefined` = item solto.
+  const [listaDoVisualizador, setListaDoVisualizador] = useState<ViewerMedia[] | undefined>(undefined)
+  // Posição do item aberto dentro da lista. Vale mais que buscar pela URL: a mesma
+  // URL pode aparecer duas vezes (foto reencaminhada), e o índice não erra.
+  const [indiceInicialDoVisualizador, setIndiceInicialDoVisualizador] = useState<number | undefined>(undefined)
   const [galeriaAberta, setGaleriaAberta] = useState(false)
   // Lista, e não uma mensagem: o mesmo diálogo atende o encaminhar do menu ⋮
   // (lista de uma) e o da barra de seleção (lista de várias).
@@ -1737,18 +1766,6 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
    * pedido.
    */
   const [semAssinatura, setSemAssinatura] = useState(false)
-
-  // Abre um item da galeria no visualizador que já existe. Vídeo e imagem são os
-  // dois tipos que a aba Fotos produz.
-  const abrirMidiaDaGaleria = useCallback((itens: any[], index: number) => {
-    const item = itens[index]
-    if (!item) return
-    setMediaView({
-      url: item.url,
-      type: item.tipo === 'video' ? 'video' : 'image',
-      name: item.nome,
-    })
-  }, [])
 
   // Busca dentro da conversa (Ctrl+F)
   const [isFindOpen, setIsFindOpen] = useState(false)
@@ -2214,6 +2231,8 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     // escrevia a anotação/tarefa no prontuário do contato errado, ou renomeava
     // quem não devia. Com os campos já zerados acima, fechar fecha o ciclo.
     setMediaView(null)
+    setListaDoVisualizador(undefined)
+    setIndiceInicialDoVisualizador(undefined)
     setIsNoteOpen(false)
     setIsTaskModalOpen(false)
     setIsNicknameOpen(false)
@@ -2429,12 +2448,38 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     const conversationChanged = prevConvKeyRef.current !== convKey
     prevConvKeyRef.current = convKey
 
+    const ultima = messages[messages.length - 1]
+    const chaveDaUltima = ultima ? ((ultima as any).chaveRender ?? ultima.id) : null
+
     if (conversationChanged) {
       // Conversa nova/trocada: sempre abre no fundo e reseta o estado "grudado".
       isNearBottomRef.current = true
       el.scrollTop = el.scrollHeight
+      // O botão de "ir para o fim" e o contador também são por conversa: o
+      // ChatWindow não desmonta na troca.
+      ultimaChaveContadaRef.current = chaveDaUltima
+      zerarBotaoDeRolagem()
       return
     }
+
+    // Contador do botão: só RECEBIDAS que chegaram com a pessoa longe do fim
+    // (como o WhatsApp — o que ela mesma envia não conta). Acha a última já
+    // contada pela identidade e soma o que veio depois; se ela não estiver na
+    // lista (troca de conversa em andamento, recarga), só reancora.
+    if (!isNearBottomRef.current && ultimaChaveContadaRef.current) {
+      let i = messages.length - 1
+      while (i >= 0 && ((messages[i] as any).chaveRender ?? messages[i].id) !== ultimaChaveContadaRef.current) i--
+      if (i >= 0 && i < messages.length - 1) {
+        const novas = messages
+          .slice(i + 1)
+          .filter((m: any) => m.direction !== 'outbound' && m.sender_id !== user?.id).length
+        if (novas > 0) {
+          novasRecebidasRef.current += novas
+          setNovasRecebidas(novasRecebidasRef.current)
+        }
+      }
+    }
+    ultimaChaveContadaRef.current = chaveDaUltima
 
     // Mesma conversa, array de mensagens mudou (poll de 25s, realtime, envio
     // otimista): só rola pro fundo se o usuário já estava perto do fundo —
@@ -2442,7 +2487,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     if (isNearBottomRef.current) {
       el.scrollTop = el.scrollHeight
     }
-  }, [messages, device?.id, contact])
+  }, [messages, device?.id, contact, user?.id, zerarBotaoDeRolagem])
 
   useEffect(() => {
     const el = scrollRef.current
@@ -2451,11 +2496,58 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     const handleScroll = () => {
       const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
       isNearBottomRef.current = distanceFromBottom <= NEAR_BOTTOM_THRESHOLD_PX
+      // Botão: aparece a mais de ~1 tela do fim. Só mexe no estado quando o valor
+      // MUDA — evento de scroll é contínuo, e re-renderizar o componente a cada
+      // um custaria o mesmo que a digitação já custou (ver `baloesDaConversa`).
+      // Durante a rolagem `smooth` do próprio botão a distância ainda é grande: sem
+      // esta trava o botão reapareceria e sumiria de novo pelo caminho. Solta ao
+      // chegar perto do fim (ou pelo tempo de segurança do clique).
+      if (rolandoProgramaticoRef.current && isNearBottomRef.current) {
+        rolandoProgramaticoRef.current = false
+        if (rolandoProgramaticoTimerRef.current) {
+          clearTimeout(rolandoProgramaticoTimerRef.current)
+          rolandoProgramaticoTimerRef.current = null
+        }
+      }
+      const longe = !rolandoProgramaticoRef.current && distanceFromBottom > el.clientHeight * 0.75
+      if (longe !== longeDoFimRef.current) {
+        longeDoFimRef.current = longe
+        setLongeDoFim(longe)
+      }
+      // Chegou perto do fim: o que era "novo" já está na tela.
+      if (isNearBottomRef.current && novasRecebidasRef.current !== 0) {
+        novasRecebidasRef.current = 0
+        setNovasRecebidas(0)
+      }
     }
     handleScroll()
     el.addEventListener('scroll', handleScroll, { passive: true })
     return () => el.removeEventListener('scroll', handleScroll)
   }, [device?.id, contact])
+
+  // Clique no botão: rola até o fim. Marca `isNearBottomRef` ANTES, como os
+  // outros pontos que rolam por conta própria (busca, pulo de citação), para o
+  // auto-scroll e o reancoramento da mídia não brigarem com a animação. Longe
+  // demais, pula direto: animar 30 telas só faria a conversa "correr".
+  const irParaAsUltimas = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const distancia = el.scrollHeight - el.scrollTop - el.clientHeight
+    isNearBottomRef.current = true
+    const suave = distancia < el.clientHeight * 3
+    el.scrollTo({ top: el.scrollHeight, behavior: suave ? 'smooth' : 'auto' })
+    // Zera (e esconde) já, e só depois arma a trava: `zerarBotaoDeRolagem` a desarma.
+    zerarBotaoDeRolagem()
+    if (suave) {
+      rolandoProgramaticoRef.current = true
+      // Segurança: se a rolagem for interrompida (roda do mouse, toque) o botão
+      // não fica preso escondido para sempre.
+      rolandoProgramaticoTimerRef.current = setTimeout(() => {
+        rolandoProgramaticoRef.current = false
+        rolandoProgramaticoTimerRef.current = null
+      }, 1000)
+    }
+  }, [zerarBotaoDeRolagem])
 
   /**
    * Mantém a conversa colada na última mensagem enquanto a mídia carrega.
@@ -4254,18 +4346,34 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     }
   }, [])
 
+  // Entra no modo de seleção já com VÁRIAS mensagens marcadas (álbum: as fotos
+  // são mensagens separadas, e agir só na 1ª seria enganoso). `iniciarCom` só
+  // aceita uma; as demais entram por `alternar` no mesmo lote, que soma ao
+  // conjunto — e o hook já reseta tudo ao trocar de conversa.
+  const iniciarSelecaoDoGrupo = useCallback(
+    (grupo: any[]) => {
+      if (grupo.length === 0) return
+      iniciarSelecaoCom(grupo[0])
+      for (const m of grupo.slice(1)) {
+        alternarSelecao(m, messages.findIndex((x: any) => x.id === m.id))
+      }
+    },
+    [iniciarSelecaoCom, alternarSelecao, messages],
+  )
+
   const iniciarLongPress = useCallback(
-    (e: React.PointerEvent, msg: any) => {
+    (e: React.PointerEvent, msg: any, grupo?: any[]) => {
       if (e.pointerType !== 'touch' || modoSelecao) return
       cancelarLongPress()
       longPressRef.current.x = e.clientX
       longPressRef.current.y = e.clientY
       longPressRef.current.timer = setTimeout(() => {
         longPressRef.current.timer = null
-        iniciarSelecaoCom(msg)
+        if (grupo) iniciarSelecaoDoGrupo(grupo)
+        else iniciarSelecaoCom(msg)
       }, 500)
     },
-    [modoSelecao, iniciarSelecaoCom, cancelarLongPress],
+    [modoSelecao, iniciarSelecaoCom, iniciarSelecaoDoGrupo, cancelarLongPress],
   )
 
   const moverLongPress = useCallback(
@@ -4344,6 +4452,230 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
   )
 
   /**
+   * Álbuns da conversa (regra do cliente — ver `agruparAlbuns`). Calculado UMA vez
+   * por mudança de lista, fora do `map` dos balões, e só depende de `messages` e
+   * do usuário. O balão do álbum acha as mensagens dos outros membros por
+   * `mensagensPorId` (o índice que já existe acima).
+   */
+  const albuns = useMemo(
+    () =>
+      agruparAlbuns(messages as any[], {
+        userId: user?.id,
+        anexoVivo: (m, anexo) =>
+          typeof anexo === 'string' ||
+          anexoEstaVivo(previasDeEnvioRef.current.get((m as any).chaveRender ?? m.id) || (anexo as any)?.url),
+        semLegenda: isTechnicalPlaceholder,
+      }),
+    [messages, user?.id],
+  )
+
+  /**
+   * Lista do visualizador: TODAS as fotos e vídeos carregados da conversa, um
+   * item por anexo, em ordem cronológica — a faixa de miniaturas do WhatsApp
+   * mostra a conversa toda, não só o álbum ou o balão clicado.
+   *
+   * Montada UMA vez por mudança de `messages` (não por render, nem por clique).
+   * A URL de cada item é a MESMA que o balão desenha (prévia local do envio no
+   * 1º anexo, senão a do Storage), e `indicePorAnexo` traduz "mensagem + posição
+   * do anexo" em índice na lista — por isso o clique não depende de comparar URL.
+   *
+   * Autor: "Você" nas minhas; nas demais, o mesmo nome que o balão e a cópia da
+   * conversa já usam (`resolverAutorDaMensagem`). O avatar é o do balão das
+   * recebidas; nas minhas não há avatar no chat, então segue sem.
+   */
+  const { itensDoVisualizador, indicePorAnexo } = useMemo(() => {
+    const itens: ViewerMedia[] = []
+    const indices = new Map<string, number>()
+    const albumDe = new Map<string, { atual: number; total: number; primeiro: string }>()
+    albuns.porPrimeira.forEach((ids, primeiro) =>
+      ids.forEach((id, i) => albumDe.set(id, { atual: i + 1, total: ids.length, primeiro })),
+    )
+    const avatares = new Map<string, React.ReactNode>()
+    for (const m of messages as any[]) {
+      if (m.deleted_at || !Array.isArray(m.attachments)) continue
+      const minha = m.direction === 'outbound' || m.sender_id === user?.id
+      m.attachments.forEach((anexo: any, idx: number) => {
+        const tipo = tipoDoAnexo(anexo)
+        if (tipo !== 'image' && tipo !== 'video') return
+        const chave = m.chaveRender ?? m.id
+        const url: string =
+          (idx === 0 && previasDeEnvioRef.current.get(chave)) ||
+          (typeof anexo === 'string' ? urlDoAnexoPorNome(m.id, anexo) : anexo.url)
+        if (typeof anexo !== 'string' && !anexoEstaVivo(url)) return
+        let avatar: React.ReactNode = undefined
+        if (!minha) {
+          const chaveAvatar = `${m.remote_sender}|${m.sender_name ?? ''}`
+          if (!avatares.has(chaveAvatar)) {
+            avatares.set(
+              chaveAvatar,
+              <SmartAvatar
+                jid={m.remote_sender}
+                name={resolveContactDisplayName(m.remote_sender, contactIndex, { sender_name: m.sender_name })}
+                instanceKey={device?.instance_key}
+                contactRecord={findContactByIdentifier(m.remote_sender, contactIndex)}
+                className="h-8 w-8"
+                fallbackClassName="bg-chat-panel text-chat-muted text-xs"
+              />,
+            )
+          }
+          avatar = avatares.get(chaveAvatar)
+        }
+        indices.set(`${m.id}:${idx}`, itens.length)
+        itens.push({
+          url,
+          type: tipo,
+          name: typeof anexo === 'string' ? anexo : anexo.name,
+          messageId: m.id,
+          autor: minha ? 'Você' : resolverAutorDaMensagem(m),
+          enviadaEm: m.created_at,
+          avatar,
+          // `grupoId`: o viewer junta os itens do mesmo álbum pela 1ª mensagem.
+          grupoId: albumDe.get(m.id)?.primeiro,
+          album: albumDe.has(m.id)
+            ? { atual: albumDe.get(m.id)!.atual, total: albumDe.get(m.id)!.total }
+            : undefined,
+        })
+      })
+    }
+    return { itensDoVisualizador: itens, indicePorAnexo: indices }
+  }, [messages, user?.id, albuns, contactIndex, device?.instance_key, resolverAutorDaMensagem])
+
+  /**
+   * Abre foto/vídeo do balão (ou quadro do álbum) com a conversa toda como lista.
+   * Se o anexo não estiver na lista (não deveria acontecer), abre só ele.
+   */
+  const abrirMidiaDaConversa = useCallback(
+    (messageId: string, idx: number, alternativa: ViewerMedia) => {
+      const i = indicePorAnexo.get(`${messageId}:${idx}`)
+      if (i === undefined) {
+        setListaDoVisualizador(undefined)
+        setIndiceInicialDoVisualizador(undefined)
+        setMediaView(alternativa)
+        return
+      }
+      setListaDoVisualizador(itensDoVisualizador)
+      setIndiceInicialDoVisualizador(i)
+      setMediaView(itensDoVisualizador[i])
+    },
+    [indicePorAnexo, itensDoVisualizador],
+  )
+
+  // Abre um item da galeria: a lista é a da própria aba Fotos (só os arquivos que
+  // ainda existem; o clicado abre sempre). Autor e data saem da mensagem quando
+  // ela está carregada; senão ficam de fora (o visualizador trata como opcional).
+  const abrirMidiaDaGaleria = useCallback(
+    (itens: any[], index: number) => {
+      const item = itens[index]
+      if (!item) return
+      const paraViewer = (i: any): ViewerMedia => {
+        const m = i.messageId ? mensagensPorId.get(i.messageId) : undefined
+        const minha = i.direction === 'outbound' || (!!m && m.sender_id === user?.id)
+        return {
+          url: i.url,
+          type: i.tipo === 'video' ? 'video' : 'image',
+          name: i.nome,
+          // Sem a mensagem carregada não há o que responder, encaminhar ou
+          // reagir: sem `messageId` o visualizador esconde os botões de ação.
+          messageId: m ? i.messageId : undefined,
+          enviadaEm: i.createdAt,
+          autor: minha ? 'Você' : m ? resolverAutorDaMensagem(m) : undefined,
+        }
+      }
+      // Como o WhatsApp: abrir a mídia pela galeria fecha o painel lateral. O
+      // painel é um modal do Radix — com ele aberto o corpo fica sem clique e o
+      // primeiro toque no visualizador só fecharia o painel.
+      onSheetOpenChange?.(false)
+      const disponiveis = itens.filter((i) => i.disponivel !== false)
+      const lista = disponiveis.map(paraViewer)
+      const posicao = disponiveis.indexOf(item)
+      if (lista.length > 1 && posicao >= 0) {
+        setListaDoVisualizador(lista)
+        setIndiceInicialDoVisualizador(posicao)
+        setMediaView(lista[posicao])
+      } else {
+        setListaDoVisualizador(undefined)
+        setIndiceInicialDoVisualizador(undefined)
+        setMediaView(paraViewer(item))
+      }
+    },
+    [mensagensPorId, user?.id, resolverAutorDaMensagem, onSheetOpenChange],
+  )
+
+  const fecharVisualizador = useCallback(() => {
+    setMediaView(null)
+    setListaDoVisualizador(undefined)
+    setIndiceInicialDoVisualizador(undefined)
+  }, [])
+
+  // Antes de abrir outro painel a partir do visualizador: fecha o painel lateral
+  // (modal do Radix, que trava o foco e o clique fora dele) e o próprio visualizador.
+  const fecharParaAgir = useCallback(() => {
+    onSheetOpenChange?.(false)
+    fecharVisualizador()
+  }, [onSheetOpenChange, fecharVisualizador])
+
+  /**
+   * Ações do visualizador. Cada uma resolve a mensagem por id e reaproveita o
+   * fluxo que o balão já tem. As que abrem outro painel (responder, encaminhar,
+   * info, ir para a mensagem) fecham o visualizador antes: um diálogo aberto por
+   * cima dele ficaria empilhado e o foco do compositor não chegaria.
+   */
+  const acoesDoVisualizador = useMemo<AcoesDoVisualizador>(
+    () => ({
+      aoIrParaMensagem: (id) => {
+        fecharParaAgir()
+        pularParaMensagemOriginal(id)
+      },
+      aoResponder: (id) => {
+        const m = mensagensPorId.get(id)
+        if (!m) return
+        fecharParaAgir()
+        handleReply(m)
+      },
+      // Mesmo fluxo do botão 😊 do balão: reage, conta o uso sem esperar, e só
+      // atualiza a estatística local quando deu certo.
+      aoReagir: async (id, emoji) => {
+        if (!device?.id || !user?.id) throw new Error('Nenhum aparelho conectado para reagir')
+        try {
+          await reactToMessage(id, emoji, device.id, user.id)
+          void registrarUsoDeReacao(emoji)
+          setUsoDeReacoes((antes) => ({
+            ...(antes || {}),
+            [emoji]: ((antes || {})[emoji] || 0) + 1,
+          }))
+        } catch (err: any) {
+          toast({ title: err.message || 'Erro ao reagir', variant: 'destructive' })
+          // Relança: o toast fica atrás do visualizador, que mostra o próprio aviso.
+          throw err
+        }
+      },
+      aoEncaminhar: (id) => {
+        const m = mensagensPorId.get(id)
+        if (!m) return
+        fecharParaAgir()
+        setMsgsParaEncaminhar([m])
+      },
+      aoVerInfo: (id) => {
+        const m = mensagensPorId.get(id)
+        if (!m) return
+        fecharParaAgir()
+        setMsgInfoAberta(m)
+      },
+      usoDeReacoes: usoDeReacoes ?? undefined,
+    }),
+    [
+      fecharParaAgir,
+      pularParaMensagemOriginal,
+      mensagensPorId,
+      handleReply,
+      device?.id,
+      user?.id,
+      toast,
+      usoDeReacoes,
+    ],
+  )
+
+  /**
    * A LISTA DE BALÕES, MEMORIZADA — e o motivo de o chat ter parado de travar
    * enquanto se digita.
    *
@@ -4373,6 +4705,9 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           // acaso, mas depender disso foi o que derrubou a produção uma vez.
           !device || !contact ? null :
           messages.map((msg: any, index: number) => {
+          // Membro (não-primeiro) de um álbum: quem desenha é o balão da 1ª foto.
+          // No modo de seleção o álbum se desfaz e cada foto volta a ter balão.
+          if (!modoSelecao && albuns.membros.has(msg.id)) return null
           const isMe = msg.direction === 'outbound' || msg.sender_id === user?.id
           const estaMarcada = estaSelecionada(msg.id)
           const messageAttachments = Array.isArray(msg.attachments) ? msg.attachments : []
@@ -4395,6 +4730,18 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           const previousMsg = messages[index - 1]
           const shouldShowDateSeparator =
             !previousMsg || getDateKey(previousMsg.created_at) !== getDateKey(msg.created_at)
+          // Decide o espaço acima do balão (12px ao trocar de quem fala, 2px
+          // dentro da mesma sequência) e onde nasce o rabinho.
+          // A linha de sistema "[Mensagem fixada]" não é balão de ninguém: o que
+          // vem depois dela começa sequência nova (senão herdaria o autor dela).
+          const anteriorEhFixada =
+            !!previousMsg && !previousMsg.deleted_at && previousMsg.content?.trim() === '[Mensagem fixada]'
+          const inicioDeSequencia = ehInicioDeSequencia(
+            msg,
+            previousMsg,
+            shouldShowDateSeparator || anteriorEhFixada,
+            user?.id,
+          )
           // Aviso de "mensagem fixada": linha de sistema centralizada e
           // discreta, no mesmo estilo do divisor de data — nunca um balão (um
           // balão aqui sugeriria que alguém "disse" isto).
@@ -4402,13 +4749,9 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
             return (
               <React.Fragment key={msg.chaveRender ?? msg.id}>
                 {shouldShowDateSeparator && (
-                  <div className="flex justify-center py-2">
-                    <span className="rounded-full border border-chat-border bg-chat-panel/90 px-3 py-1 text-[12px] font-medium text-chat-muted shadow-chat backdrop-blur">
-                      {getDateLabel(msg.created_at)}
-                    </span>
-                  </div>
+                  <SeparadorDeData rotulo={rotuloDaData(msg.created_at)} />
                 )}
-                <div className="flex justify-center py-1">
+                <div className="my-3 flex justify-center">
                   <span className="text-[12px] italic text-chat-muted/60">📌 Mensagem fixada</span>
                 </div>
               </React.Fragment>
@@ -4444,6 +4787,152 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
               shouldShowDateSeparator ||
               previousMsg.remote_sender !== msg.remote_sender
             )
+          // Mídia sem legenda no estilo WhatsApp: UMA foto ou vídeo, sem texto,
+          // sem citação nem "Encaminhada" acima. O balão vira só moldura de 3px
+          // e o horário passa a ser desenhado em cima da própria mídia.
+          // Álbum: este balão desenha a grade das fotos seguidas (a 1ª mensagem é
+          // a dona do balão). Ações em massa (➦, reações) usam a lista inteira.
+          const idsDoAlbum = modoSelecao ? undefined : albuns.porPrimeira.get(msg.id)
+          const mensagensDoAlbum: any[] | undefined = idsDoAlbum
+            ?.map((id) => mensagensPorId.get(id))
+            .filter(Boolean)
+          const ehAlbum = !!mensagensDoAlbum && mensagensDoAlbum.length >= 2
+          const paraEncaminhar: any[] = ehAlbum ? mensagensDoAlbum! : [msg]
+          const reacoesDoBalao: any[] | undefined = ehAlbum
+            ? mensagensDoAlbum!.flatMap((m: any) => m.reactions || [])
+            : msg.reactions
+          const itensDoAlbum = ehAlbum
+            ? mensagensDoAlbum!.map((m: any) => {
+                const anexo = m.attachments[0]
+                const chave = m.chaveRender ?? m.id
+                const nome = typeof anexo === 'string' ? anexo : anexo?.name
+                const url =
+                  previasDeEnvioRef.current.get(chave) ||
+                  (typeof anexo === 'string'
+                    ? urlDoAnexoPorNome(m.id, anexo)
+                    : anexo.url)
+                const pct = progressoDeEnvio[chave]
+                return {
+                  id: m.id as string,
+                  url: url as string,
+                  tipo: (tipoDoAnexo(anexo) === 'video' ? 'video' : 'image') as 'image' | 'video',
+                  nome: nome as string | undefined,
+                  horario: timeFormatter.format(new Date(m.created_at)),
+                  falhou: m.status === 'failed',
+                  veu: pct !== undefined ? <VeuDeEnvio pct={pct} /> : null,
+                }
+              })
+            : []
+          const anexoUnico = messageAttachments.length === 1 ? messageAttachments[0] : null
+          const tipoAnexoUnico = anexoUnico ? tipoDoAnexo(anexoUnico) : null
+          const semTextoNemCabecalho =
+            !msg.deleted_at &&
+            !msg.reply_to_snapshot &&
+            !msg.is_forwarded &&
+            (!msg.content?.trim() || isTechnicalPlaceholder(msg.content))
+          // Anexo de servidor morto vira `UnavailableAttachmentBubble`, que não é
+          // mídia nem documento e não combina com a moldura fina.
+          const anexoUnicoVivo =
+            anexoUnico !== null &&
+            (typeof anexoUnico === 'string' || anexoEstaVivo(previaLocal || anexoUnico.url))
+          const midiaSemLegenda =
+            ehAlbum ||
+            (semTextoNemCabecalho && anexoUnicoVivo && (tipoAnexoUnico === 'image' || tipoAnexoUnico === 'video'))
+          // Documento sozinho: também moldura fina, mas o horário fica ABAIXO do
+          // cartão (não sobreposto, como na foto).
+          const documentoSemLegenda = semTextoNemCabecalho && anexoUnicoVivo && tipoAnexoUnico === 'document'
+          // Só ganham o botão ➦ do lado de fora: foto, vídeo e documento.
+          const podeEncaminharRapido =
+            !msg.deleted_at &&
+            messageAttachments.some((att: any) => {
+              const t = tipoDoAnexo(att)
+              return t === 'image' || t === 'video' || t === 'document'
+            })
+          const corDoRodape = midiaSemLegenda ? 'text-white' : 'text-chat-muted'
+          // Áudio sozinho: o player mostra o horário na própria linha da duração
+          // (prop `rodape`), então o rodapé normal de baixo NÃO é desenhado — senão
+          // o horário apareceria duas vezes. Com legenda, citação ou "Encaminhada"
+          // o layout antigo (rodapé embaixo) continua.
+          // Com falha o rodapé volta para baixo do player: "falhou · tentar novamente"
+          // não quebra linha e (~190px) transbordaria o balão, cortando o único botão
+          // de reenvio.
+          const audioSemLegenda =
+            semTextoNemCabecalho && anexoUnicoVivo && tipoAnexoUnico === 'audio' && msg.status !== 'failed'
+          // Foto ao lado do player (48px): a de quem falou nas recebidas — em grupo o
+          // participante, como o rótulo do balão —, e a do aparelho nas minhas
+          // (mesmo par `isInstance` + `deviceRecord` que a lista de conversas usa, e
+          // que já rebusca a foto expirada). Sem foto o player cai no modo enxuto.
+          const avatarDoAudio = messageAttachments.some((a: any) => tipoDoAnexo(a) === 'audio')
+            ? isMe
+              ? device
+                ? (
+                    <SmartAvatar
+                      isInstance
+                      deviceRecord={device}
+                      name={device.name}
+                      className="h-12 w-12 bg-chat-panel"
+                      fallbackClassName="bg-chat-panel text-chat-muted text-xs"
+                    />
+                  )
+                : undefined
+              : isGroupContactMsg && msg.group_participant
+                ? (
+                    <SmartAvatar
+                      jid={msg.group_participant}
+                      name={thisSender}
+                      instanceKey={device?.instance_key}
+                      contactRecord={participantContact}
+                      className="h-12 w-12"
+                      fallbackClassName="bg-chat-panel text-chat-muted text-xs"
+                    />
+                  )
+                : (
+                    <SmartAvatar
+                      jid={msg.remote_sender}
+                      name={resolveContactDisplayName(msg.remote_sender, contactIndex, {
+                        sender_name: msg.sender_name,
+                      })}
+                      instanceKey={device?.instance_key}
+                      contactRecord={findContactByIdentifier(msg.remote_sender, contactIndex)}
+                      className="h-12 w-12"
+                      fallbackClassName="bg-chat-panel text-chat-muted text-xs"
+                    />
+                  )
+            : undefined
+          // Rodapé do balão (horário, "editado", relógio, falha), montado UMA vez
+          // e usado nos dois ramos. No ramo de texto ele é desenhado duas vezes
+          // (reserva invisível + cópia no canto); no ramo só-mídia, uma.
+          const rodape = (
+            <>
+              {msg.edited_at && <span className={cn('text-[11px]', corDoRodape)}>(editado)</span>}
+              {/* `!msg.deleted_at`: mensagem apagada pelo próprio operador já
+                  mostra "[Mensagem apagada]" e não ganha o badge de revoke. */}
+              {msg.revoked_at && !msg.deleted_at && (
+                <span className="inline-flex items-center gap-0.5 text-[11px] font-medium text-red-400">
+                  <Trash2 className="h-3 w-3" /> apagada
+                </span>
+              )}
+              {isMe && msg.status === 'sending' && <Clock className={cn('h-3 w-3 shrink-0', corDoRodape)} />}
+              {isMe && msg.status === 'failed' && (
+                // O reenvio sai do payload guardado no aparelho, então funciona
+                // mesmo depois de recarregar a página.
+                <button
+                  type="button"
+                  disabled={reenviando === msg.id}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    void reenviarFalha(msg.id)
+                  }}
+                  className="inline-flex items-center gap-0.5 text-[11px] font-medium text-red-400 hover:text-red-300 hover:underline disabled:opacity-60"
+                >
+                  {reenviando === msg.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <AlertCircle className="h-3 w-3" />}
+                  {reenviando === msg.id ? 'reenviando…' : 'falhou · tentar novamente'}
+                </button>
+              )}
+              <span className={cn('text-[11px]', corDoRodape)}>{timestamp}</span>
+            </>
+          )
           return (
             // `chaveRender` antes de `id`: a mensagem enviada por aqui nasce
             // como balão otimista (`temp-...`) e é substituída pela linha real
@@ -4459,18 +4948,17 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                 // IA") e, sem `pointer-events-none`, ainda engolia o clique de
                 // quem tentava selecionar o que estava embaixo. Em conversa de um
                 // dia só ela aparece uma vez, no topo, e some ao rolar.
-                <div className="flex justify-center py-2">
-                  <span className="rounded-full border border-chat-border bg-chat-panel/90 px-3 py-1 text-[12px] font-medium text-chat-muted shadow-chat backdrop-blur">
-                    {getDateLabel(msg.created_at)}
-                  </span>
-                </div>
+                <SeparadorDeData rotulo={rotuloDaData(msg.created_at)} />
               )}
             <div
               ref={(el) => {
-                if (el) messageRefs.current.set(msg.id, el)
-                else messageRefs.current.delete(msg.id)
+                // O álbum responde por todas as suas mensagens: o pulo de uma
+                // citação (ou de uma busca) que aponta para a 3ª foto acha o balão.
+                const ids = ehAlbum ? idsDoAlbum! : [msg.id]
+                if (el) for (const id of ids) messageRefs.current.set(id, el)
+                else for (const id of ids) messageRefs.current.delete(id)
               }}
-              onPointerDown={(e) => iniciarLongPress(e, msg)}
+              onPointerDown={(e) => iniciarLongPress(e, msg, ehAlbum ? paraEncaminhar : undefined)}
               onPointerMove={moverLongPress}
               onPointerUp={cancelarLongPress}
               onPointerCancel={cancelarLongPress}
@@ -4491,6 +4979,11 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
               }
               className={cn(
                 'flex flex-col',
+                // Sem `space-y` no container: o espaço vem daqui, para que
+                // balões da mesma sequência fiquem quase colados como no WhatsApp.
+                inicioDeSequencia ? 'mt-3' : 'mt-0.5',
+                // Espaço para a pílula de reações, que fica pendurada na borda de baixo.
+                (reacoesDoBalao?.length ?? 0) > 0 && 'mb-4',
                 /*
                   A bolha entra do lado de quem falou: a minha sobe vindo da
                   direita (de onde saiu o compositor), a do cliente vindo da
@@ -4515,7 +5008,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                 estaMarcada && 'bg-chat-text/[0.07]',
                 // ITEM 12: realce de quem acabou de receber o pulo de uma
                 // citação. Some sozinho (ver o efeito de `mensagemDestacada`).
-                mensagemDestacada === msg.id &&
+                (mensagemDestacada === msg.id || (!!mensagemDestacada && !!idsDoAlbum?.includes(mensagemDestacada))) &&
                   'rounded-lg -mx-1 px-1 py-0.5 bg-blue-400/15 transition-colors duration-500',
               )}
             >
@@ -4558,12 +5051,86 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                   )
                 )}
                 <div
-                  className={`max-w-[88%] sm:max-w-[78%] rounded-2xl px-3.5 py-2 shadow-chat-bubble relative group transition-all duration-150 ${
-                    isMe
-                      ? 'bg-chat-bubble-out text-chat-text rounded-br-sm border border-chat-bubble-outline'
-                      : 'bg-chat-bubble-in text-chat-text rounded-bl-sm'
-                  }`}
+                  className={cn(
+                    'relative group max-w-[88%] sm:max-w-[65%] rounded-[7.5px] shadow-chat-bubble transition-all duration-150 text-chat-text',
+                    midiaSemLegenda
+                      ? 'p-[3px]'
+                      : documentoSemLegenda
+                        ? 'p-[3px] pb-1'
+                        : audioSemLegenda
+                          ? 'px-1.5 pt-1.5 pb-1'
+                          : 'pt-1.5 pr-[7px] pb-2 pl-[9px]',
+                    isMe ? 'bg-chat-bubble-out' : 'bg-chat-bubble-in',
+                    // O rabinho ocupa o canto de cima; o balão perde o arredondamento ali.
+                    inicioDeSequencia && (isMe ? 'rounded-tr-none' : 'rounded-tl-none'),
+                  )}
                 >
+                  {inicioDeSequencia && (
+                    <RabinhoDaBolha
+                      lado={isMe ? 'direita' : 'esquerda'}
+                      className={isMe ? 'text-chat-bubble-out' : 'text-chat-bubble-in'}
+                    />
+                  )}
+                  {!msg.deleted_at && (
+                    <DropdownMenu
+                      open={messageMenuOpenId === msg.id}
+                      onOpenChange={(open) => setMessageMenuOpenId(open ? msg.id : null)}
+                    >
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label="Opções da mensagem"
+                          onClick={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          className={cn(
+                            // Degradê da cor do próprio balão: a setinha fica legível
+                            // sem tampar o texto com um bloco sólido — é o truque do WhatsApp.
+                            'absolute right-0.5 top-0.5 z-10 flex h-4 w-8 items-start justify-end rounded-tr-[7.5px] pr-1 transition-opacity duration-150',
+                            // Sobre foto/vídeo sem legenda o degradê do balão não
+                            // existe por baixo: escurece e clareia o ícone.
+                            midiaSemLegenda
+                              ? 'bg-gradient-to-bl from-black/40 to-transparent text-white'
+                              : cn(
+                                  'text-chat-muted',
+                                  isMe
+                                    ? 'bg-[linear-gradient(to_left,hsl(var(--chat-bubble-out))_55%,transparent)]'
+                                    : 'bg-[linear-gradient(to_left,hsl(var(--chat-bubble-in))_55%,transparent)]',
+                                ),
+                            messageMenuOpenId === msg.id
+                              ? 'opacity-100'
+                              : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto',
+                          )}
+                        >
+                          <ChevronDown className="-mt-0.5 h-[18px] w-[18px]" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <MessageActionsMenu
+                        msg={msg}
+                        isMe={isMe}
+                        podeEditar={isMe && podeEditarNoWhatsapp(msg)}
+                        onReply={handleReply}
+                        onCopy={handleCopyMessage}
+                        onEdit={handleEditMessage}
+                        // Álbum: apagar age sobre TODAS as fotos, então vai pelo apagar
+                        // em lote (seleção com o álbum inteiro marcado + diálogo que
+                        // mostra o total). Apagar só a 1ª foto seria enganoso.
+                        onDelete={
+                          ehAlbum
+                            ? () => {
+                                iniciarSelecaoDoGrupo(paraEncaminhar)
+                                setApagarSelecionadasAberto(true)
+                              }
+                            : setDeleteConfirmMsg
+                        }
+                        onForward={(m: any) => setMsgsParaEncaminhar(ehAlbum ? paraEncaminhar : [m])}
+                        onSelecionar={(m: any) => (ehAlbum ? iniciarSelecaoDoGrupo(paraEncaminhar) : iniciarSelecaoCom(m))}
+                        onReplyPrivately={handleReplyPrivately}
+                        podeResponderPrivadamente={isGroupContact && !isMe && !!msg.group_participant}
+                        onInfo={setMsgInfoAberta}
+                      />
+                    </DropdownMenu>
+                  )}
                   {!msg.deleted_at && msg.reply_to_snapshot && (
                     // ITEM 12: só vira botão quando há para onde pular. Sem
                     // `reply_to_id` a original não está no nosso banco (só o
@@ -4612,8 +5179,17 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                       Encaminhada
                     </div>
                   )}
-                    {messageAttachments.length > 0 && (
-                     <div className="flex flex-col gap-2 mb-2">
+                    {ehAlbum && (
+                      <AlbumDeFotos
+                        itens={itensDoAlbum}
+                        onAbrir={(i) => {
+                          const it = itensDoAlbum[i]
+                          abrirMidiaDaConversa(it.id, 0, { url: it.url, type: it.tipo, name: it.nome })
+                        }}
+                      />
+                    )}
+                    {!ehAlbum && messageAttachments.length > 0 && (
+                     <div className={cn('flex flex-col gap-2', !midiaSemLegenda && !documentoSemLegenda && !audioSemLegenda && 'mb-2')}>
                        {messageAttachments.map((att: any, idx: number) => {
                           if (att && typeof att === 'object' && att.type === 'contact') {
                             return (
@@ -4678,6 +5254,13 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                                    transcription={msg.transcription}
                                    transcriptionStatus={msg.transcription_status}
                                    createdAt={msg.created_at}
+                                   avatar={avatarDoAudio}
+                                   interativo={!modoSelecao}
+                                   rodape={
+                                     audioSemLegenda ? (
+                                       <span className="inline-flex items-center gap-1">{rodape}</span>
+                                     ) : undefined
+                                   }
                                  />
                                </div>
                               )
@@ -4687,8 +5270,13 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                               <button
                                 key={idx}
                                 type="button"
-                                onClick={() => setMediaView({ url: urlDoAnexo, type: 'video', name: att.name })}
-                                className="group relative block w-[300px] max-w-full min-h-[180px] overflow-hidden rounded-xl border border-chat-border bg-black shadow-sm"
+                                onClick={() => abrirMidiaDaConversa(msg.id, idx, { url: urlDoAnexo, type: 'video', name: att.name })}
+                                className={cn(
+                                  'group relative block max-w-full min-h-[180px] overflow-hidden',
+                                  // Sem legenda: sem fundo preto (a miniatura preenche, sem faixas).
+                                  midiaSemLegenda ? 'bg-chat-muted/10' : 'bg-black shadow-sm',
+                                  midiaSemLegenda ? 'w-[330px] rounded-[6px]' : 'w-[300px] rounded-xl border border-chat-border',
+                                )}
                               >
                                 {/* `min-h` fixo no contêiner, não liberado depois: o
                                     fundo é preto e `object-contain` já letterboxa,
@@ -4698,10 +5286,15 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                                   src={urlDoAnexo}
                                   muted
                                   preload="metadata"
-                                  className="w-full max-h-[320px] object-contain pointer-events-none"
+                                  className={cn(
+                                    'w-full max-h-[320px] pointer-events-none',
+                                    // `cover` preenche a área e corta as sobras, como o WhatsApp;
+                                    // `min-h` mantém a reserva enquanto os metadados não chegam.
+                                    midiaSemLegenda ? 'block min-h-[180px] object-cover' : 'object-contain',
+                                  )}
                                 />
                                 <span className="absolute inset-0 flex items-center justify-center">
-                                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-black/55 text-white transition-colors group-hover:bg-black/70">
+                                  <span className={cn('flex h-12 w-12 items-center justify-center rounded-full text-white transition-colors', midiaSemLegenda ? 'bg-black/40 group-hover:bg-black/55' : 'bg-black/55 group-hover:bg-black/70')}>
                                     <Play className="h-6 w-6 translate-x-0.5" fill="currentColor" />
                                   </span>
                                 </span>
@@ -4714,7 +5307,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                               <button
                                 key={idx}
                                 type="button"
-                                onClick={() => setMediaView({ url: urlDoAnexo, type: 'image', name: att.name })}
+                                onClick={() => abrirMidiaDaConversa(msg.id, idx, { url: urlDoAnexo, type: 'image', name: att.name })}
                                 /*
                                   ITEM 6: mais perto do WhatsApp. Saíram a borda,
                                   a sombra e o `hover:scale` — o WhatsApp não tem
@@ -4730,7 +5323,14 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                                   por quê. `object-contain` no lugar de
                                   `object-cover` para nunca cortar a imagem.
                                 */
-                                className="relative block max-w-[320px] overflow-hidden rounded-xl cursor-zoom-in transition-opacity duration-200 hover:opacity-95"
+                                className={cn(
+                                  'relative block overflow-hidden cursor-zoom-in transition-opacity duration-200 hover:opacity-95',
+                                  // Largura natural até 330px: esticar foto pequena (QR code, etiqueta) é bug antigo.
+                                  // `min-h`/fundo seguram o espaço se a foto falhar ao carregar.
+                                  midiaSemLegenda
+                                    ? 'max-w-[330px] min-h-[120px] rounded-[6px] bg-chat-muted/10'
+                                    : 'max-w-[320px] rounded-xl',
+                                )}
                               >
                                 <ChatImage
                                   src={urlDoAnexo}
@@ -4801,6 +5401,13 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                                 transcription={msg.transcription}
                                 transcriptionStatus={msg.transcription_status}
                                 createdAt={msg.created_at}
+                                avatar={avatarDoAudio}
+                                interativo={!modoSelecao}
+                                rodape={
+                                  audioSemLegenda ? (
+                                    <span className="inline-flex items-center gap-1">{rodape}</span>
+                                  ) : undefined
+                                }
                               />
                             </div>
                           )
@@ -4810,17 +5417,26 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                             <button
                               key={idx}
                               type="button"
-                              onClick={() => setMediaView({ url, type: 'video', name: filename })}
-                              className="group relative block max-w-[300px] overflow-hidden rounded-xl border border-chat-border bg-black shadow-sm"
+                              onClick={() => abrirMidiaDaConversa(msg.id, idx, { url, type: 'video', name: filename })}
+                              className={cn(
+                                'group relative block overflow-hidden',
+                                midiaSemLegenda ? 'bg-chat-muted/10' : 'bg-black shadow-sm',
+                                midiaSemLegenda ? 'w-[330px] max-w-full rounded-[6px]' : 'max-w-[300px] rounded-xl border border-chat-border',
+                              )}
                             >
                               <video
                                 src={url}
                                 muted
                                 preload="metadata"
-                                className="w-full max-h-[320px] object-contain pointer-events-none"
+                                className={cn(
+                                    'w-full max-h-[320px] pointer-events-none',
+                                    // `cover` preenche a área e corta as sobras, como o WhatsApp;
+                                    // `min-h` mantém a reserva enquanto os metadados não chegam.
+                                    midiaSemLegenda ? 'block min-h-[180px] object-cover' : 'object-contain',
+                                  )}
                               />
                               <span className="absolute inset-0 flex items-center justify-center">
-                                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-black/55 text-white transition-colors group-hover:bg-black/70">
+                                <span className={cn('flex h-12 w-12 items-center justify-center rounded-full text-white transition-colors', midiaSemLegenda ? 'bg-black/40 group-hover:bg-black/55' : 'bg-black/55 group-hover:bg-black/70')}>
                                   <Play className="h-6 w-6 translate-x-0.5" fill="currentColor" />
                                 </span>
                               </span>
@@ -4832,8 +5448,13 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                             <button
                               key={idx}
                               type="button"
-                              onClick={() => setMediaView({ url, type: 'image', name: filename })}
-                              className="block max-w-[240px] overflow-hidden rounded-xl border border-chat-border hover:opacity-90 hover:scale-[1.02] transition-all duration-300 shadow-sm cursor-zoom-in"
+                              onClick={() => abrirMidiaDaConversa(msg.id, idx, { url, type: 'image', name: filename })}
+                              className={cn(
+                                'block overflow-hidden hover:opacity-90 hover:scale-[1.02] transition-all duration-300 shadow-sm cursor-zoom-in',
+                                midiaSemLegenda
+                                  ? 'max-w-[330px] min-h-[120px] rounded-[6px] bg-chat-muted/10'
+                                  : 'max-w-[240px] rounded-xl border border-chat-border',
+                              )}
                             >
                               <img
                                 src={url}
@@ -4885,7 +5506,20 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                    ) : msg.content?.trim() &&
                        (!isTechnicalPlaceholder(msg.content) ||
                          (isMensagemDeMidiaDesconhecida(msg.content) && messageAttachments.length === 0)) ? (
-                     <div className="text-[15px] leading-relaxed break-words">
+                     <div className="relative text-[14.2px] leading-[19px] break-words">
+                       {/* Texto longo é cortado por altura (~14 linhas) com "Ler mais".
+                           A reserva do horário vai junto, para o rodapé continuar
+                           empurrando a última linha quando o texto está inteiro. */}
+                       <TextoComLerMais
+                         // Ocorrência da busca neste balão: abre expandido, senão o destaque
+                         // (e o pulo até ele) poderia cair no trecho cortado.
+                         abrirExpandido={(rangesByMessageId.get(msg.id) ?? EMPTY_RANGES).length > 0}
+                         reserva={
+                           <span aria-hidden className="invisible inline-flex items-center gap-1 whitespace-nowrap pl-2 align-bottom text-[11px]">
+                             {rodape}
+                           </span>
+                         }
+                       >
                         {isMensagemDeMidiaDesconhecida(msg.content) ? (
                           // SÓ para o rótulo de tipo REALMENTE desconhecido
                           // (`[Mensagem de mídia]` / `[Mensagem de midia]`) e
@@ -4913,100 +5547,45 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                             resolveMention={resolverNomeDaMencao}
                           />
                         )}
-                       <span
-  className={`inline-flex translate-y-[30%] items-center gap-1 whitespace-nowrap ${
-    isMe ? 'float-right ml-3' : 'ml-1'
-  }`}>
-                         {msg.edited_at && (
-                           <span className="text-[10px] text-chat-muted/60">(editado)</span>
-                         )}
-                         {msg.revoked_at && (
-                           <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-red-400">
-                             <Trash2 className="h-3 w-3" /> apagada
-                           </span>
-                         )}
-                         {isMe && msg.status === 'sending' && (
-                           <Clock className="h-3 w-3 text-chat-muted/60 shrink-0" />
-                         )}
-                         {isMe && msg.status === 'failed' && (
-                           // Era só o texto "falhou", sem saída nenhuma: a
-                           // pessoa via o problema e não tinha o que fazer. O
-                           // reenvio sai do payload guardado no aparelho, então
-                           // funciona mesmo depois de recarregar a página.
-                           <button
-                             type="button"
-                             disabled={reenviando === msg.id}
-                             onClick={(e) => {
-                               e.preventDefault()
-                               e.stopPropagation()
-                               void reenviarFalha(msg.id)
-                             }}
-                             className="inline-flex items-center gap-0.5 text-[10px] font-medium text-red-400 hover:text-red-300 hover:underline disabled:opacity-60"
-                           >
-                             {reenviando === msg.id ? (
-                               <Loader2 className="h-3 w-3 animate-spin" />
-                             ) : (
-                               <AlertCircle className="h-3 w-3" />
-                             )}
-                             {reenviando === msg.id ? 'reenviando…' : 'falhou · tentar novamente'}
-                           </button>
-                         )}
-                         <span className="text-[10px] font-medium text-chat-muted/70">{timestamp}</span>
-                         <DropdownMenu
-                           open={messageMenuOpenId === msg.id}
-                           onOpenChange={(open) => setMessageMenuOpenId(open ? msg.id : null)}
-                         >
-                           <DropdownMenuTrigger asChild>
-                             <button
-                               type="button"
-                               onClick={(e) => e.stopPropagation()}
-                               onMouseDown={(e) => e.stopPropagation()}
-                               onPointerDown={(e) => e.stopPropagation()}
-                               className={`text-chat-muted/50 hover:text-chat-muted transition-all duration-150 p-0.5 rounded hover:bg-chat-hover ${
-                                 messageMenuOpenId === msg.id
-                                   ? 'opacity-100 pointer-events-auto'
-                                   : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'
-                               }`}
-                             >
-                               <MoreVertical className="h-3.5 w-3.5" />
-                             </button>
-                           </DropdownMenuTrigger>
-                           <MessageActionsMenu
-                             msg={msg}
-                             isMe={isMe}
-                             podeEditar={isMe && podeEditarNoWhatsapp(msg)}
-                             onReply={handleReply}
-                             onCopy={handleCopyMessage}
-                             onEdit={handleEditMessage}
-                             onDelete={setDeleteConfirmMsg}
-  onForward={(m: any) => setMsgsParaEncaminhar([m])}
-  onSelecionar={iniciarSelecaoCom}
-  onReplyPrivately={handleReplyPrivately}
-  podeResponderPrivadamente={isGroupContact && !isMe && !!msg.group_participant}
-  onInfo={setMsgInfoAberta}
-                           />
-                         </DropdownMenu>
+                       </TextoComLerMais>
+                       {/* Reserva (passada acima): cópia invisível que empurra a
+                           última linha para caber o horário. `invisible`
+                           (visibility:hidden) tira do clique e do foco; `aria-hidden`
+                           tira do leitor de tela. A cópia visível abaixo se ancora no
+                           div de TEXTO (`relative`), não no balão: com reações
+                           abaixo, o balão inteiro ficaria de referência e o horário
+                           desceria para a linha delas. */}
+                       <span className="absolute bottom-0 right-0 inline-flex translate-y-[3px] items-center gap-1 whitespace-nowrap leading-none">
+                         {rodape}
                        </span>
                      </div>
                     ) : null}
-                    {msg.reactions && msg.reactions.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1.5">
+                    {reacoesDoBalao && reacoesDoBalao.length > 0 && (
+                      // Pílula pendurada na borda de baixo do balão (a linha ganha
+                      // `mb-4` para ela não cobrir o próximo balão). Absoluta de
+                      // propósito: assim não empurra o texto nem o horário.
+                      <div
+                        className={cn(
+                          'absolute -bottom-3 z-10 flex items-center gap-0.5 rounded-full bg-chat-bubble-in px-1.5 py-0.5 text-[13px] leading-none shadow-chat ring-2 ring-chat-conversation',
+                          isMe ? 'right-2' : 'left-2',
+                        )}
+                      >
                         {Array.from(
-                          msg.reactions.reduce((acc: Map<string, number>, r: any) => {
+                          reacoesDoBalao.reduce((acc: Map<string, number>, r: any) => {
                             acc.set(r.emoji, (acc.get(r.emoji) || 0) + 1)
                             return acc
-                          }, new Map())
+                          }, new Map()),
                         ).map(([emoji, count]) => (
-                          <span
-                             key={emoji}
-                              className="text-[11px] px-1 py-0.5 rounded-full border border-chat-text/10 bg-chat-text/5"
-                          >
-                            {emoji}{count > 1 ? String(count) : ''}
+                          <span key={emoji as string}>
+                            {emoji as string}
+                            {(count as number) > 1 ? (
+                              <span className="ml-0.5 text-[11px] text-chat-muted">{count as number}</span>
+                            ) : null}
                           </span>
                         ))}
                       </div>
                     )}
-                    {(msg.deleted_at ||
+                    {!ehAlbum && !audioSemLegenda && (msg.deleted_at ||
                       !msg.content?.trim() ||
                       // Rótulo técnico QUALQUER (ex.: "[Imagem]" sem anexo,
                       // "[Áudio]" ao lado do áudio, etc.): só o rodapé, nunca
@@ -5018,91 +5597,43 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                       // se a condição não o excluísse.
                       (isTechnicalPlaceholder(msg.content) &&
                         (!isMensagemDeMidiaDesconhecida(msg.content) || messageAttachments.length > 0))) && (
-                      <div className="mt-1.5 flex items-center justify-end gap-1">
-                        {msg.edited_at && (
-                          <span className="text-[10px] text-chat-muted/60">(editado)</span>
-                        )}
-                        {/* Mídia sem legenda cai neste ramo (o conteúdo vira um
-                            rótulo técnico tipo "[Imagem]"), então o badge do ramo
-                            de texto nunca aparecia para imagem/áudio/vídeo — era
-                            metade da queixa. O `!msg.deleted_at` evita o sinal
-                            duplicado: mensagem apagada pelo próprio operador já
-                            mostra "[Mensagem apagada]" e não deve ganhar o badge
-                            de revoke por cima. */}
-                        {!msg.deleted_at && msg.revoked_at && (
-                          <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-red-400">
-                            <Trash2 className="h-3 w-3" /> apagada
-                          </span>
-                        )}
-                        {/* Relógio e "tentar novamente" também aqui: mídia sem
-                            legenda cai neste rodapé, e sem isto uma foto que
-                            está subindo (ou que falhou) ficava sem sinal
-                            nenhum — só o balão de texto tinha os dois. */}
-                        {isMe && msg.status === 'sending' && (
-                          <Clock className="h-3 w-3 text-chat-muted/60 shrink-0" />
-                        )}
-                        {isMe && msg.status === 'failed' && (
-                          <button
-                            type="button"
-                            disabled={reenviando === msg.id}
-                            onClick={(e) => {
-                              e.preventDefault()
-                              e.stopPropagation()
-                              void reenviarFalha(msg.id)
-                            }}
-                            className="inline-flex items-center gap-0.5 text-[10px] font-medium text-red-400 hover:text-red-300 hover:underline disabled:opacity-60"
-                          >
-                            {reenviando === msg.id ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            ) : (
-                              <AlertCircle className="h-3 w-3" />
-                            )}
-                            {reenviando === msg.id ? 'reenviando…' : 'falhou · tentar novamente'}
-                          </button>
-                        )}
-                        <span className="text-[10px] font-medium text-chat-muted/70 translate-y-[1px]">
-                          {timestamp}
-                        </span>
-                        {!msg.deleted_at && (
-                          <DropdownMenu
-                            open={messageMenuOpenId === msg.id}
-                            onOpenChange={(open) => setMessageMenuOpenId(open ? msg.id : null)}
-                          >
-                            <DropdownMenuTrigger asChild>
-                              <button
-                                type="button"
-                                onClick={(e) => e.stopPropagation()}
-                                onMouseDown={(e) => e.stopPropagation()}
-                                onPointerDown={(e) => e.stopPropagation()}
-                                className={`text-chat-muted/50 hover:text-chat-muted transition-all duration-150 p-0.5 rounded hover:bg-chat-hover ${
-                                  messageMenuOpenId === msg.id
-                                    ? 'opacity-100 pointer-events-auto'
-                                    : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'
-                                }`}
-                              >
-                                <MoreVertical className="h-3.5 w-3.5" />
-                              </button>
-                            </DropdownMenuTrigger>
-                            <MessageActionsMenu
-                              msg={msg}
-                              isMe={isMe}
-                              podeEditar={isMe && podeEditarNoWhatsapp(msg)}
-                              onReply={handleReply}
-                              onCopy={handleCopyMessage}
-                              onEdit={handleEditMessage}
-                              onDelete={setDeleteConfirmMsg}
-  onForward={(m: any) => setMsgsParaEncaminhar([m])}
-  onSelecionar={iniciarSelecaoCom}
-  onReplyPrivately={handleReplyPrivately}
-  podeResponderPrivadamente={isGroupContact && !isMe && !!msg.group_participant}
-  onInfo={setMsgInfoAberta}
-                            />
-                          </DropdownMenu>
-                        )}
-                      </div>
+                      midiaSemLegenda ? (
+                        <>
+                          {/* Degradê escuro no pé da mídia para o horário branco
+                              ler sobre qualquer foto. Nenhum dos dois captura
+                              clique (o de "tentar novamente" reativa o seu). */}
+                          <div className="pointer-events-none absolute inset-x-[3px] bottom-[3px] h-7 rounded-b-[6px] bg-gradient-to-t from-black/50 to-transparent" />
+                          <div className="pointer-events-none absolute bottom-[7px] right-[9px] z-[1] flex items-center gap-1 whitespace-nowrap leading-none [&_button]:pointer-events-auto">
+                            {rodape}
+                          </div>
+                        </>
+                      ) : (
+                        <div className={cn('flex items-center justify-end gap-1', documentoSemLegenda ? 'mt-0.5 pr-1' : 'mt-1.5')}>
+                          {rodape}
+                        </div>
+                      )
                     )}
                      {!msg.deleted_at && (
-                       <div className={`absolute top-1/2 z-10 -translate-y-1/2 ${isMe ? '-left-8' : '-right-8'}`}>
+                       // Botões do lado de fora do balão, lado a lado e centralizados
+                       // na altura dele: ➦ (só em foto/vídeo/documento) COLADO ao
+                       // balão e 😊 por fora. Enviadas: `😊 ➦ [balão]`; recebidas:
+                       // `[balão] ➦ 😊` (a linha inverte). O padding do lado do balão
+                       // fecha o vão, então o hover não se perde no caminho.
+                       // `hidden sm:flex`: no celular a coluna passaria da tela e
+                       // criaria rolagem horizontal.
+                       <div
+                         className={cn(
+                           'absolute top-1/2 z-10 hidden -translate-y-1/2 items-center gap-1.5 sm:flex',
+                           isMe ? 'right-full flex-row pr-1.5' : 'left-full flex-row-reverse pl-1.5',
+                           // Com o menu radial aberto a coluna inteira precisa
+                           // aceitar clique, senão o arco (que é filho dela) fica
+                           // morto ao cruzar o vão.
+                           reactionPopoverMessageId === msg.id
+                             ? 'pointer-events-auto'
+                             : 'pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto',
+                         )}
+                       >
+                        <div className="relative">
                          <button
                            type="button"
                            aria-label="Adicionar reação"
@@ -5118,11 +5649,12 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                            }}
                            onMouseDown={(e) => e.stopPropagation()}
                            onPointerDown={(e) => e.stopPropagation()}
-                           className={`flex h-8 w-8 items-center justify-center rounded-full border border-chat-border bg-chat-panel text-chat-muted shadow-chat transition-all duration-150 hover:bg-chat-hover hover:text-chat-text ${
+                           className={cn(
+                             'flex h-[26px] w-[26px] items-center justify-center rounded-full bg-black/[0.06] text-chat-muted transition-all duration-150 hover:bg-black/10 hover:text-chat-text dark:bg-white/10 dark:hover:bg-white/15',
                              reactionPopoverMessageId === msg.id
                                ? 'opacity-100 pointer-events-auto scale-100'
-                               : 'opacity-0 pointer-events-none scale-95 group-hover:opacity-100 group-hover:pointer-events-auto group-hover:scale-100 group-focus-within:opacity-100 group-focus-within:pointer-events-auto group-focus-within:scale-100'
-                           }`}
+                               : 'opacity-0 pointer-events-none scale-95 group-hover:opacity-100 group-hover:pointer-events-auto group-hover:scale-100 group-focus-within:opacity-100 group-focus-within:pointer-events-auto group-focus-within:scale-100',
+                           )}
                          >
                            <Smile className="h-4 w-4" />
                          </button>
@@ -5150,6 +5682,24 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                              }}
                            />
                          )}
+                        </div>
+                        {podeEncaminharRapido && (
+                          <button
+                            type="button"
+                            aria-label="Encaminhar"
+                            title="Encaminhar"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              setMsgsParaEncaminhar(paraEncaminhar)
+                            }}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            className="pointer-events-auto flex h-[26px] w-[26px] items-center justify-center rounded-full bg-black/[0.06] text-chat-muted transition-colors duration-150 hover:bg-black/10 hover:text-chat-text dark:bg-white/10 dark:hover:bg-white/15"
+                          >
+                            <Forward className="h-4 w-4" />
+                          </button>
+                        )}
                        </div>
                      )}
                  </div>
@@ -5183,6 +5733,9 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     // Estado de interação que muda o desenho
     modoSelecao,
     estaSelecionada,
+    albuns,
+    mensagensPorId,
+    abrirMidiaDaConversa,
     messageMenuOpenId,
     reactionPopoverMessageId,
     mensagemDestacada,
@@ -5190,6 +5743,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     // Ações (todas memorizadas na origem — ver `sendListOptionAsText`)
     alternarSelecao,
     iniciarSelecaoCom,
+    iniciarSelecaoDoGrupo,
     iniciarLongPress,
     moverLongPress,
     cancelarLongPress,
@@ -6052,8 +6606,9 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         {/* Wrapper observado pelo ResizeObserver. Precisa existir: observar o
             container de rolagem devolveria o tamanho da JANELA, que não muda
             quando uma foto carrega — é a altura do CONTEÚDO que cresce.
-            `py-4 space-y-3` mora aqui porque `space-y` age nos filhos diretos. */}
-        <div ref={conteudoRef} className="py-4 space-y-3">
+            `py-4` mora aqui; o espaço entre balões vem da margem de cada linha
+            (`mt-3` ao trocar de quem fala, `mt-0.5` dentro da sequência). */}
+        <div ref={conteudoRef} className="py-4">
         {messages.length === 0 && estadoConversa === 'carregando' ? (
           // Carregando: bolhas fantasma alternadas. Antes só existiam dois
           // caminhos — "tem mensagem" ou "não tem" —, então enquanto a busca
@@ -6062,7 +6617,7 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className={cn('flex', i % 2 === 0 ? 'justify-start' : 'justify-end')}>
                 <div
-                  className="h-14 rounded-2xl bg-chat-muted/10 animate-pulse"
+                  className="h-14 rounded-[7.5px] bg-chat-muted/10 animate-pulse"
                   style={{ width: `${38 + ((i * 13) % 34)}%` }}
                 />
               </div>
@@ -6105,24 +6660,24 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
             edição já avisa). Ver reset por conversa e a busca logo acima. */}
         {tentativasAbertas
           .filter((t) => t.tipo !== 'edicao')
-          .map((t) => {
+          .map((t, i) => {
             const falhou = t.status === 'falhou'
             // Mídia sem `anexos` gravado não tem o que reenviar (o arquivo já
             // se foi) — só dá para descartar.
             const podeReenviar = !(t.tipo === 'midia' && !t.anexos)
             return (
-              <div key={`tentativa-${t.id}`} className="flex flex-col items-end gap-1">
+              <div key={`tentativa-${t.id}`} className={cn('flex flex-col items-end gap-1', i === 0 ? 'mt-3' : 'mt-0.5')}>
                 <div className="flex gap-2.5 items-end w-full justify-end">
                   <div
                     className={cn(
-                      'max-w-[88%] sm:max-w-[78%] rounded-2xl rounded-br-sm px-3.5 py-2 shadow-chat-bubble border text-chat-text',
+                      'max-w-[88%] sm:max-w-[65%] rounded-[7.5px] pt-1.5 pr-[7px] pb-2 pl-[9px] shadow-chat-bubble border text-chat-text',
                       falhou
                         ? 'bg-red-500/10 border-red-500/40'
                         : 'bg-chat-bubble-out border-chat-bubble-outline',
                     )}
                   >
                     {t.conteudo?.trim() && (
-                      <div className="text-[15px] leading-relaxed break-words whitespace-pre-wrap">
+                      <div className="text-[14.2px] leading-[19px] break-words whitespace-pre-wrap">
                         {t.conteudo}
                       </div>
                     )}
@@ -6199,6 +6754,27 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
           })}
         </div>
         </div>
+        {/* Irmão do container de rolagem (e não filho): senão rolaria junto. Fica
+            acima do compositor e do que o empilha (citação, prévia), que são
+            irmãos DESTA área; os menus "/" e de menção abrem no canto esquerdo. */}
+        {longeDoFim && messages.length > 0 && (
+          <button
+            type="button"
+            onClick={irParaAsUltimas}
+            aria-label="Ir para as mensagens mais recentes"
+            className="absolute bottom-4 right-4 z-20 flex h-[42px] w-[42px] items-center justify-center rounded-full bg-chat-panel text-chat-muted shadow-chat transition-colors hover:text-chat-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 sm:right-6 motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-90 motion-safe:duration-150"
+          >
+            <ChevronDown className="h-[22px] w-[22px]" />
+            {novasRecebidas > 0 && (
+              <span
+                aria-label={`${novasRecebidas} mensagens novas`}
+                className="absolute -top-2 left-1/2 flex h-5 min-w-5 -translate-x-1/2 items-center justify-center rounded-full bg-emerald-500 px-1 text-[11px] font-medium leading-none text-white"
+              >
+                {novasRecebidas > 99 ? '99+' : novasRecebidas}
+              </span>
+            )}
+          </button>
+        )}
       </div>
 
       <Dialog open={isTaskModalOpen} onOpenChange={setIsTaskModalOpen}>
@@ -7460,7 +8036,10 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
         )}
         <MediaViewer
           media={mediaView}
-          onClose={() => setMediaView(null)}
+          lista={listaDoVisualizador}
+          indiceInicial={indiceInicialDoVisualizador}
+          acoes={acoesDoVisualizador}
+          onClose={fecharVisualizador}
           aoSalvarFigurinha={async (m) => {
             if (!user?.id) return
             try {
