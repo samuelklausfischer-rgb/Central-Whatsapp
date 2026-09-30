@@ -44,7 +44,9 @@ export const FERRAMENTAS_HOSPEDADAS: Record<string, FerramentaHospedavel> = {
   // "Reportar problema", que diz de onde a pessoa está reportando. Três ficaram
   // para trás do renome de 04/09 e diziam o nome antigo — "Análise PRN" onde o
   // menu já dizia "Cruzar Contas".
-  'analise-prn': { titulo: 'Cruzar Contas', url: '/ferramentas/analise-prn', Componente: AnalisePrn },
+  // `telaCheia` desde 30/09: a aba principal virou o app de conferência embutido
+  // por iframe. A aba "Por planilha" põe o próprio respiro e a própria rolagem.
+  'analise-prn': { titulo: 'Cruzar Contas', url: '/ferramentas/analise-prn', Componente: AnalisePrn, telaCheia: true },
   'rateio-mobilemed': { titulo: 'Rateio', url: '/ferramentas/rateio-mobilemed', Componente: RateioMobilemed },
   'relatorio-app': { titulo: 'Relatório App', url: '/ferramentas/relatorio-app', Componente: RelatorioApp },
   // Nativa, então SEM `telaCheia`: recebe o respiro e a largura máxima do painel,

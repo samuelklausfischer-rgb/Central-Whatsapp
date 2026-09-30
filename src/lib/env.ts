@@ -7,6 +7,7 @@ type AppRuntimeConfig = {
   VITE_PRN_HUB_APP_URL?: string
   VITE_GESTAO_MEDICA_APP_URL?: string
   VITE_PROPOSTA_APP_URL?: string
+  VITE_CONFERENCIA_PAGAMENTO_APP_URL?: string
 }
 
 /**
@@ -55,6 +56,15 @@ const GESTAO_MEDICA_APP_URL_PADRAO = 'https://frontends-gestao-medica.srofjl.eas
  * antiga do EasyPanel é ignorada e o código usa este mesmo endereço".
  */
 const PROPOSTA_APP_URL_PADRAO = 'https://frontends-propostacomercial.srofjl.easypanel.host'
+/**
+ * Conferência de pagamentos (serviço `frontends/conferenciapagamento`, repositório
+ * `samuelklausfischer-rgb/prn-conferencia-pagamentos`). É a aba principal do
+ * Cruzar Contas desde 30/09/2026: cruza o dia com os 3 meses anteriores lendo
+ * direto da Omie, sem planilha. Aponta para `/conferencia`, não para a raiz —
+ * a raiz é o "Painel do mês", e a própria página tem link entre as duas.
+ */
+const CONFERENCIA_PAGAMENTO_APP_URL_PADRAO =
+  'https://frontends-conferenciapagamento.srofjl.easypanel.host/conferencia'
 
 declare global {
   interface Window {
@@ -108,4 +118,8 @@ export const appEnv = {
     runtimeConfig?.VITE_PROPOSTA_APP_URL ||
     import.meta.env.VITE_PROPOSTA_APP_URL ||
     PROPOSTA_APP_URL_PADRAO,
+  VITE_CONFERENCIA_PAGAMENTO_APP_URL:
+    runtimeConfig?.VITE_CONFERENCIA_PAGAMENTO_APP_URL ||
+    import.meta.env.VITE_CONFERENCIA_PAGAMENTO_APP_URL ||
+    CONFERENCIA_PAGAMENTO_APP_URL_PADRAO,
 }

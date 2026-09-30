@@ -28,6 +28,8 @@ import { ResultsDashboard } from '@/components/prn-analise/duplicity-dashboard'
 import { parsePrnDailyReceipts } from '@/lib/prn-analise/prn-daily-parser'
 import { extractHistoricalRows, HISTORY_MONTH_WINDOW } from '@/lib/prn-analise/prn-history-workbook'
 import { formatMonthList } from '@/lib/prn-analise/audit-utils'
+import { ToolFrame } from '@/components/tools/ToolFrame'
+import { appEnv } from '@/lib/env'
 
 const normalizePrnPayloadWithDailyFile = async (payload: any, dailyFile: File, referenceDate?: string) => {
   const parsed = await parsePrnDailyReceipts(dailyFile, { referenceDate })
@@ -453,12 +455,77 @@ function PrnAnalysisInner() {
   )
 }
 
+type Aba = 'omie' | 'planilha'
+
+/**
+ * Duas abas desde 30/09/2026.
+ *
+ * "Omie" embute o app `conferenciapagamento`, que cruza o dia com os 3 meses
+ * anteriores lendo direto da Omie (PRN, MedImagem e Palhoça) — sem subir
+ * planilha. "Por planilha" é o fluxo antigo, via n8n, mantido para o que está
+ * fora dessas três contas e para comparar enquanto o novo é validado.
+ *
+ * As duas ficam MONTADAS depois da primeira visita e só se escondem: desmontar
+ * o iframe o recarregaria do zero, e desmontar a de planilha perderia o
+ * relatório aberto. A de planilha só monta quando alguém entra nela, porque é
+ * ela que exige o login no Supabase financeiro.
+ */
 export default function AnalisePrn() {
+  const [aba, setAba] = useState<Aba>('omie')
+  const [planilhaVisitada, setPlanilhaVisitada] = useState(false)
+
+  const escolher = (proxima: Aba) => {
+    if (proxima === 'planilha') setPlanilhaVisitada(true)
+    setAba(proxima)
+  }
+
   return (
-    <FinanceiroAuthProvider>
-      <FinanceiroLoginGate>
-        <PrnAnalysisInner />
-      </FinanceiroLoginGate>
-    </FinanceiroAuthProvider>
+    <div className="flex h-full w-full flex-col">
+      <div role="tablist" aria-label="Modo do Cruzar Contas" className="flex shrink-0 gap-1 border-b border-border bg-background px-4 pt-2">
+        {(
+          [
+            ['omie', 'Omie · conferência do dia'],
+            ['planilha', 'Por planilha'],
+          ] as const
+        ).map(([id, rotulo]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={aba === id}
+            onClick={() => escolher(id)}
+            className={
+              'rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition-colors ' +
+              (aba === id
+                ? 'border-primary text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground')
+            }
+          >
+            {rotulo}
+          </button>
+        ))}
+      </div>
+
+      <div className="relative min-h-0 flex-1">
+        <div className={aba === 'omie' ? 'h-full' : 'hidden'}>
+          <ToolFrame
+            title="Conferência de pagamentos"
+            baseUrl={appEnv.VITE_CONFERENCIA_PAGAMENTO_APP_URL}
+            envVarName="VITE_CONFERENCIA_PAGAMENTO_APP_URL"
+            prontidao="ao-carregar"
+          />
+        </div>
+
+        {planilhaVisitada && (
+          <div className={aba === 'planilha' ? 'h-full overflow-y-auto' : 'hidden'}>
+            <FinanceiroAuthProvider>
+              <FinanceiroLoginGate>
+                <PrnAnalysisInner />
+              </FinanceiroLoginGate>
+            </FinanceiroAuthProvider>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
