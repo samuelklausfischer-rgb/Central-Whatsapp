@@ -10,6 +10,7 @@ import {
   Bell,
   BarChart3,
   Percent,
+  Landmark,
   Stethoscope,
   Activity,
   Timer,
@@ -174,6 +175,14 @@ const RATEIO: DestinoNav = {
   url: '/ferramentas/rateio-mobilemed',
 }
 
+/** Conciliação bancária: extrato × Omie. Padrão do setor Financeiro, como Cruzar Contas e Rateio. */
+const CONCILIACAO: DestinoNav = {
+  title: 'Conciliação',
+  description: 'Extrato do banco × Omie',
+  icon: Landmark,
+  url: '/ferramentas/conciliacao',
+}
+
 /**
  * Gestão Médica: cadastro de médicos, contratos e documentos. Padrão pelo SETOR
  * (Administrativo), como Cruzar Contas e Rateio são pelo Financeiro — mas desde
@@ -309,6 +318,7 @@ export function gruposDeFerramentas(
   const sistemas: DestinoNav[] = [
     ...(pode('analise-prn') ? [ANALISE_PRN] : []),
     ...(pode('rateio-mobilemed') ? [RATEIO] : []),
+    ...(pode('conciliacao') ? [CONCILIACAO] : []),
     ...(pode('gestao-medica') ? [GESTAO_MEDICA] : []),
     ...(pode('proposta-comercial') ? [PROPOSTA_COMERCIAL] : []),
     ...(pode('relatorios') ? [RELATORIOS] : []),

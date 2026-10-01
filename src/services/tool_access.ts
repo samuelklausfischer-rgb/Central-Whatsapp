@@ -34,6 +34,7 @@ export type ToolName =
   | 'controle-mensagens'
   | 'analise-prn'
   | 'rateio-mobilemed'
+  | 'conciliacao'
   | 'gestao-medica'
   | 'relatorio-app'
   | 'relatorios'
