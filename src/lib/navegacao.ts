@@ -11,6 +11,7 @@ import {
   BarChart3,
   Percent,
   Landmark,
+  FileSpreadsheet,
   Stethoscope,
   Activity,
   Timer,
@@ -183,6 +184,14 @@ const CONCILIACAO: DestinoNav = {
   url: '/ferramentas/conciliacao',
 }
 
+/** Faturamento por unidade: Bruto da Mobilemed → relatório de cada unidade. Padrão do Financeiro, como a Conciliação. */
+const FATURAMENTO: DestinoNav = {
+  title: 'Faturamento',
+  description: 'Relatório por unidade',
+  icon: FileSpreadsheet,
+  url: '/ferramentas/faturamento',
+}
+
 /**
  * Gestão Médica: cadastro de médicos, contratos e documentos. Padrão pelo SETOR
  * (Administrativo), como Cruzar Contas e Rateio são pelo Financeiro — mas desde
@@ -319,6 +328,7 @@ export function gruposDeFerramentas(
     ...(pode('analise-prn') ? [ANALISE_PRN] : []),
     ...(pode('rateio-mobilemed') ? [RATEIO] : []),
     ...(pode('conciliacao') ? [CONCILIACAO] : []),
+    ...(pode('faturamento') ? [FATURAMENTO] : []),
     ...(pode('gestao-medica') ? [GESTAO_MEDICA] : []),
     ...(pode('proposta-comercial') ? [PROPOSTA_COMERCIAL] : []),
     ...(pode('relatorios') ? [RELATORIOS] : []),

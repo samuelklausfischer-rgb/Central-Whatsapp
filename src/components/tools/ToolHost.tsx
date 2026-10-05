@@ -22,6 +22,7 @@ const PrnHub = lazy(() => import('@/pages/tools/PrnHub'))
 const DisparadorEmMassa = lazy(() => import('@/pages/tools/DisparadorEmMassa'))
 const GestaoMedica = lazy(() => import('@/pages/tools/GestaoMedica'))
 const Conciliacao = lazy(() => import('@/pages/tools/Conciliacao'))
+const Faturamento = lazy(() => import('@/pages/tools/faturamento/faturamento-modulo'))
 
 interface FerramentaHospedavel {
   titulo: string
@@ -50,6 +51,8 @@ export const FERRAMENTAS_HOSPEDADAS: Record<string, FerramentaHospedavel> = {
   'analise-prn': { titulo: 'Cruzar Contas', url: '/ferramentas/analise-prn', Componente: AnalisePrn, telaCheia: true },
   // Embutida por iframe (sessão do Supabase pelo handshake): `telaCheia`.
   conciliacao: { titulo: 'Conciliação', url: '/ferramentas/conciliacao', Componente: Conciliacao, telaCheia: true },
+  // Nativa (telas no próprio app), então SEM `telaCheia`: recebe o respiro do painel.
+  faturamento: { titulo: 'Faturamento', url: '/ferramentas/faturamento', Componente: Faturamento },
   'rateio-mobilemed': { titulo: 'Rateio', url: '/ferramentas/rateio-mobilemed', Componente: RateioMobilemed },
   'relatorio-app': { titulo: 'Relatório App', url: '/ferramentas/relatorio-app', Componente: RelatorioApp },
   // Nativa, então SEM `telaCheia`: recebe o respiro e a largura máxima do painel,

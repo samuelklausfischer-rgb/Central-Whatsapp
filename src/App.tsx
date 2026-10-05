@@ -203,6 +203,9 @@ const App = () => {
                 <Route element={<FerramentaRoute slug="conciliacao" />}>
                   <Route path="/ferramentas/conciliacao" element={<FerramentaHospedada slug="conciliacao" />} />
                 </Route>
+                <Route element={<FerramentaRoute slug="faturamento" />}>
+                  <Route path="/ferramentas/faturamento" element={<FerramentaHospedada slug="faturamento" />} />
+                </Route>
                 <Route element={<FerramentaRoute slug="rateio-mobilemed" />}>
                   <Route path="/ferramentas/rateio-mobilemed" element={<FerramentaHospedada slug="rateio-mobilemed" />} />
                 </Route>

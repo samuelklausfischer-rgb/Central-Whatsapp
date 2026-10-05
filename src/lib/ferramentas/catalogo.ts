@@ -262,6 +262,21 @@ export const CATALOGO_DE_FERRAMENTAS: FerramentaDoCatalogo[] = [
     padraoDescricao: 'Financeiro e administradores',
   },
   {
+    slug: 'faturamento',
+    titulo: 'Faturamento',
+    grupo: 'sistema',
+    liberacao: 'excecao',
+    // ⚠️ A chave TEM de ser exatamente `faturamento`: o banco espelha esta regra
+    // em `faturamento_unidades._pode_usar()` (policies do schema e a Edge Function
+    // fat-simular), lendo `public.tool_access` com `tool = 'faturamento'`.
+    // Mudar aqui sem mudar lá descola menu e porteiro.
+    chave: 'faturamento',
+    explicacao:
+      'Faturamento por unidade: sobe o Bruto da Mobilemed e sai o relatório de cada unidade, separado pelos 4 grupos (PRN, PRN Ápice Tele, Medimagem, Medimagem Ápice Tele).',
+    padrao: (c) => canAccessFinanceiroTools(c.perfil),
+    padraoDescricao: 'Financeiro e administradores',
+  },
+  {
     slug: 'rateio-mobilemed',
     titulo: 'Rateio',
     grupo: 'sistema',
