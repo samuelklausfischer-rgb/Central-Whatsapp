@@ -34,6 +34,18 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.220',
+    date: '2026-10-05 18:00',
+    title: 'Nova ferramenta: Faturamento por unidade',
+    details: [
+      '🧾 Faturamento: nova ferramenta em Mais > Sistemas PRN. Você sobe o Bruto da Mobilemed (um ou mais arquivos) e sai o relatório de cada unidade, com valores pelo contrato, separado pelos 4 grupos: PRN, PRN Ápice Tele, Medimagem e Medimagem Ápice Tele',
+      '📦 Baixa tudo de uma vez: um ZIP com uma pasta por grupo e o Excel consolidado para apresentação',
+      '🔐 Quem abre: financeiro e administradores, como Conciliação e Rateio. Dá para liberar ou bloquear pessoa a pessoa em Administração',
+    ],
+    usabilidade:
+      'Abra Mais > Faturamento > Gerar relatório, escolha o Bruto do mês e confira o mês sugerido. No fim, abra o relatório e baixe o ZIP por grupo.',
+  },
+  {
     version: '0.0.219',
     date: '2026-10-01 12:00',
     title: 'Nova ferramenta: Conciliação bancária',

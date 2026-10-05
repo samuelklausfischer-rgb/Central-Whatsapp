@@ -35,6 +35,7 @@ export type ToolName =
   | 'analise-prn'
   | 'rateio-mobilemed'
   | 'conciliacao'
+  | 'faturamento'
   | 'gestao-medica'
   | 'relatorio-app'
   | 'relatorios'
