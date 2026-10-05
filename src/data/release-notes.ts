@@ -34,6 +34,17 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.219',
+    date: '2026-10-01 12:00',
+    title: 'Nova ferramenta: Conciliação bancária',
+    details: [
+      '🏦 Conciliação: nova ferramenta em Mais > Sistemas PRN. Mostra o extrato do banco ao lado do que está lançado no Omie, com sugestão de nota fiscal para cada linha e a conferência do que fecha e do que não fecha',
+      '🔐 Quem abre: financeiro e administradores, como Cruzar Contas e Rateio. Dá para liberar ou bloquear pessoa a pessoa em Administração, no mesmo painel das outras ferramentas',
+    ],
+    usabilidade:
+      'Abra Mais > Conciliação, entre com a sessão que você já tem aqui (não pede outro login) e envie o extrato do banco para ver o que bate com o Omie.',
+  },
+  {
     version: '0.0.218',
     date: '2026-09-04 11:30',
     title: 'A Proposta Comercial agora é o gerador de verdade',

@@ -27,7 +27,8 @@ const OBRIGATORIAS = [
 
 /**
  * As URLs dos apps embutidos na aba Ferramentas NÃO entram em OBRIGATORIAS: as
- * cinco têm padrão de produção em `src/lib/env.ts`, então buildar sem elas é
+ * cinco têm padrão de produção em `src/lib/env.ts` (a da Conciliação, `VITE_CONCILIACAO_APP_URL`,
+ * entrou em 01/10/2026 também com padrão), então buildar sem elas é
  * intencional e não quebra ninguém. A da Proposta Comercial foi a última a
  * ganhar padrão (04/09/2026), quando a ferramenta virou iframe — antes ela
  * tinha um caminho local de reserva que tornava o vazio aceitável.

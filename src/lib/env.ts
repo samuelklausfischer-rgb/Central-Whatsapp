@@ -8,6 +8,7 @@ type AppRuntimeConfig = {
   VITE_GESTAO_MEDICA_APP_URL?: string
   VITE_PROPOSTA_APP_URL?: string
   VITE_CONFERENCIA_PAGAMENTO_APP_URL?: string
+  VITE_CONCILIACAO_APP_URL?: string
 }
 
 /**
@@ -65,6 +66,15 @@ const PROPOSTA_APP_URL_PADRAO = 'https://frontends-propostacomercial.srofjl.easy
  */
 const CONFERENCIA_PAGAMENTO_APP_URL_PADRAO =
   'https://frontends-conferenciapagamento.srofjl.easypanel.host/conferencia'
+/**
+ * Conciliação bancária (extrato do banco × Omie, com sugestão de nota; repositório
+ * `PRN-conciliacao-financeira`). Embutida por iframe com a sessão do Supabase
+ * passada pelo handshake `central-whats-embed` — mesmo projeto Supabase do
+ * Central, então a sessão atravessa e o app confere o acesso em
+ * `public.tool_access` (`tool = 'conciliacao'`). Padrão no código pela mesma
+ * lição da v0.0.207 explicada acima.
+ */
+const CONCILIACAO_APP_URL_PADRAO = 'https://frontends-conciliacao.srofjl.easypanel.host'
 
 declare global {
   interface Window {
@@ -122,4 +132,8 @@ export const appEnv = {
     runtimeConfig?.VITE_CONFERENCIA_PAGAMENTO_APP_URL ||
     import.meta.env.VITE_CONFERENCIA_PAGAMENTO_APP_URL ||
     CONFERENCIA_PAGAMENTO_APP_URL_PADRAO,
+  VITE_CONCILIACAO_APP_URL:
+    runtimeConfig?.VITE_CONCILIACAO_APP_URL ||
+    import.meta.env.VITE_CONCILIACAO_APP_URL ||
+    CONCILIACAO_APP_URL_PADRAO,
 }

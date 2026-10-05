@@ -21,6 +21,7 @@ const PropostaComercial = lazy(() => import('@/pages/tools/PropostaComercial'))
 const PrnHub = lazy(() => import('@/pages/tools/PrnHub'))
 const DisparadorEmMassa = lazy(() => import('@/pages/tools/DisparadorEmMassa'))
 const GestaoMedica = lazy(() => import('@/pages/tools/GestaoMedica'))
+const Conciliacao = lazy(() => import('@/pages/tools/Conciliacao'))
 
 interface FerramentaHospedavel {
   titulo: string
@@ -47,6 +48,8 @@ export const FERRAMENTAS_HOSPEDADAS: Record<string, FerramentaHospedavel> = {
   // `telaCheia` desde 30/09: a aba principal virou o app de conferência embutido
   // por iframe. A aba "Por planilha" põe o próprio respiro e a própria rolagem.
   'analise-prn': { titulo: 'Cruzar Contas', url: '/ferramentas/analise-prn', Componente: AnalisePrn, telaCheia: true },
+  // Embutida por iframe (sessão do Supabase pelo handshake): `telaCheia`.
+  conciliacao: { titulo: 'Conciliação', url: '/ferramentas/conciliacao', Componente: Conciliacao, telaCheia: true },
   'rateio-mobilemed': { titulo: 'Rateio', url: '/ferramentas/rateio-mobilemed', Componente: RateioMobilemed },
   'relatorio-app': { titulo: 'Relatório App', url: '/ferramentas/relatorio-app', Componente: RelatorioApp },
   // Nativa, então SEM `telaCheia`: recebe o respiro e a largura máxima do painel,

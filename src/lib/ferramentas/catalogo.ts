@@ -249,6 +249,19 @@ export const CATALOGO_DE_FERRAMENTAS: FerramentaDoCatalogo[] = [
     padraoDescricao: 'Financeiro e administradores',
   },
   {
+    slug: 'conciliacao',
+    titulo: 'Conciliação',
+    grupo: 'sistema',
+    liberacao: 'excecao',
+    // ⚠️ A chave TEM de ser exatamente `conciliacao`: o servidor do app embutido
+    // espelha esta regra no banco, lendo `public.tool_access` com
+    // `tool = 'conciliacao'`. Mudar aqui sem mudar lá descola menu e porteiro.
+    chave: 'conciliacao',
+    explicacao: 'Conciliação bancária: extrato do banco × Omie, com sugestão de nota.',
+    padrao: (c) => canAccessFinanceiroTools(c.perfil),
+    padraoDescricao: 'Financeiro e administradores',
+  },
+  {
     slug: 'rateio-mobilemed',
     titulo: 'Rateio',
     grupo: 'sistema',

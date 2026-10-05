@@ -28,6 +28,7 @@ export type ProjetoDoHub =
   | 'sistema-relatorios'
   | 'prn-rateio'
   | 'prn-financeiro'
+  | 'sistema-de-conciliacao-financeira'
 
 /**
  * Ferramenta embutida → projeto dono dela.
@@ -47,6 +48,8 @@ const PROJETO_DA_FERRAMENTA: Record<string, ProjetoDoHub> = {
   // Decisão do Samuel (08/09): a tela mora aqui, mas o acompanhamento é feito
   // na fila financeira.
   'analise-prn': 'prn-financeiro',
+  // Repositório próprio (PRN-conciliacao-financeira), com fila própria no Hub.
+  conciliacao: 'sistema-de-conciliacao-financeira',
 }
 
 /**
@@ -164,4 +167,5 @@ export const NOME_DO_PROJETO: Record<ProjetoDoHub, string> = {
   'sistema-relatorios': 'Sistema de Relatórios',
   'prn-rateio': 'PRN Rateio',
   'prn-financeiro': 'PRN Financeiro',
+  'sistema-de-conciliacao-financeira': 'Sistema de Conciliação Financeira',
 }
