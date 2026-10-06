@@ -8,7 +8,8 @@ export interface UnidadeResumo {
 }
 // Regras de faturamento da unidade (colunas novas da fase 2 — lidas da tabela `unidade`,
 // porque a view v_unidade_resumo congela as colunas no momento em que foi criada)
-export type Janela = 'mes' | 'ciclo_27_26' | 'quinzena'
+export type { Janela } from '../nucleo/motor'
+import type { Janela } from '../nucleo/motor'
 export type CriterioData = 'laudo' | 'exame' | null
 export interface RegrasUnidade {
   id: string; janela: Janela; criterio_data: CriterioData; franquia_mensal: number | null; todos_status: boolean; estudos_conta_2: string | null

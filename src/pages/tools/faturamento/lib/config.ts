@@ -1,6 +1,7 @@
 // Lógica pura da tela de Configuração (agrupamento, resumos e textos de regras).
 import type { CriterioData, PapelItem, PrecoVigente, RegrasUnidade } from './tipos'
 import { MODELO, brl } from './format'
+import { diaDeCorte } from '../nucleo/motor'
 
 export const GRUPO_PROPRIO_PRN = 'Contrato próprio — PRN'
 export const GRUPO_PROPRIO_MEDIMAGEM = 'Contrato próprio — Medimagem'
@@ -68,10 +69,29 @@ export const ROTULO_JANELA: Record<string, string> = {
   mes: 'mês calendário', ciclo_27_26: 'ciclo do dia 27 ao dia 26', quinzena: 'quinzenal (dias 1–15 e 16–fim do mês)',
 }
 
+/** Opções da tela da unidade: mês, quinzena e os dias de corte 2–28 (o 27 usa o nome antigo ciclo_27_26). */
+export const OPCOES_JANELA: { valor: string; rotulo: string }[] = [
+  { valor: 'mes', rotulo: ROTULO_JANELA.mes },
+  { valor: 'quinzena', rotulo: ROTULO_JANELA.quinzena },
+  ...Array.from({ length: 27 }, (_, i) => i + 2).map(d => ({
+    valor: d === 27 ? 'ciclo_27_26' : `corte_${d}`,
+    rotulo: `corte: do dia ${d} do mês anterior ao dia ${d - 1}`,
+  })),
+]
+
+/** Texto da janela, incluindo os cortes 'corte_NN' (do dia NN do mês anterior ao dia NN−1). */
+export function rotuloJanela(janela: string | null | undefined): string {
+  const j = janela ?? 'mes'
+  if (ROTULO_JANELA[j]) return ROTULO_JANELA[j]
+  const d = diaDeCorte(j)
+  return d ? `do dia ${d} do mês anterior ao dia ${d - 1}` : j
+}
+
 export function etiquetasRegras(r: Regras | undefined): string[] {
   if (!r) return []
   const e: string[] = []
-  if (r.janela === 'ciclo_27_26') e.push('ciclo 27→26')
+  const corte = diaDeCorte(r.janela)
+  if (corte) e.push(`ciclo ${corte}→${corte - 1}`)
   else if (r.janela === 'quinzena') e.push('quinzenal')
   if (r.criterio_data === 'exame') e.push('pela data do exame')
   else if (r.criterio_data === 'laudo') e.push('pela data do laudo')
@@ -91,7 +111,7 @@ export function comoFatura(modelo: string, r: Regras | undefined): { rotulo: str
     { rotulo: 'Modelo', texto: MODELO[modelo] ?? modelo },
     { rotulo: 'Data que define o mês', texto: `data do ${crit.data}${crit.auto ? ' (automático)' : ''}` },
     { rotulo: 'Status aceitos', texto: modelo === 'fixo_mensal' ? 'todos' : 'Assinado e Reassinado' },
-    { rotulo: 'Janela', texto: ROTULO_JANELA[r?.janela ?? 'mes'] },
+    { rotulo: 'Janela', texto: rotuloJanela(r?.janela) },
   ]
   if (r?.franquia_mensal) linhas.push({ rotulo: 'Franquia', texto: `${r.franquia_mensal.toLocaleString('pt-BR')} exames/mês; acima disso cobra o excedente` })
   return linhas

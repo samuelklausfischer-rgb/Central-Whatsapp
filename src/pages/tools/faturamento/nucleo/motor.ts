@@ -37,7 +37,7 @@ export interface ContextoUnidade {
   unidade_id: string
   pasta: string
   modelo: string // preco_unico | por_modalidade | por_procedimento | fixo_mensal | misto | nao_identificado
-  janela: 'mes' | 'ciclo_27_26' | 'quinzena'
+  janela: Janela
   criterio_data: 'laudo' | 'exame' | null
   franquia_mensal: number | null
   todos_status?: boolean // cobra exame em qualquer status (ex.: Sorocaba, sem laudo na Mobilemed)
@@ -46,6 +46,22 @@ export interface ContextoUnidade {
   subunidade: string | null // do alias
   principal: boolean // recebe os itens fixos
   itensPorPeriodo: Record<string, ItemPreco[]> // preço vigente no fim de cada período (chave = rotulo)
+}
+
+/**
+ * Período de faturamento da unidade:
+ * - 'mes': mês fechado; 'quinzena': dias 1–15 e 16–fim;
+ * - 'corte_NN': do dia NN do mês anterior ao dia NN−1 da competência (ex.: corte_21 = 21/08 a 20/09);
+ * - 'ciclo_27_26': nome antigo de corte_27 (FHEMIG), mantido para não quebrar o cadastro.
+ */
+export type Janela = 'mes' | 'quinzena' | 'ciclo_27_26' | `corte_${number}`
+
+/** Dia de corte da janela (2–28), ou null para mês fechado/quinzena. */
+export function diaDeCorte(janela: string): number | null {
+  if (janela === 'ciclo_27_26') return 27
+  const m = /^corte_(\d{1,2})$/.exec(janela)
+  const d = m ? Number(m[1]) : NaN
+  return d >= 2 && d <= 28 ? d : null
 }
 
 export interface Config {
@@ -114,9 +130,10 @@ function ultimoDia(a: number, m: number): number { return new Date(Date.UTC(a, m
 export function periodos(competencia: string, janela: ContextoUnidade['janela']): Periodo[] {
   const [a, m1] = competencia.split('-').map(Number)
   const m = m1 - 1
-  if (janela === 'ciclo_27_26') {
-    const inicio = new Date(Date.UTC(a, m - 1, 27))
-    const fim = fimDoDia(a, m, 26)
+  const corte = diaDeCorte(janela)
+  if (corte) {
+    const inicio = new Date(Date.UTC(a, m - 1, corte))
+    const fim = fimDoDia(a, m, corte - 1)
     return [{ rotulo: '', inicio, fim, dataPreco: iso(fim) }]
   }
   if (janela === 'quinzena') {

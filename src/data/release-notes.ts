@@ -34,6 +34,18 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.221',
+    date: '2026-10-06 18:00',
+    title: 'Faturamento: acervo de exames e dia de corte',
+    details: [
+      '🗄️ Faturamento: cada Bruto que você sobe fica guardado por 3 meses, e o relatório é montado a partir desse acervo. Cada exame entra no mês do seu laudo, venha do arquivo que vier',
+      '📅 Unidades que fecham com dia de corte (ex.: do dia 27 ao dia 26) pegam sozinhas os dias do mês anterior. Na tela da unidade dá para escolher qualquer dia de corte, de 2 a 28',
+      '⬆️ Botão novo "Só guardar no acervo", para subir uma vez o Bruto do mês anterior sem gerar relatório',
+    ],
+    usabilidade:
+      'Exporte da Mobilemed os 2 últimos meses e suba em Faturamento > Gerar relatório: os laudos que saíram depois do envio anterior entram no mês certo, sem contar duas vezes.',
+  },
+  {
     version: '0.0.220',
     date: '2026-10-05 18:00',
     title: 'Nova ferramenta: Faturamento por unidade',

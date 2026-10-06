@@ -47,7 +47,7 @@ export async function lerBruto(file: File): Promise<BrutoLido> {
 }
 
 // mesmo exame = mesma unidade, paciente, accession, estudo e data do exame
-const chaveExame = (l: LinhaBruto) =>
+export const chaveExame = (l: LinhaBruto) =>
   [l.unidade, l.nome_paciente, l.accession_number, l.estudo_descricao, l.data_exame].map(v => v ?? '').join('|')
 
 /**
