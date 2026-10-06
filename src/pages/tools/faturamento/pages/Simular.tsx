@@ -7,6 +7,7 @@ import { baixarConsolidado, carregarInfoAlias, simularNome, verificarFuncao, typ
 import { grupoDoNome, GRUPOS, type InfoAlias } from '../lib/relatorioUnidade'
 import { normNome } from '../nucleo/motor'
 import { brl } from '../lib/format'
+import { acervoCobre, guardarNoAcervo, janelasPorNome, nomesComCorte, nomesNoAcervo } from '../lib/acervo'
 
 interface ResultadoNome { nome: string; unidade: string | null; faturados: number; total: number; pendencias: string[]; erro?: string; ignorado?: boolean }
 
@@ -20,7 +21,9 @@ export default function Simular() {
   const [competencia, setCompetencia] = useState(mesAnterior())
   const [arquivos, setArquivos] = useState<File[]>([])
   const [build, setBuild] = useState<string | null | undefined>(undefined) // undefined = verificando
-  const [fase, setFase] = useState<'parado' | 'lendo' | 'calculando' | 'fim'>('parado')
+  const [fase, setFase] = useState<'parado' | 'lendo' | 'guardando' | 'calculando' | 'fim'>('parado')
+  const [guardando, setGuardando] = useState<{ feitos: number; total: number } | null>(null)
+  const [soGuardado, setSoGuardado] = useState<number | null>(null)
   const [resumoLeitura, setResumoLeitura] = useState<{ exames: number; nomes: number; arquivos: ArquivoLido[] } | null>(null)
   const [feitos, setFeitos] = useState(0)
   const [total, setTotal] = useState(0)
@@ -53,9 +56,34 @@ export default function Simular() {
     finally { setLendoArquivo(false) }
   }
 
+  /** Último dia do mês anterior à competência ('AAAA-MM' → 'AAAA-MM-DD'). */
+  const fimMesAnterior = (c: string) => new Date(Date.UTC(+c.slice(0, 4), +c.slice(5, 7) - 1, 0)).toISOString().slice(0, 10)
+  /** Último dia da competência ('AAAA-MM' → 'AAAA-MM-DD'). */
+  const fimDoMes = (c: string) => new Date(Date.UTC(+c.slice(0, 4), +c.slice(5, 7), 0)).toISOString().slice(0, 10)
+  const ddmm = (isoData: string) => `${isoData.slice(8, 10)}/${isoData.slice(5, 7)}`
+  // build mínimo da função fat-simular que lê o acervo (pedido com do_acervo)
+  const FUNCAO_MINIMA = 'fat-simular-2026-10-06b'
+
+  /** Só guarda os exames no acervo (ex.: subir o Bruto do mês anterior uma vez, para os cortes). */
+  async function soGuardar() {
+    if (!arquivos.length) { setErro('Escolha o(s) arquivo(s) Bruto (.xlsx).'); return }
+    setErro(null); setSoGuardado(null)
+    try {
+      setFase('guardando')
+      const { linhas } = lido ?? await lerBrutos(arquivos)
+      const n = await guardarNoAcervo(linhas, arquivos.map(f => f.name).join(' + '), (f, t) => setGuardando({ feitos: f, total: t }))
+      setSoGuardado(n)
+    } catch (e) { setErro(e instanceof Error ? e.message : String(e)) }
+    finally { setFase('parado'); setGuardando(null) }
+  }
+
   async function processar() {
     if (!arquivos.length) { setErro('Escolha o(s) arquivo(s) Bruto (.xlsx).'); return }
     if (!/^\d{4}-\d{2}$/.test(competencia)) { setErro('Informe a competência.'); return }
+    if (!build || build < FUNCAO_MINIMA) {
+      setErro(`A função de cálculo no servidor está desatualizada (${build ?? 'sem resposta'}; precisa de ${FUNCAO_MINIMA} ou mais nova). Publique o PUBLICAR.txt do repositório PRN-faturamento-unidades no container functions.`)
+      return
+    }
     if (detectado && detectado.competencia !== competencia &&
       !confirm(`Os exames deste arquivo são de ${mmaaaa(detectado.competencia)} (${Math.round(detectado.fracao * 100)}% pela data do laudo), mas a competência escolhida é ${mmaaaa(competencia)}.\n\nNesse caso quase nenhum exame entra e saem só os valores fixos. Gerar mesmo assim?`)) return
     setErro(null); setResultados([]); setFeitos(0); setSimulacaoId(null); setResumoLeitura(null)
@@ -64,10 +92,33 @@ export default function Simular() {
       const { linhas, nomes, arquivos: lidos } = lido ?? await lerBrutos(arquivos)
       if (nomes.size === 0) throw new Error('Nenhuma linha com Unidade preenchida foi encontrada no arquivo.')
       setResumoLeitura({ exames: linhas.length, nomes: nomes.size, arquivos: lidos })
-      setTotal(nomes.size)
+
+      // Acervo: guarda o envio e calcula lendo do acervo — cada exame entra no mês do seu
+      // laudo (ou do exame), venha de qual Bruto vier; unidades com dia de corte pegam os
+      // dias do mês anterior que já estavam guardados.
+      setFase('guardando')
+      await guardarNoAcervo(linhas, arquivos.map(f => f.name).join(' + '), (f, t) => setGuardando({ feitos: f, total: t }))
+      const corte = nomesComCorte([...nomes.keys()], await janelasPorNome(), competencia)
+      if (corte.length) {
+        const fimAnt = fimMesAnterior(competencia)
+        const faltando: string[] = []
+        for (const ini of [...new Set(corte.map(c => c.inicio))].sort()) {
+          if (ini > fimAnt || await acervoCobre(ini, fimAnt)) continue
+          for (const c of corte.filter(x => x.inicio === ini)) faltando.push(`• ${c.nome}: precisa de ${ddmm(ini)} a ${ddmm(fimAnt)}`)
+        }
+        if (faltando.length && !confirm(`Estas unidades fecham com dia de corte e o acervo ainda não tem os dias do mês anterior:\n\n${faltando.join('\n')}\n\nSuba antes o Bruto do mês anterior com "Só guardar no acervo". Gerar mesmo assim (essas unidades sairão com o período incompleto)?`)) {
+          setFase('parado'); setGuardando(null); return
+        }
+      }
+      // quem calcular: os nomes do arquivo + os que têm exame guardado na competência
+      // (ex.: laudo de setembro que só veio no Bruto de agosto)
+      const noAcervo = await nomesNoAcervo(`${competencia}-01`, fimDoMes(competencia))
+      const nomesCalc = [...new Set([...nomes.keys(), ...noAcervo.keys()])]
+      setGuardando(null)
+      setTotal(nomesCalc.length)
 
       const { data: sim, error } = await db.from('simulacao')
-        .insert({ competencia: `${competencia}-01`, arquivo_nome: arquivos.map(f => f.name).join(' + '), total_nomes: nomes.size, status: 'processando' })
+        .insert({ competencia: `${competencia}-01`, arquivo_nome: arquivos.map(f => f.name).join(' + '), total_nomes: nomesCalc.length, status: 'processando' })
         .select('id').single()
       if (error || !sim) throw new Error(error?.message ?? 'Não consegui criar o relatório.')
       setSimulacaoId(sim.id)
@@ -76,12 +127,12 @@ export default function Simular() {
       const modo: ModoCalculo = build ? 'servidor' : 'local'
       const cache = {}
       let nFeitos = 0, nFaturados = 0, nFalhas = 0, valor = 0
-      await executarEmPool([...nomes.entries()], 3, async ([nome, ls]) => {
+      await executarEmPool(nomesCalc, 3, async nome => {
         let r: ResultadoNome
         try {
           let resp
-          try { resp = await simularNome({ simulacao_id: sim.id, competencia, nome_bruto: nome, linhas: ls }, modo, cache) }
-          catch { resp = await simularNome({ simulacao_id: sim.id, competencia, nome_bruto: nome, linhas: ls }, modo, cache) } // 1 nova tentativa
+          try { resp = await simularNome({ simulacao_id: sim.id, competencia, nome_bruto: nome, do_acervo: true }, modo, cache) }
+          catch { resp = await simularNome({ simulacao_id: sim.id, competencia, nome_bruto: nome, do_acervo: true }, modo, cache) } // 1 nova tentativa
           r = { nome, unidade: resp.unidade ?? null, faturados: resp.faturados ?? 0, total: resp.total ?? 0, pendencias: resp.pendencias ?? [], ignorado: !!(resp as { ignorado?: boolean }).ignorado }
           nFaturados += r.faturados; valor += r.total
         } catch (e) {
@@ -111,7 +162,7 @@ export default function Simular() {
     finally { setGerandoConsolidado(false) }
   }
 
-  const ocupado = fase === 'lendo' || fase === 'calculando'
+  const ocupado = fase === 'lendo' || fase === 'guardando' || fase === 'calculando'
   const falhas = resultados.filter(r => r.erro).length
   const pct = total ? Math.round((feitos / total) * 100) : 0
 
@@ -136,6 +187,10 @@ export default function Simular() {
         <button className="rounded bg-[#1f4e78] px-4 py-1.5 text-white disabled:opacity-50" onClick={processar} disabled={ocupado || lendoArquivo || build === undefined || !arquivos.length}>
           {ocupado ? 'Processando…' : lendoArquivo ? 'Lendo arquivo…' : 'Processar'}
         </button>
+        <button className="rounded border border-[#1f4e78] px-3 py-1.5 text-[#1f4e78] disabled:opacity-50" onClick={soGuardar} disabled={ocupado || lendoArquivo || !arquivos.length}
+          title="Guarda os exames sem gerar relatório. Use para subir o Bruto do mês anterior uma vez, e as unidades com dia de corte (27→26, 21→20…) ficarem completas.">
+          Só guardar no acervo
+        </button>
       </div>
       {detectado && (
         <p className={`rounded-lg border p-2 text-sm ${detectado.competencia === competencia ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-amber-300 bg-amber-50 text-amber-900'}`}>
@@ -145,7 +200,13 @@ export default function Simular() {
             : <> A competência escolhida é <b>{mmaaaa(competencia)}</b>: assim quase nenhum exame entra no relatório. <button className="underline" onClick={() => setCompetencia(detectado.competencia)}>Usar {mmaaaa(detectado.competencia)}</button></>}
         </p>
       )}
-      <p className="text-xs text-slate-500">Os arquivos são lidos aqui no navegador e enviados aos poucos, um nome de unidade por vez. Os relatórios ficam guardados por 30 dias.</p>
+      <p className="text-xs text-slate-500">Os arquivos são lidos aqui no navegador e enviados aos poucos, um nome de unidade por vez. Os relatórios ficam guardados por 30 dias. Os exames ficam no acervo por 3 meses e o cálculo lê de lá: cada exame entra no mês do seu laudo, venha do arquivo que vier, e as unidades com dia de corte (ex.: 27→26) pegam os dias do mês anterior. Dica: exporte da Mobilemed os 2 últimos meses — assim os laudos que saíram depois do envio anterior entram no mês certo.</p>
+      {guardando && (
+        <p className="text-sm text-slate-600">Guardando exames no acervo: {guardando.feitos.toLocaleString('pt-BR')} de {guardando.total.toLocaleString('pt-BR')}…</p>
+      )}
+      {soGuardado !== null && (
+        <p className="rounded-lg border border-emerald-200 bg-emerald-50 p-2 text-sm text-emerald-900">✅ {soGuardado.toLocaleString('pt-BR')} exames guardados no acervo. Agora suba o Bruto do mês e clique em Processar.</p>
+      )}
 
       {erro && <p className="rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">Erro: {erro}</p>}
       {resumoLeitura && (

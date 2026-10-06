@@ -30,8 +30,11 @@ export async function verificarFuncao(): Promise<string | null> {
   } catch { return null }
 }
 
-/** Calcula um nome do Bruto na Edge Function (vai com o token de quem está logado). */
-export async function simularNome(corpo: { simulacao_id: string; competencia: string; nome_bruto: string; linhas: unknown[] }, _modo: ModoCalculo = 'servidor', _cache: Cache = {}): Promise<RespostaSimular> {
+/**
+ * Calcula um nome do Bruto na Edge Function (vai com o token de quem está logado).
+ * `do_acervo: true` (padrão do Central Whats): a função lê os exames do acervo, não do pedido.
+ */
+export async function simularNome(corpo: { simulacao_id: string; competencia: string; nome_bruto: string; linhas?: unknown[]; do_acervo?: boolean }, _modo: ModoCalculo = 'servidor', _cache: Cache = {}): Promise<RespostaSimular> {
   const { data, error } = await supabase.functions.invoke<RespostaSimular>(FUNCAO, { body: corpo })
   if (error) {
     // Erro HTTP da função: a mensagem útil vem no corpo ({ erro }).

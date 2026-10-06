@@ -4,7 +4,7 @@ import { db } from '../lib/supabase'
 import type { Alias, Evento, ItemVigente, PapelItem, Pendencia, RegrasUnidade, UnidadeResumo } from '../lib/tipos'
 import { GRUPOS, grupoDoNome, type Grupo } from '../lib/relatorioUnidade'
 import { MODELO, SITUACAO, TIPOS_EVENTO, brl, dataBR, hojeISO } from '../lib/format'
-import { ROTULO_JANELA, ROTULO_PAPEL } from '../lib/config'
+import { OPCOES_JANELA, ROTULO_PAPEL } from '../lib/config'
 import { Pill } from '../components/Pill'
 
 export default function Unidade() {
@@ -231,7 +231,7 @@ function FormRegras({ u, regras, onSalvar }: {
       <div className="flex flex-wrap items-end gap-4 text-sm">
         <label className="flex flex-col gap-1"><span className="text-xs text-slate-500">Janela do período</span>
           <select className={campo} value={janela} onChange={e => setJanela(e.target.value as RegrasUnidade['janela'])}>
-            {Object.entries(ROTULO_JANELA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+            {OPCOES_JANELA.map(o => <option key={o.valor} value={o.valor}>{o.rotulo}</option>)}</select></label>
         <label className="flex flex-col gap-1"><span className="text-xs text-slate-500">Data que define o mês</span>
           <select className={campo} value={criterio} onChange={e => setCriterio(e.target.value)}>
             <option value="">Automático</option><option value="laudo">Data do laudo</option><option value="exame">Data do exame</option></select></label>
