@@ -34,6 +34,17 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.222',
+    date: '2026-10-06 19:00',
+    title: 'Faturamento: estudo que conta mais de 1',
+    details: [
+      '🔢 Faturamento: na tela da unidade dá para dizer que um estudo conta mais de 1 — por exemplo, na Jandaia, "mãos e punhos para idade óssea" conta 4. O relatório já multiplica a quantidade e o valor',
+      '♻️ A regra antiga do "ABDOME TOTAL conta 2" virou uma dessas regras e continua valendo nas mesmas unidades',
+    ],
+    usabilidade:
+      'Abra Faturamento > Configuração > a unidade > Regras de faturamento e escreva uma regra por linha, no formato PADRÃO = N (ex.: MAOS E PUNHOS.*IDADE OSSEA = 4). Acento e maiúscula não importam.',
+  },
+  {
     version: '0.0.221',
     date: '2026-10-06 18:00',
     title: 'Faturamento: acervo de exames e dia de corte',

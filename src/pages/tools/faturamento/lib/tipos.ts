@@ -8,11 +8,12 @@ export interface UnidadeResumo {
 }
 // Regras de faturamento da unidade (colunas novas da fase 2 — lidas da tabela `unidade`,
 // porque a view v_unidade_resumo congela as colunas no momento em que foi criada)
-export type { Janela } from '../nucleo/motor'
-import type { Janela } from '../nucleo/motor'
+export type { Janela, RegraQuantidade } from '../nucleo/motor'
+import type { Janela, RegraQuantidade } from '../nucleo/motor'
 export type CriterioData = 'laudo' | 'exame' | null
 export interface RegrasUnidade {
   id: string; janela: Janela; criterio_data: CriterioData; franquia_mensal: number | null; todos_status: boolean; estudos_conta_2: string | null
+  regras_quantidade: RegraQuantidade[] | null // estudo que conta N (ver motor)
 }
 export type PapelItem = 'normal' | 'urgencia' | 'fixo' | 'excedente'
 // linha da RPC precos_vigentes(p_data): preço vigente de TODAS as unidades

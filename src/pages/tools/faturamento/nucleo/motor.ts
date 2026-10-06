@@ -33,6 +33,13 @@ export interface ItemPreco {
   papel: Papel
 }
 
+/**
+ * "Este estudo conta N": `padrao` é uma expressão regular aplicada à descrição do estudo
+ * sem acento e em maiúsculas (ex.: 'MAOS E PUNHOS.*IDADE OSSEA' = 4; 'ABDOME TOTAL|TRIFASICO' = 2).
+ * Vale a primeira regra que casar; nenhuma casou = 1.
+ */
+export interface RegraQuantidade { padrao: string; quantidade: number }
+
 export interface ContextoUnidade {
   unidade_id: string
   pasta: string
@@ -41,7 +48,8 @@ export interface ContextoUnidade {
   criterio_data: 'laudo' | 'exame' | null
   franquia_mensal: number | null
   todos_status?: boolean // cobra exame em qualquer status (ex.: Sorocaba, sem laudo na Mobilemed)
-  estudos_conta_2?: string | null // regex sobre a descrição normalizada: estudo que conta 2 (ex.: 'ABDOME TOTAL|TRIFASICO')
+  regras_quantidade?: RegraQuantidade[] | null // estudo que conta N (ex.: idade óssea = 4 na Jandaia)
+  estudos_conta_2?: string | null // formato antigo (só "conta 2"): vale quando não há regras_quantidade
   situacao: string
   subunidade: string | null // do alias
   principal: boolean // recebe os itens fixos
@@ -217,7 +225,13 @@ export function calcular(nomeBruto: string, linhas: LinhaBruto[], ctx: ContextoU
   const statusOk = new Set(cfg.statusPorExame.map(s => normNome(s)))
   const precoUnico = ctx.modelo === 'preco_unico'
   const pend: Pendencia[] = []
-  const conta2 = ctx.estudos_conta_2 ? new RegExp(ctx.estudos_conta_2, 'i') : null
+  // quantidade por estudo (ver RegraQuantidade); estudos_conta_2 é o formato antigo, só "conta 2"
+  const fonteQtd: RegraQuantidade[] = ctx.regras_quantidade?.length ? ctx.regras_quantidade
+    : ctx.estudos_conta_2 ? [{ padrao: ctx.estudos_conta_2, quantidade: 2 }] : []
+  const regrasQtd = fonteQtd.flatMap(r => {
+    try { return [{ re: new RegExp(r.padrao, 'i'), q: Math.max(1, Math.round(Number(r.quantidade) || 1)) }] }
+    catch { pend.push({ tipo: 'regra_invalida', detalhe: `regra de quantidade inválida, ignorada: "${r.padrao}"` }); return [] }
+  })
   const exames: ExameCalc[] = []
   const resumo: ResumoLinha[] = []
   const usadas = new Set<LinhaBruto>()
@@ -260,7 +274,8 @@ export function calcular(nomeBruto: string, linhas: LinhaBruto[], ctx: ContextoU
       const urgente = urg.has(normNome(l.prioridade ?? ''))
       const it = escolherItem(l, cobraveis, urgente, precoUnico)
       if (!it) { semPreco++; exames.push({ ...base, item_preco_id: null, item_exame: null, valor_unitario: 0, valor_total: 0, motivo: 'sem_preco' }); return }
-      const q = conta2?.test(normNome(l.estudo_descricao ?? '')) ? 2 : 1
+      const estudo = normNome(l.estudo_descricao ?? '')
+      const q = regrasQtd.find(r => r.re.test(estudo))?.q ?? 1
       exames.push({ ...base, quantidade: q, item_preco_id: it.item_preco_id, item_exame: it.exame, valor_unitario: it.valor!, valor_total: round2(it.valor! * q), motivo: 'ok' })
     })
 
