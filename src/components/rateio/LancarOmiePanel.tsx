@@ -282,13 +282,15 @@ export function LancarOmiePanel({ execucaoId, motivoIndisponivel }: LancarOmiePa
       <h3 className="mb-1 text-sm font-semibold text-foreground">Lançar no Omie</h3>
       <p className="mb-4 text-xs text-muted-foreground">
         Confira a distribuição por departamento antes de criar a conta a pagar. Analisar não grava nada no Omie.
+        A conta vai pelo valor bruto da NF; as retenções de impostos continuam sendo editadas no Omie pelo
+        financeiro, como hoje.
       </p>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Campo rotulo="NF">
           <Input value={nf} onChange={(e) => setNf(e.target.value)} placeholder="Número da NF" />
         </Campo>
-        <Campo rotulo="Valor da NF">
+        <Campo rotulo="Valor bruto da NF (antes das retenções)">
           <Input
             inputMode="decimal"
             value={valorNf}
