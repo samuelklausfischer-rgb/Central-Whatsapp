@@ -3,6 +3,7 @@ import {
   processarRateio,
   insertRateioExecucao,
   fetchRateioHistorico,
+  fetchRateioUnidades,
   type RateioEmpresa,
   type RateioResultado,
   type RateioHistoricoItem,
@@ -92,4 +93,37 @@ export function useRateioHistorico(empresa: RateioEmpresa) {
   }, [empresa, tick])
 
   return { historico, loading, error, refetch }
+}
+
+// Unidades ativas da empresa para o seletor do serviço adicional. `unidades` fica
+// null enquanto carrega, ao trocar de empresa e quando a busca falha.
+export function useRateioUnidades(empresa: RateioEmpresa) {
+  const [unidades, setUnidades] = useState<string[] | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [tick, setTick] = useState(0)
+
+  const refetch = useCallback(() => setTick((t) => t + 1), [])
+
+  useEffect(() => {
+    let cancelled = false
+    setUnidades(null)
+    setError(null)
+    setLoading(true)
+    fetchRateioUnidades(empresa)
+      .then((data) => {
+        if (!cancelled) setUnidades(data)
+      })
+      .catch((err) => {
+        if (!cancelled) setError((err as Error).message || 'Falha ao carregar as unidades')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [empresa, tick])
+
+  return { unidades, loading, error, refetch }
 }
