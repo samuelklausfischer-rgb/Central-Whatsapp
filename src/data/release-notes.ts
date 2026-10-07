@@ -34,6 +34,17 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.227',
+    date: '2026-10-07 19:45',
+    title: 'Dá para fechar o aviso de WhatsApp desconectado',
+    details: [
+      '✖️ A faixa vermelha de "WhatsApp desconectado" ganhou um X. Fechada, ela não volta ao reabrir o app enquanto for a mesma queda — e para de tocar o alarme dela',
+      '🔁 Se o aparelho conectar e cair de novo, é uma queda nova e o aviso volta, mesmo que isso tenha acontecido com o app fechado',
+    ],
+    usabilidade:
+      'Clique no X no canto direito da faixa vermelha. Cada pessoa fecha a sua. Se for você quem vai reconectar o aparelho, use o botão "Reconectar" da faixa antes de fechá-la.',
+  },
+  {
     version: '0.0.226',
     date: '2026-10-07 19:30',
     title: 'Mensagem enviada não some mais por causa do 9',
