@@ -90,10 +90,12 @@ test('lerCsv: BOM, separador ; e colunas do rascunho', () => {
 test('CSV real: contagem por empresa e por confiança', { skip: !existsSync(CSV_PADRAO) }, () => {
   const r = consolidar(lerCsv(readFileSync(CSV_PADRAO, 'utf8')));
   const { porEmpresa, porConfianca } = contar(r.mapa);
-  assert.deepEqual(porEmpresa, { PRN: 85, PRN_APICE: 67, MEDIMAGEM: 27, MEDIMAGEM_APICE: 15 });
-  assert.deepEqual(porConfianca, { ALTA: 163, MEDIA: 16, BAIXA: 15 });
-  assert.equal(r.mapa.length, 194);
-  assert.equal(r.descartadas.length, 6);
+  // 2026-10-07: o financeiro confirmou 4 vinculos (+3 gemeos Apice) e 4 linhas sem confirmacao
+  // perderam o departamento (MGS Porto Seguro, SESI MS 1, JANDAIA Apice x2) - vinculam na tela.
+  assert.deepEqual(porEmpresa, { PRN: 83, PRN_APICE: 66, MEDIMAGEM: 27, MEDIMAGEM_APICE: 14 });
+  assert.deepEqual(porConfianca, { ALTA: 170, MEDIA: 9, BAIXA: 11 });
+  assert.equal(r.mapa.length, 190);
+  assert.equal(r.descartadas.length, 10);
   assert.equal(r.conflitos.length, 0);
   // chave única por empresa
   const ids = new Set(r.mapa.map((x) => `${x.empresa}|${x._chave}`));

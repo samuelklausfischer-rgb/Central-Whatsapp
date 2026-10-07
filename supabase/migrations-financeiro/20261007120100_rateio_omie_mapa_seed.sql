@@ -2,7 +2,7 @@
 -- Rateio -> Omie: seed do mapa unidade -> departamento (GERADO por scripts/rateio/gerar-seed-mapa.mjs)
 -- Fonte: mapa_unidade_departamento_RASCUNHO.csv. NÃO editar à mão: regenere o arquivo.
 -- BANCO: Supabase FINANCEIRO. Rodar depois de 20261007120000_rateio_omie.sql.
--- 194 vínculos. Duplicatas já consolidadas (ver scripts/rateio/seed-mapa-conflitos.txt).
+-- 190 vínculos. Duplicatas já consolidadas (ver scripts/rateio/seed-mapa-conflitos.txt).
 -- Rodar de novo é seguro: só atualiza linhas com origem = 'csv'; vínculos feitos pela tela
 -- (origem = 'tela') nunca são sobrescritos.
 -- =====================================================================================
@@ -10,7 +10,7 @@
 insert into public.rateio_omie_mapa
   (empresa, unidade, unidade_chave, cod_departamento, departamento_nome, confianca, origem, observacao)
 values
-  ('PRN', 'Alberto Cavalcente', 'ALBERTO CAVALCENTE', 6864062398, 'FHEMIG - ALBERTO CAVALCANTI', 'BAIXA', 'csv', 'unidade com nome digitado errado (569,34 = 169,34+400), nao lancada no Omie de set, destino presumido pelo nome'),
+  ('PRN', 'Alberto Cavalcente', 'ALBERTO CAVALCENTE', 6864062398, 'FHEMIG - ALBERTO CAVALCANTI', 'ALTA', 'csv', 'confirmado pelo financeiro em 2026-10-07 (grafia errada no Bruto)'),
   ('PRN', 'ARARAQUARA (PRN)', 'ARARAQUARA (PRN)', 6864062461, 'SCP ARARAQUARA', 'ALTA', 'csv', null),
   ('PRN', 'ARCO VERDE (PRN)', 'ARCO VERDE (PRN)', 7054706288, 'ARCO VERDE', 'ALTA', 'csv', null),
   ('PRN', 'ARIQUEMES RONDÔNIA (PRN)', 'ARIQUEMES RONDONIA (PRN)', 6864062474, 'ARIQUEMES RONDÔNIA', 'ALTA', 'csv', null),
@@ -42,7 +42,7 @@ values
   ('PRN', 'EXÉRCITO - PMRJ', 'EXERCITO - PMRJ', 7365954836, 'EXERCITO PMRJ', 'ALTA', 'csv', null),
   ('PRN', 'EXÉRCITO HMAPA', 'EXERCITO HMAPA', 7264685660, 'EXERCITO HMAPA', 'ALTA', 'csv', null),
   ('PRN', 'FAEPU - Patos de Minas', 'FAEPU - PATOS DE MINAS', 7297702765, 'FAEPU - Patos de Minas', 'ALTA', 'csv', null),
-  ('PRN', 'HINSG – (PRN)', 'HINSG - (PRN)', 7061066584, 'Vitoria SCP', 'MEDIA', 'csv', 'ago: dept Vitoria SCP +360,00 acima do rateio (ajuste/adicional manual), HINSG = Hosp. Infantil N. Sra. da Gloria, so soma jul fecha'),
+  ('PRN', 'HINSG – (PRN)', 'HINSG - (PRN)', 7061066584, 'Vitoria SCP', 'ALTA', 'csv', 'confirmado pelo financeiro em 2026-10-07'),
   ('PRN', 'HINSG/Anexo HPM – (PRN)', 'HINSG/ANEXO HPM - (PRN)', 7061066584, 'Vitoria SCP', 'MEDIA', 'csv', 'ago: dept Vitoria SCP +360,00 acima do rateio (ajuste/adicional manual), so soma jul fecha'),
   ('PRN', 'HMSB CUIABA (PRN)', 'HMSB CUIABA (PRN)', 7073387702, 'SCP HMSB CUIABA', 'ALTA', 'csv', null),
   ('PRN', 'HOSPITAL ALBERTO CAVALCANTI - (PRN) - FHEMIG', 'HOSPITAL ALBERTO CAVALCANTI - (PRN) - FHEMIG', 6864062398, 'FHEMIG - ALBERTO CAVALCANTI', 'ALTA', 'csv', null),
@@ -66,7 +66,6 @@ values
   ('PRN', 'MARABA (PRN)', 'MARABA (PRN)', 6864063573, 'MARABA', 'ALTA', 'csv', null),
   ('PRN', 'MGS - HOSPITAL TEIXEIRA DE FREITAS (PRN)', 'MGS - HOSPITAL TEIXEIRA DE FREITAS (PRN)', 6864064144, 'HOSPITAL TEIXEIRA DE FREITAS', 'ALTA', 'csv', null),
   ('PRN', 'MGS - PAULO AFONSO (PRN)', 'MGS - PAULO AFONSO (PRN)', 7445319907, 'MGS - Paulo Afonso', 'ALTA', 'csv', 'jul: diff 1,15 (Omie 121,32 x rateio 122,47) = diferenca total do mes'),
-  ('PRN', 'MGS - PORTO SEGURO PRN', 'MGS - PORTO SEGURO PRN', 7445319907, 'MGS - Paulo Afonso', 'MEDIA', 'csv', 'ago: soma Paulo Afonso+Porto Seguro fecha exato (unica solucao), set: Omie MGS-Paulo Afonso nao inclui Porto Seguro - a diferenca de +1035,32 em Porto Velho fecha exatamente se Porto Seguro (751,75) e Hosp. Metropolitano (120,45) tiverem caido em Porto Velho'),
   ('PRN', 'MHC - SALVADOR', 'MHC - SALVADOR', 7421803397, 'MGS - SALVADOR', 'ALTA', 'csv', null),
   ('PRN', 'MORRETES PRN', 'MORRETES PRN', 7415312750, 'MORRETES', 'ALTA', 'csv', null),
   ('PRN', 'PAM BOA ESPERANÇA (PRN)', 'PAM BOA ESPERANCA (PRN)', 6987234184, 'PAM BOA ESPERANÇA', 'ALTA', 'csv', null),
@@ -89,7 +88,6 @@ values
   ('PRN', 'SANTANA DE BOA VISTA (PRN)', 'SANTANA DE BOA VISTA (PRN)', 6864064019, 'SANTANA DE BOA VISTA', 'ALTA', 'csv', 'sem dept no Omie em set'),
   ('PRN', 'SANTAREM - (PRN)', 'SANTAREM - (PRN)', 6948281213, 'SANTAREM', 'ALTA', 'csv', null),
   ('PRN', 'SÃO MIGUEL DO OESTE (PRN)', 'SAO MIGUEL DO OESTE (PRN)', 6948281294, 'SÃO MIGUEL DO OESTE', 'ALTA', 'csv', null),
-  ('PRN', 'SESI MS 1', 'SESI MS 1', 6858986481, 'PRN', 'MEDIA', 'csv', 'dept generico PRN recebe unidade sem departamento proprio, unica solucao de soma em jul'),
   ('PRN', 'UPA ABRAÃO', 'UPA ABRAAO', 6881740809, 'Angra dos Reis SCP', 'MEDIA', 'csv', null),
   ('PRN', 'UPA FRADE', 'UPA FRADE', 6881740809, 'Angra dos Reis SCP', 'MEDIA', 'csv', null),
   ('PRN', 'UPA PRAIA GRANDE (PRN)', 'UPA PRAIA GRANDE (PRN)', 6864063807, 'SCP UPA PRAIA GRANDE', 'ALTA', 'csv', null),
@@ -123,7 +121,7 @@ values
   ('PRN_APICE', 'EXÉRCITO HMAR - APICE TELE', 'EXERCITO HMAR - APICE TELE', 7271810921, 'EXERCITO HMAR', 'ALTA', 'csv', 'sem dept no Omie em set'),
   ('PRN_APICE', 'EXÉRCITO- PMGU GNA - APICE TELE', 'EXERCITO- PMGU GNA - APICE TELE', 7257419178, 'EXERCITO PMGU GNA', 'ALTA', 'csv', 'sem dept no Omie em set'),
   ('PRN_APICE', 'FAEPU - Patos de Minas - APICE TELE', 'FAEPU - PATOS DE MINAS - APICE TELE', 7297702765, 'FAEPU - Patos de Minas', 'ALTA', 'csv', null),
-  ('PRN_APICE', 'HINSG – ÁPICE TELE', 'HINSG - APICE TELE', 7061066584, 'Vitoria SCP', 'MEDIA', 'csv', 'valor 0 em ago, so nome'),
+  ('PRN_APICE', 'HINSG – ÁPICE TELE', 'HINSG - APICE TELE', 7061066584, 'Vitoria SCP', 'ALTA', 'csv', 'mesma unidade de HINSG (PRN), confirmada pelo financeiro em 2026-10-07'),
   ('PRN_APICE', 'HINSG/Anexo HPM – ÁPICE TELE', 'HINSG/ANEXO HPM - APICE TELE', 7061066584, 'Vitoria SCP', 'MEDIA', 'csv', null),
   ('PRN_APICE', 'HMSB CUIABÁ - APICE TELE', 'HMSB CUIABA - APICE TELE', 7073387702, 'SCP HMSB CUIABA', 'ALTA', 'csv', null),
   ('PRN_APICE', 'HOSP. REGIONAL DE JOINVILLE  - APICE TELE', 'HOSP. REGIONAL DE JOINVILLE - APICE TELE', 6864063268, 'SCP HOSPITAL REGIONAL DE JOINVILLE', 'ALTA', 'csv', null),
@@ -137,7 +135,6 @@ values
   ('PRN_APICE', 'Hospital Universitário de Rio Grande - Apice Tele', 'HOSPITAL UNIVERSITARIO DE RIO GRANDE - APICE TELE', 6864064393, 'HOSPITAL UNIVERSITÁRIO DE RIO GRANDE', 'ALTA', 'csv', null),
   ('PRN_APICE', 'IBIRAMA - APICE TELE', 'IBIRAMA - APICE TELE', 6875302204, 'IBIRAMA', 'ALTA', 'csv', null),
   ('PRN_APICE', 'IMADI - PRN APICE TELE', 'IMADI - PRN APICE TELE', 7427032713, 'IMADI', 'ALTA', 'csv', null),
-  ('PRN_APICE', 'JANDAIA (PRN) - APICE TELE', 'JANDAIA (PRN) - APICE TELE', 7392683755, 'JANDAIA', 'BAIXA', 'csv', 'nao lancado no Omie, dept JANDAIA e do PRN'),
   ('PRN_APICE', 'MARABA APICE TELE', 'MARABA APICE TELE', 6864063573, 'MARABA', 'BAIXA', 'csv', 'ago: Omie 157,08 x rateio 209,44 (-52,36)'),
   ('PRN_APICE', 'MEDIMAGEM PALHOÇA - APICE TELE', 'MEDIMAGEM PALHOCA - APICE TELE', 6879190206, 'MEDIMAGEM PALHOÇA', 'ALTA', 'csv', 'sem dept no Omie em set'),
   ('PRN_APICE', 'MGS - HOSPITAL TEIXEIRA DE FREITAS APICE TELE', 'MGS - HOSPITAL TEIXEIRA DE FREITAS APICE TELE', 6864064144, 'HOSPITAL TEIXEIRA DE FREITAS', 'ALTA', 'csv', null),
@@ -183,16 +180,15 @@ values
   ('MEDIMAGEM', 'MEDIMAGEM POÁ', 'MEDIMAGEM POA', 2665295114, 'Poá', 'ALTA', 'csv', null),
   ('MEDIMAGEM', 'MEDIMAGEM SÃO JOÃO EVANGELISTA', 'MEDIMAGEM SAO JOAO EVANGELISTA', 2722872993, 'São João Evangelista', 'ALTA', 'csv', null),
   ('MEDIMAGEM', 'MEDIMAGEM SÃO MATEUS', 'MEDIMAGEM SAO MATEUS', 2659458416, 'São Mateus', 'ALTA', 'csv', null),
-  ('MEDIMAGEM', 'MEDIMAGEM SÃO PEDRO', 'MEDIMAGEM SAO PEDRO', 2435942730, 'Vitoria', 'MEDIA', 'csv', 'Vitoria, unica solucao de soma (sao pedro + upa sua)'),
+  ('MEDIMAGEM', 'MEDIMAGEM SÃO PEDRO', 'MEDIMAGEM SAO PEDRO', 2435942730, 'Vitoria', 'ALTA', 'csv', 'confirmado pelo financeiro em 2026-10-07'),
   ('MEDIMAGEM', 'MEDIMAGEM SESI', 'MEDIMAGEM SESI', 2631959942, 'SESI', 'ALTA', 'csv', 'dept SESI so aparece em jul, sem dept no Omie em ago,set'),
   ('MEDIMAGEM', 'MEDIMAGEM UNAÍ', 'MEDIMAGEM UNAI', 2883563294, 'Unai', 'ALTA', 'csv', null),
   ('MEDIMAGEM', 'NOVA TRENTO', 'NOVA TRENTO', 2435942488, 'Nova Trento', 'ALTA', 'csv', null),
   ('MEDIMAGEM', 'SESI MS 1', 'SESI MS 1', 2869644242, 'SESI MS 1', 'ALTA', 'csv', 'dept SESI MS 1 so aparece em jul/ago, sem dept no Omie em set'),
-  ('MEDIMAGEM', 'UPA SUA', 'UPA SUA', 2435942730, 'Vitoria', 'MEDIA', 'csv', 'Vitoria, unica solucao de soma (sao pedro + upa sua)'),
+  ('MEDIMAGEM', 'UPA SUA', 'UPA SUA', 2435942730, 'Vitoria', 'ALTA', 'csv', 'confirmado pelo financeiro em 2026-10-07'),
   ('MEDIMAGEM_APICE', 'APICE TELE - MEDIMAGEM HNAM - PALMEIRAS DE GOIAS', 'APICE TELE - MEDIMAGEM HNAM - PALMEIRAS DE GOIAS', 2791818564, 'PALMEIRAS DE GOIAS', 'ALTA', 'csv', 'jul: Omie nao tem dept Palmeiras na conta Apice, 52,36 caiu em MEDIMAGEM DIAGNOSTICOS ou SJ Evangelista (ambiguo), sem dept no Omie em jul'),
   ('MEDIMAGEM_APICE', 'APICE TELE - MEDIMAGEM SÃO JOÃO EVANGELISTA', 'APICE TELE - MEDIMAGEM SAO JOAO EVANGELISTA', 2722872993, 'São João Evangelista', 'ALTA', 'csv', null),
   ('MEDIMAGEM_APICE', 'APICE TELE MEDIMAGEM SÃO MATEUS', 'APICE TELE MEDIMAGEM SAO MATEUS', 2659458416, 'São Mateus', 'ALTA', 'csv', null),
-  ('MEDIMAGEM_APICE', 'JANDAIA (PRN) - APICE TELE', 'JANDAIA (PRN) - APICE TELE', 2428329032, 'MEDIMAGEM DIAGNÓSTICOS', 'MEDIA', 'csv', 'jul: provavel MEDIMAGEM DIAGNOSTICOS (ambiguo, 3 solucoes), ago nao lancado, sem dept no Omie em ago'),
   ('MEDIMAGEM_APICE', 'MEDIMAGEM - SAO JOAO DEL REY - APICE TELE', 'MEDIMAGEM - SAO JOAO DEL REY - APICE TELE', 2593493101, 'SCP SAO JOAO DEL REI', 'ALTA', 'csv', null),
   ('MEDIMAGEM_APICE', 'MEDIMAGEM ESTÂNCIA VELHA - APICE TELE', 'MEDIMAGEM ESTANCIA VELHA - APICE TELE', 2601601020, 'Estância Velha', 'ALTA', 'csv', null),
   ('MEDIMAGEM_APICE', 'MEDIMAGEM IBIRAMA  APICE TELE', 'MEDIMAGEM IBIRAMA APICE TELE', 2834946312, 'Medimagem Ibirama', 'BAIXA', 'csv', 'valor 0, so nome'),
@@ -202,8 +198,8 @@ values
   ('MEDIMAGEM_APICE', 'MEDIMAGEM NOVA MUTUM APICE TELE', 'MEDIMAGEM NOVA MUTUM APICE TELE', 2792577854, 'NOVA MUTUM', 'ALTA', 'csv', 'jul: 52,36 caiu em SJ Evangelista (ambiguo), ago ok, sem dept no Omie em jul'),
   ('MEDIMAGEM_APICE', 'MEDIMAGEM ORTIGUEIRA APICE TELE', 'MEDIMAGEM ORTIGUEIRA APICE TELE', 2833096912, 'ORTIGUEIRA', 'ALTA', 'csv', null),
   ('MEDIMAGEM_APICE', 'MEDIMAGEM UNAÍ APICE TELE', 'MEDIMAGEM UNAI APICE TELE', 2883563294, 'Unai', 'BAIXA', 'csv', 'ago: Omie 70,21 x rateio 62,86 (+7,35)'),
-  ('MEDIMAGEM_APICE', 'MEDIMAGEM UPA SÃO PEDRO - APICE TELE', 'MEDIMAGEM UPA SAO PEDRO - APICE TELE', 2435942730, 'Vitoria', 'BAIXA', 'csv', 'valor 0, so nome (Vitoria)'),
-  ('MEDIMAGEM_APICE', 'MEDIMAGEM Upa Sua - Apice Tele', 'MEDIMAGEM UPA SUA - APICE TELE', 2435942730, 'Vitoria', 'BAIXA', 'csv', 'valor 0, so nome (Vitoria)')
+  ('MEDIMAGEM_APICE', 'MEDIMAGEM UPA SÃO PEDRO - APICE TELE', 'MEDIMAGEM UPA SAO PEDRO - APICE TELE', 2435942730, 'Vitoria', 'ALTA', 'csv', 'mesma unidade de MEDIMAGEM SÃO PEDRO, confirmada pelo financeiro em 2026-10-07'),
+  ('MEDIMAGEM_APICE', 'MEDIMAGEM Upa Sua - Apice Tele', 'MEDIMAGEM UPA SUA - APICE TELE', 2435942730, 'Vitoria', 'ALTA', 'csv', 'mesma unidade de UPA SUA, confirmada pelo financeiro em 2026-10-07')
 on conflict (empresa, unidade_chave) do update set
   unidade           = excluded.unidade,
   cod_departamento  = excluded.cod_departamento,

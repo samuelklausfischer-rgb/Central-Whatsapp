@@ -1,18 +1,22 @@
 RELATÓRIO DO SEED DO MAPA (gerado por gerar-seed-mapa.mjs)
 
-Vínculos no seed: 194
-  por empresa:   {"PRN":85,"PRN_APICE":67,"MEDIMAGEM":27,"MEDIMAGEM_APICE":15}
-  por confiança: {"BAIXA":15,"ALTA":163,"MEDIA":16}
+Vínculos no seed: 190
+  por empresa:   {"PRN":83,"PRN_APICE":66,"MEDIMAGEM":27,"MEDIMAGEM_APICE":14}
+  por confiança: {"ALTA":170,"MEDIA":9,"BAIXA":11}
 
 == CONFLITOS: mesma empresa e unidade, departamentos DIFERENTES (0) ==
 Ficou a de maior confiança (empate: mais meses). Um humano deve confirmar.
 
 == DUPLICATAS: mesmo departamento, consolidadas em uma (0) ==
 
-== FORA DO SEED (6) ==
+== FORA DO SEED (10) ==
+  linha 80: PRN | MGS - PORTO SEGURO PRN | confiança=MEDIA | cCodDep=(vazio) -> sem cCodDep
+  linha 81: PRN | SESI MS 1 | confiança=MEDIA | cCodDep=(vazio) -> sem cCodDep
+  linha 149: PRN_APICE | JANDAIA (PRN) - APICE TELE | confiança=BAIXA | cCodDep=(vazio) -> sem cCodDep
   linha 154: PRN_APICE | PRN DIAGNOSTICO - CLINICA MEDIMAGEM - APICE TELE | confiança=SEM_MAPA | cCodDep=(vazio) -> confiança "SEM_MAPA" (não é ALTA/MEDIA/BAIXA)
   linha 182: MEDIMAGEM | DIAS D'AVILA | confiança=SEM_MAPA | cCodDep=(vazio) -> confiança "SEM_MAPA" (não é ALTA/MEDIA/BAIXA)
   linha 183: MEDIMAGEM | MEDIMAGEM PEDRO AVELINO | confiança=SEM_MAPA | cCodDep=(vazio) -> confiança "SEM_MAPA" (não é ALTA/MEDIA/BAIXA)
+  linha 193: MEDIMAGEM_APICE | JANDAIA (PRN) - APICE TELE | confiança=MEDIA | cCodDep=(vazio) -> sem cCodDep
   linha 199: PRN | (SEM UNIDADE - valor lancado so no Omie) | confiança=SEM_UNIDADE | cCodDep=6858986481 -> confiança "SEM_UNIDADE" (não é ALTA/MEDIA/BAIXA)
   linha 200: PRN | (SEM UNIDADE - valor lancado so no Omie) | confiança=SEM_UNIDADE | cCodDep=7263753063 -> confiança "SEM_UNIDADE" (não é ALTA/MEDIA/BAIXA)
   linha 201: PRN | (SEM UNIDADE - valor lancado so no Omie) | confiança=SEM_UNIDADE | cCodDep=7061066584 -> confiança "SEM_UNIDADE" (não é ALTA/MEDIA/BAIXA)
