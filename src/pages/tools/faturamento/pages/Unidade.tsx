@@ -4,7 +4,8 @@ import { db } from '../lib/supabase'
 import type { Alias, Evento, ItemVigente, PapelItem, Pendencia, RegrasUnidade, UnidadeResumo } from '../lib/tipos'
 import { GRUPOS, grupoDoNome, type Grupo } from '../lib/relatorioUnidade'
 import { MODELO, SITUACAO, TIPOS_EVENTO, brl, dataBR, hojeISO } from '../lib/format'
-import { OPCOES_JANELA, ROTULO_PAPEL } from '../lib/config'
+import { OPCOES_JANELA, ROTULO_PAPEL, lerRegrasQuantidade, textoRegrasQuantidade } from '../lib/config'
+import type { RegraQuantidade } from '../lib/tipos'
 import { Pill } from '../components/Pill'
 
 export default function Unidade() {
@@ -28,7 +29,7 @@ export default function Unidade() {
         .order('data_referencia', { nullsFirst: false }).order('ordem'),
       db.from('pendencia_cadastro').select('*').eq('unidade_id', id).order('resolvida').order('tipo'),
       // as colunas novas ficam na tabela (a view v_unidade_resumo não as traz)
-      db.from('unidade').select('id, janela, criterio_data, franquia_mensal, todos_status, estudos_conta_2').eq('id', id).single(),
+      db.from('unidade').select('id, janela, criterio_data, franquia_mensal, todos_status, estudos_conta_2, regras_quantidade').eq('id', id).single(),
       db.from('alias').select('*').eq('unidade_id', id).order('nome_bruto'),
       db.from('item_preco').select('id, papel').eq('unidade_id', id),
     ])
@@ -71,8 +72,14 @@ export default function Unidade() {
         <FormSituacao u={u} onSalvar={(sit, motivo) => salvar(db.from('unidade').update({ situacao: sit, motivo_situacao: motivo, situacao_manual: true, atualizado_em: new Date().toISOString() }).eq('id', u.id))} />
       </section>
 
-      <FormRegras key={`${u.id}|${u.modelo_cobranca}|${regras.janela}|${regras.criterio_data}|${regras.franquia_mensal}|${regras.todos_status}|${regras.estudos_conta_2}`} u={u} regras={regras}
-        onSalvar={(r, modelo) => salvar(db.from('unidade').update({ janela: r.janela, criterio_data: r.criterio_data, franquia_mensal: r.franquia_mensal, todos_status: r.todos_status, estudos_conta_2: r.estudos_conta_2, modelo_cobranca: modelo, atualizado_em: new Date().toISOString() }).eq('id', u.id))} />
+      <FormRegras key={`${u.id}|${u.modelo_cobranca}|${regras.janela}|${regras.criterio_data}|${regras.franquia_mensal}|${regras.todos_status}|${regras.estudos_conta_2}|${JSON.stringify(regras.regras_quantidade)}`} u={u} regras={regras}
+        onSalvar={(r, modelo) => salvar(db.from('unidade').update({
+          janela: r.janela, criterio_data: r.criterio_data, franquia_mensal: r.franquia_mensal, todos_status: r.todos_status,
+          regras_quantidade: r.regras_quantidade.length ? r.regras_quantidade : null,
+          // formato antigo ("conta 2") mantido em dia para a fat-simular anterior à 2026-10-06c
+          estudos_conta_2: r.regras_quantidade.filter(x => x.quantidade === 2).map(x => x.padrao).join('|') || null,
+          modelo_cobranca: modelo, atualizado_em: new Date().toISOString(),
+        }).eq('id', u.id))} />
 
       <SecaoNomes nomes={nomes} empresa={u.empresa}
         onAdicionar={(nome_bruto, subunidade, principal, grupo) => salvar(db.from('alias').insert({ nome_bruto, unidade_id: u.id, subunidade, principal, grupo }))}
@@ -215,14 +222,14 @@ function FormEvento({ itens, proximaOrdem, onSalvar }: { itens: ItemVigente[]; p
 
 function FormRegras({ u, regras, onSalvar }: {
   u: UnidadeResumo; regras: RegrasUnidade
-  onSalvar: (r: { janela: RegrasUnidade['janela']; criterio_data: RegrasUnidade['criterio_data']; franquia_mensal: number | null; todos_status: boolean; estudos_conta_2: string | null }, modelo: string) => void
+  onSalvar: (r: { janela: RegrasUnidade['janela']; criterio_data: RegrasUnidade['criterio_data']; franquia_mensal: number | null; todos_status: boolean; regras_quantidade: RegraQuantidade[] }, modelo: string) => void
 }) {
   const [janela, setJanela] = useState(regras.janela)
   const [criterio, setCriterio] = useState<string>(regras.criterio_data ?? '')
   const [franquia, setFranquia] = useState(regras.franquia_mensal?.toString() ?? '')
   const [modelo, setModelo] = useState(u.modelo_cobranca)
   const [todos, setTodos] = useState(regras.todos_status)
-  const [conta2, setConta2] = useState(regras.estudos_conta_2 ?? '')
+  const [qtdTexto, setQtdTexto] = useState(textoRegrasQuantidade(regras))
   const campo = 'rounded border px-2 py-1'
   return (
     <section className="rounded-lg border bg-white p-4">
@@ -243,13 +250,16 @@ function FormRegras({ u, regras, onSalvar }: {
         <label className="flex items-center gap-2 pb-1" title="Cobra também exames sem laudo assinado (À Preparar, Pendente…). Valor fixo mensal já cobra todos.">
           <input type="checkbox" checked={todos} onChange={e => setTodos(e.target.checked)} />
           <span>Cobra todos os status</span></label>
-        <label className="flex flex-col gap-1" title="Separe por | . Ex.: ABDOME TOTAL|TRIFASICO (sem acento, maiúsculas)"><span className="text-xs text-slate-500">Estudos que contam 2</span>
-          <input className={`${campo} w-64`} placeholder="ex.: ABDOME TOTAL|TRIFASICO" value={conta2} onChange={e => setConta2(e.target.value)} /></label>
+        <label className="flex flex-col gap-1" title="Uma regra por linha: PADRÃO = quantidade. O padrão é procurado na descrição do estudo (acento e maiúscula não importam). Use | para alternativas e .* para 'qualquer coisa no meio'.">
+          <span className="text-xs text-slate-500">Estudos que contam mais de 1 (um por linha: PADRÃO = N)</span>
+          <textarea className={`${campo} w-96 font-mono text-xs`} rows={3} placeholder="ex.: MAOS E PUNHOS.*IDADE OSSEA = 4" value={qtdTexto} onChange={e => setQtdTexto(e.target.value)} /></label>
         <button className="rounded bg-[#1f4e78] px-3 py-1.5 text-white" onClick={() => {
           const txt = franquia.trim()
           const n = txt === '' ? null : Number(txt.replace(/\./g, '').replace(',', '.'))
           if (n !== null && (!Number.isInteger(n) || n <= 0)) { alert('Franquia deve ser um número inteiro maior que zero (ou vazio)'); return }
-          onSalvar({ janela, criterio_data: criterio === '' ? null : (criterio as 'laudo' | 'exame'), franquia_mensal: n, todos_status: todos, estudos_conta_2: conta2.trim() || null }, modelo)
+          const qtd = lerRegrasQuantidade(qtdTexto)
+          if (qtd.erros.length) { alert(`Estudos que contam mais de 1:\n${qtd.erros.join('\n')}`); return }
+          onSalvar({ janela, criterio_data: criterio === '' ? null : (criterio as 'laudo' | 'exame'), franquia_mensal: n, todos_status: todos, regras_quantidade: qtd.regras }, modelo)
         }}>Salvar</button>
       </div>
     </section>
