@@ -11,8 +11,19 @@ import {
   Smartphone,
   Trash,
   User as UserIcon,
+  UserCheck,
+  UserX,
 } from 'lucide-react'
-import { getUsers, createUser, updateUser, deleteUser, type ManagedUser } from '@/services/users'
+import {
+  getUsers,
+  createUser,
+  updateUser,
+  deleteUser,
+  desativarUsuario,
+  reativarUsuario,
+  listarDesativados,
+  type ManagedUser,
+} from '@/services/users'
 import { getAcessoDaFerramenta, setToolAccess } from '@/services/tool_access'
 import {
   CATALOGO_DE_FERRAMENTAS,
@@ -69,6 +80,15 @@ export default function AdminPage() {
   const { toast } = useToast()
 
   const [users, setUsers] = useState<ManagedUser[]>([])
+  // Quem está desativado. Mora fora de `profiles` (ver a migration
+  // 20261007130000), então vem de uma leitura própria.
+  const [desativados, setDesativados] = useState<Set<string>>(new Set())
+  const [filtroSituacao, setFiltroSituacao] = useState<'todos' | 'ativos' | 'desativados'>('todos')
+  const [usuarioADesativar, setUsuarioADesativar] = useState<ManagedUser | null>(null)
+  const [motivoDesativacao, setMotivoDesativacao] = useState('')
+  // Id de quem está sendo desativado/reativado agora — trava o botão enquanto a
+  // chamada não volta, para um duplo clique não virar "já está desativado".
+  const [processandoId, setProcessandoId] = useState<string | null>(null)
   const [devices, setDevices] = useState<any[]>([])
   const devicesMap = useMemo(() => new Map(devices.map((d: any) => [d.id, d])), [devices])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -151,6 +171,11 @@ export default function AdminPage() {
   const groupedUsers = useMemo(() => {
     const groups = new Map<string, ManagedUser[]>()
     ;[...users]
+      .filter((user) => {
+        if (filtroSituacao === 'ativos') return !desativados.has(user.id)
+        if (filtroSituacao === 'desativados') return desativados.has(user.id)
+        return true
+      })
       .sort((a, b) => (a.name || a.email || '').localeCompare(b.name || b.email || ''))
       .forEach((user) => {
         const key = getDepartmentLabel(user.department)
@@ -162,7 +187,7 @@ export default function AdminPage() {
       if (b === 'Sem setor') return -1
       return a.localeCompare(b)
     })
-  }, [users])
+  }, [users, desativados, filtroSituacao])
 
   const newSyncInstances = useMemo(
     () => syncInstances.filter((instance) => !instance.alreadyImported),
@@ -171,14 +196,16 @@ export default function AdminPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [uData, dData, ...listas] = await Promise.all([
+      const [uData, dData, idsDesativados, ...listas] = await Promise.all([
         getUsers(),
         getDevices(),
+        listarDesativados(),
         ...FERRAMENTAS_CONTROLAVEIS.map((f) => getAcessoDaFerramenta(f.chave)),
       ])
       // Marca que a leitura FOI feita. Ver a trava em `handleSave`.
       setFerramentasCarregadas(true)
       setUsers(uData)
+      setDesativados(idsDesativados)
       setDevices(dData)
       setAcessoPorFerramenta(
         Object.fromEntries(
@@ -498,13 +525,68 @@ export default function AdminPage() {
       toast({ title: 'Você não pode remover a própria conta', variant: 'destructive' })
       return
     }
-    if (!window.confirm('Tem certeza que deseja remover este usuário?')) return
+    if (
+      !window.confirm(
+        'Tem certeza que deseja remover este usuário?\n\n' +
+          'A conta é apagada de vez e as conversas que estavam com ele voltam para a Geral. ' +
+          'Para manter o histórico, use "Desativar".',
+      )
+    )
+      return
     try {
       await deleteUser(id)
       toast({ title: 'Usuário removido' })
       await loadData()
     } catch (err: any) {
       toast({ title: 'Erro ao remover', description: err.message, variant: 'destructive' })
+    }
+  }
+
+  const abrirDesativacao = (user: ManagedUser) => {
+    setMotivoDesativacao('')
+    setUsuarioADesativar(user)
+  }
+
+  const handleDesativar = async () => {
+    if (!usuarioADesativar) return
+    const alvo = usuarioADesativar
+    setProcessandoId(alvo.id)
+    try {
+      await desativarUsuario(alvo.id, motivoDesativacao)
+      toast({
+        title: 'Usuário desativado',
+        description: 'As conversas ativas dele voltaram para a Geral.',
+      })
+      setUsuarioADesativar(null)
+      await loadData()
+    } catch (err: any) {
+      toast({ title: 'Erro ao desativar', description: err.message, variant: 'destructive' })
+    } finally {
+      setProcessandoId(null)
+    }
+  }
+
+  const handleReativar = async (user: ManagedUser) => {
+    if (
+      !window.confirm(
+        `Reativar ${user.name || user.email || 'este usuário'}?\n\n` +
+          'O login é liberado de novo. As conversas não voltam para ele e os aparelhos ' +
+          'precisam ser marcados de novo em "Editar".',
+      )
+    )
+      return
+    setProcessandoId(user.id)
+    try {
+      await reativarUsuario(user.id)
+      toast({
+        title: 'Usuário reativado',
+        description: 'Marque os aparelhos dele em "Editar" para ele voltar a atender.',
+      })
+      await loadData()
+    } catch (err: any) {
+      toast({ title: 'Erro ao reativar', description: err.message, variant: 'destructive' })
+    } finally {
+      setProcessandoId(null)
     }
   }
 
@@ -591,6 +673,36 @@ export default function AdminPage() {
         </CardContent>
       </GlassCard>
 
+      {/* Só aparece quando há alguém desativado: sem ninguém, o filtro seria
+          três botões que não mudam nada na tela. */}
+      {desativados.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          <ToggleGroup
+            type="single"
+            value={filtroSituacao}
+            // `v &&`: o ToggleGroup devolve string vazia ao clicar no item já
+            // ativo — sem a guarda, o segundo clique apagaria o filtro.
+            onValueChange={(v) => v && setFiltroSituacao(v as 'todos' | 'ativos' | 'desativados')}
+            className="justify-start gap-1"
+          >
+            <ToggleGroupItem value="todos" size="sm" variant="outline" className="h-8 px-3 text-xs">
+              Todos
+            </ToggleGroupItem>
+            <ToggleGroupItem value="ativos" size="sm" variant="outline" className="h-8 px-3 text-xs">
+              Ativos
+            </ToggleGroupItem>
+            <ToggleGroupItem
+              value="desativados"
+              size="sm"
+              variant="outline"
+              className="h-8 px-3 text-xs"
+            >
+              Desativados ({desativados.size})
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </div>
+      )}
+
       <div className="space-y-6">
         {groupedUsers.map(([department, departmentUsers]) => (
           <section key={department} className="space-y-3">
@@ -605,7 +717,7 @@ export default function AdminPage() {
                 // backdrop-blur-sm` era opaco + blur morto. Aqui o card
                 // continua fazendo sentido como card (tem cabeçalho, corpo e
                 // ações) — só troca a pele para `GlassCard`.
-                <GlassCard key={user.id}>
+                <GlassCard key={user.id} className={desativados.has(user.id) ? 'opacity-70' : undefined}>
                   <CardHeader className="pb-3">
                     <div className="flex justify-between items-start gap-3">
                       <div className="flex items-center gap-3 min-w-0">
@@ -623,6 +735,14 @@ export default function AdminPage() {
                       </div>
                       <div className="flex flex-col gap-1 items-end shrink-0">
                         {user.id === currentUser?.id && <Badge variant="secondary">Você</Badge>}
+                        {desativados.has(user.id) && (
+                          <Badge
+                            variant="outline"
+                            className="border-red-500/30 bg-red-500/10 text-red-400 gap-1"
+                          >
+                            <UserX className="h-3 w-3" /> Desativado
+                          </Badge>
+                        )}
                         {user.is_admin && (
                           <Badge
                             variant="outline"
@@ -682,7 +802,14 @@ export default function AdminPage() {
                           {/* "Todos" só vale para admin SEM restrição. Admin
                               restrito respeita a lista igual a qualquer um, e
                               mostrar "todos" para ele escondia o acesso real. */}
-                          {user.is_admin && !user.devices_restricted ? (
+                          {desativados.has(user.id) ? (
+                            // Admin sem restrição entra em qualquer aparelho pela
+                            // regra de `can_access_device`, mas desativado não
+                            // loga — "Todos" aqui seria mentira.
+                            <span className="text-sm text-muted-foreground italic">
+                              Nenhum (desativado)
+                            </span>
+                          ) : user.is_admin && !user.devices_restricted ? (
                             <Badge variant="secondary" className="bg-accent">
                               Todos os aparelhos
                             </Badge>
@@ -701,7 +828,7 @@ export default function AdminPage() {
                         </div>
                       </div>
 
-                      <div className="flex justify-end gap-2 pt-2 border-t border-border">
+                      <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-border">
                         <Button
                           variant="ghost"
                           size="sm"
@@ -710,6 +837,40 @@ export default function AdminPage() {
                         >
                           <Edit className="h-4 w-4 mr-2" /> Editar
                         </Button>
+                        {desativados.has(user.id) ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleReativar(user)}
+                            disabled={processandoId === user.id}
+                            className="h-8"
+                          >
+                            <UserCheck className="h-4 w-4 mr-2" /> Reativar
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => abrirDesativacao(user)}
+                            // Nunca a si mesmo, e nunca super admin: a RPC recusa
+                            // os dois, e o botão só evita oferecer o que vai dar erro.
+                            disabled={
+                              user.id === currentUser?.id ||
+                              Boolean(user.is_super_admin) ||
+                              processandoId === user.id
+                            }
+                            title={
+                              user.is_super_admin
+                                ? 'Super admin não pode ser desativado'
+                                : user.id === currentUser?.id
+                                  ? 'Você não pode desativar a própria conta'
+                                  : undefined
+                            }
+                            className="h-8"
+                          >
+                            <UserX className="h-4 w-4 mr-2" /> Desativar
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="sm"
@@ -1116,6 +1277,62 @@ export default function AdminPage() {
               Cancelar
             </Button>
             <Button onClick={handleSave}>Salvar</Button>
+          </DialogFooter>
+        </GlassDialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(usuarioADesativar)}
+        onOpenChange={(aberto) => {
+          // Fechar no meio da chamada deixaria a tela sem saber se deu certo.
+          if (!aberto && !processandoId) setUsuarioADesativar(null)
+        }}
+      >
+        <GlassDialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              Desativar {usuarioADesativar?.name || usuarioADesativar?.email || 'usuário'}?
+            </DialogTitle>
+            <DialogDescription>
+              A conta continua existindo, mas deixa de funcionar:
+            </DialogDescription>
+          </DialogHeader>
+
+          <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+            <li>bloqueia o login e derruba as sessões abertas;</li>
+            <li>tira o acesso a todos os aparelhos;</li>
+            <li>devolve as conversas ativas dele para a Geral (já aparecem como não lidas);</li>
+            <li>mantém o histórico: mensagens, tarefas e registros continuam no nome dele.</li>
+          </ul>
+          <p className="text-xs text-muted-foreground">
+            Dá para reativar depois, mas as conversas não voltam sozinhas e os aparelhos precisam ser
+            marcados de novo.
+          </p>
+
+          <div className="space-y-2">
+            <Label htmlFor="motivo-desativacao">Motivo (opcional)</Label>
+            <Input
+              id="motivo-desativacao"
+              value={motivoDesativacao}
+              onChange={(e) => setMotivoDesativacao(e.target.value)}
+              placeholder="Ex: saiu da empresa"
+              maxLength={500}
+              className="bg-muted"
+              disabled={Boolean(processandoId)}
+            />
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setUsuarioADesativar(null)}
+              disabled={Boolean(processandoId)}
+            >
+              Cancelar
+            </Button>
+            <Button variant="destructive" onClick={handleDesativar} disabled={Boolean(processandoId)}>
+              {processandoId ? 'Desativando…' : 'Desativar'}
+            </Button>
           </DialogFooter>
         </GlassDialogContent>
       </Dialog>

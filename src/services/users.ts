@@ -138,3 +138,47 @@ export const deleteUser = async (id: string) => {
 
   return res.json()
 }
+
+/**
+ * Desativa a pessoa sem apagá-la: o login é bloqueado, os aparelhos saem e as
+ * conversas que estavam com ela voltam para a Geral. O histórico fica.
+ *
+ * Vai direto na RPC (e não pela edge function `manage-user`) porque o
+ * banimento é feito em SQL: a RPC é SECURITY DEFINER de um dono que escreve em
+ * `auth.users`. Quem não é admin leva `forbidden` — a checagem é do banco, o
+ * botão escondido na tela é só conforto.
+ */
+export const desativarUsuario = async (id: string, motivo?: string) => {
+  const { error } = await supabase.rpc('desativar_usuario', {
+    p_user_id: id,
+    p_motivo: motivo?.trim() || null,
+  })
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * Libera o login de novo. As conversas NÃO voltam para a pessoa e os aparelhos
+ * NÃO são restaurados — quem reativa escolhe de novo pelo cadastro.
+ */
+export const reativarUsuario = async (id: string) => {
+  const { error } = await supabase.rpc('reativar_usuario', { p_user_id: id })
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * Ids das pessoas desativadas, para o selo da tela de Equipe.
+ *
+ * Não lança: se a leitura falhar (rede, ou a migration ainda não aplicada), a
+ * tela de Equipe precisa continuar abrindo. O pior caso é um selo faltando — e
+ * desativar quem já está desativado devolve um erro claro do banco.
+ */
+export const listarDesativados = async (): Promise<Set<string>> => {
+  const { data, error } = await supabase.rpc('usuarios_desativados_ids')
+
+  if (error) {
+    console.error('Error fetching deactivated users:', error)
+    return new Set()
+  }
+
+  return new Set((data as string[] | null) ?? [])
+}

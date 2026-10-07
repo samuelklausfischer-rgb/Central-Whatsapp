@@ -27,6 +27,9 @@ const ROTULO_CAMPO: Record<string, string> = {
   department: 'Setor',
   devices_restricted: 'Restrição de instâncias',
   password: 'Senha',
+  // Linhas de desativar/reativar (RPCs `desativar_usuario`/`reativar_usuario`).
+  desativado: 'Desativado',
+  motivo: 'Motivo',
 }
 
 function formatarValor(valor: unknown): string {
@@ -56,6 +59,19 @@ function descrever(entrada: AdminAuditEntry): string[] {
         ? `Removeu o acesso à ferramenta ${ferramenta}`
         : `Liberou o acesso à ferramenta ${ferramenta}`,
     ]
+  }
+
+  // Desativar/reativar: `changes` = { desativado: { de, para }, motivo? }. O
+  // `para` diz o que aconteceu; o motivo só existe ao desativar.
+  if (entrada.entity === 'usuarios_desativados') {
+    const reativou = changes.desativado?.para === false
+    const linhas = [
+      reativou
+        ? 'Reativou o usuário (pode entrar de novo)'
+        : 'Desativou o usuário (não consegue mais entrar)',
+    ]
+    if (changes.motivo) linhas.push(`Motivo: ${formatarValor(changes.motivo)}`)
+    return linhas
   }
 
   if (entrada.action === 'insert') return ['Cadastro criado']
@@ -101,8 +117,8 @@ export function AdminAuditLog() {
           <History className="h-5 w-5 text-primary" /> Histórico de Alterações
         </CardTitle>
         <CardDescription>
-          Quem mexeu em cadastro, setor, permissão de administrador ou acesso a instâncias — e o
-          que exatamente mudou. Senha aparece como alterada, nunca o valor.
+          Quem mexeu em cadastro, setor, permissão de administrador, acesso a instâncias ou
+          desativou/reativou alguém — e o que exatamente mudou. Senha aparece como alterada, nunca o valor.
         </CardDescription>
       </CardHeader>
       <CardContent>
