@@ -15,6 +15,8 @@ import { BarraDeAbas, useBarraNoChat } from '@/components/tools/BarraDeAbas'
 import { useAppHeartbeat } from '@/hooks/use-app-heartbeat'
 import { useNotificacoesDeMensagem } from '@/hooks/use-notificacoes-de-mensagem'
 import { useNotificacoes } from '@/hooks/use-notificacoes'
+import { useChatInterno } from '@/hooks/use-chat-interno'
+import { useNotificacoesChatInterno } from '@/hooks/use-notificacoes-chat-interno'
 import { useToolAccess } from '@/hooks/use-tool-access'
 import { useAndroidBack } from '@/hooks/use-android-back'
 import { useAndroidShell } from '@/hooks/use-android-shell'
@@ -81,6 +83,14 @@ export default function Layout() {
   // Silenciadas para quem tem a tela bloqueada: som e pop-up de algo que a
   // pessoa não pode abrir é só estorvo.
   useNotificacoesDeMensagem(podeUsar['tela-chat'])
+  /*
+    Chat interno entre usuários do app: lista de conversas, Realtime (UM canal) e
+    selo de não lidas, e o som/aviso de mensagem nova. Mora aqui pelo mesmo motivo
+    da linha acima — o ChatHub é rota `lazy()` e desmonta ao navegar. O Chat interno
+    é uma opção DENTRO do Whats, então vale a mesma permissão (`tela-chat`).
+  */
+  useChatInterno(podeUsar['tela-chat'])
+  useNotificacoesChatInterno(podeUsar['tela-chat'])
   /*
     A caixa de notificações do app (agenda por ora). Mora AQUI pelo mesmo motivo
     da linha acima: precisa valer em qualquer tela, e os dois cabeçalhos —

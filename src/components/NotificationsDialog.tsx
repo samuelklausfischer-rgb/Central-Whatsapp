@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Bell, Volume2, VolumeX, BellOff, Smartphone, Wifi, WifiOff, ShieldAlert, CalendarDays } from 'lucide-react'
+import { Bell, Volume2, VolumeX, BellOff, Smartphone, Wifi, WifiOff, ShieldAlert, CalendarDays, MessagesSquare } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Switch } from '@/components/ui/switch'
 import { useAuth } from '@/hooks/use-auth'
 import { useNotificationPrefs } from '@/hooks/use-notification-prefs'
 import { getDevices } from '@/services/devices'
 import { PREF_AGENDA } from '@/hooks/use-notificacoes'
+import { PREF_CHAT_INTERNO } from '@/hooks/use-notificacoes-chat-interno'
 
 interface Props {
   open: boolean
@@ -344,6 +345,74 @@ export function NotificationsDialog({ open, onOpenChange }: Props) {
                   </div>
                   <Switch
                     checked={getPrefs(PREF_AGENDA).background && podeNotificar}
+                    className="scale-75 pointer-events-none"
+                  />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/*
+            Chat interno: mesmo molde da Agenda logo acima — a chave `app:chat-interno`
+            não é id de aparelho (prefixo `app:`), e reaproveita a persistência no
+            perfil. Vale para todas as conversas internas; silenciar UMA conversa é
+            no menu dela.
+          */}
+          {!loading && (
+            <div className="rounded-xl border border-border/60 bg-accent/20 p-3">
+              <div className="mb-2 flex items-center gap-2">
+                <MessagesSquare className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-medium">Chat interno</span>
+                <span className="text-xs text-muted-foreground">
+                  mensagens de colegas e grupos da equipe
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => toggleSound(PREF_CHAT_INTERNO)}
+                  className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2"
+                >
+                  <div className="flex items-center gap-2">
+                    {getPrefs(PREF_CHAT_INTERNO).sound ? (
+                      <Volume2 className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                    ) : (
+                      <VolumeX className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                    <span className="text-xs font-medium">Som</span>
+                  </div>
+                  <Switch
+                    checked={getPrefs(PREF_CHAT_INTERNO).sound}
+                    className="scale-75 pointer-events-none"
+                  />
+                </button>
+                <button
+                  type="button"
+                  // Parte do que a chave MOSTRA (preferência E permissão), não só da
+                  // preferência: o padrão é "ligado", então com a permissão pendente
+                  // a chave aparece desligada e o primeiro clique tem de ligar — ou
+                  // seja, pedir a permissão. `alternarBackgroundDeTodos` pede e grava
+                  // o valor explícito (um `toggle` aqui desligaria a preferência que
+                  // já estava ligada).
+                  onClick={() =>
+                    void alternarBackgroundDeTodos(
+                      !(getPrefs(PREF_CHAT_INTERNO).background && podeNotificar),
+                      [PREF_CHAT_INTERNO],
+                    )
+                  }
+                  disabled={permissao === 'denied' || permissao === 'indisponivel'}
+                  className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <div className="flex items-center gap-2">
+                    {getPrefs(PREF_CHAT_INTERNO).background && podeNotificar ? (
+                      <Bell className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                    ) : (
+                      <BellOff className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                    <span className="text-xs font-medium">2° plano</span>
+                  </div>
+                  <Switch
+                    checked={getPrefs(PREF_CHAT_INTERNO).background && podeNotificar}
                     className="scale-75 pointer-events-none"
                   />
                 </button>

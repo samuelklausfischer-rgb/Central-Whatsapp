@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { lazy, Suspense, useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { ChatList } from '@/components/chat/ChatList'
@@ -37,6 +37,13 @@ import { definirConversaAberta } from '@/stores/mobileChrome'
 import { getNotes } from '@/services/notes'
 import { useRealtime } from '@/hooks/use-realtime'
 import { useAuth } from '@/hooks/use-auth'
+import {
+  CHAVE_CONTATO_ANTES_DO_INTERNO,
+  CHAVE_CONVERSA_INTERNA,
+  CHAVE_MODO_DO_CHAT,
+  ehUuid,
+} from '@/lib/chat-interno'
+import { totalDeNaoLidas, useChatInternoStore } from '@/stores/chatInterno'
 import { useToast } from '@/hooks/use-toast'
 import {
   Dialog,
@@ -48,6 +55,16 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
+
+/**
+ * O Chat interno é carregado sob demanda: quem só usa o WhatsApp não baixa nem
+ * executa nada dele. O que precisa existir o tempo todo (Realtime, selo de não
+ * lidas, som) mora no `Layout` e na store, não aqui.
+ */
+const ChatInternoPaineis = lazy(() => import('@/components/chat-interno/ChatInternoPaineis'))
+
+/** 'whats' = conversas do WhatsApp por aparelho · 'interno' = Chat interno entre usuários do app. */
+type ModoDoChat = 'whats' | 'interno'
 
 function debounce<A extends any[]>(fn: (...args: A) => void, ms: number): (...args: A) => void {
   let timer: ReturnType<typeof setTimeout>
@@ -130,9 +147,45 @@ export default function ChatHub() {
   // pinta a sidebar imediatamente no mount, sem esperar a rede. O efeito
   // abaixo sempre refaz o fetch em paralelo e substitui pelo resultado fresco.
   const [contacts, setContacts] = useState<any[]>(() => getCachedContacts() || [])
-  const [selectedContact, setSelectedContact] = useState<string | null>(() =>
-    sessionStorage.getItem('activeContactJid')
+  // `activeContactJid` e a chave "antes do interno" nunca coexistem (ver o efeito
+  // que as espelha): a segunda só existe enquanto o modo interno esconde a
+  // conversa, e é daqui que ela volta ao reabrir o `/chat`.
+  const [selectedContact, setSelectedContact] = useState<string | null>(
+    () =>
+      sessionStorage.getItem('activeContactJid') ??
+      sessionStorage.getItem(CHAVE_CONTATO_ANTES_DO_INTERNO),
   )
+  /**
+   * Modo da tela: WhatsApp ou Chat interno. É um estado À PARTE, e não um
+   * "aparelho" falso: `selectedDeviceId` vai para RPC de uuid
+   * (`get_conversation_summaries`), para o `?device=` da URL e para o
+   * `sessionStorage` que o aviso de mensagem consulta — um id inventado vazaria
+   * para os três. Escolher o Chat interno só troca o que é desenhado; o aparelho
+   * e a conversa do WhatsApp ficam guardados para quando a pessoa voltar.
+   */
+  const [modo, setModo] = useState<ModoDoChat>(() =>
+    sessionStorage.getItem(CHAVE_MODO_DO_CHAT) === 'interno' ? 'interno' : 'whats',
+  )
+  const [conversaInternaId, setConversaInternaId] = useState<string | null>(() => {
+    const salvo = sessionStorage.getItem(CHAVE_CONVERSA_INTERNA)
+    return ehUuid(salvo) ? salvo.toLowerCase() : null
+  })
+  const naoLidasChatInterno = useChatInternoStore(totalDeNaoLidas)
+  const urlInterno = searchParams.get('interno')
+  // Lido pelos efeitos de `?device=`/`?jid=` sem entrar nas deps deles: o link do
+  // interno é consumido (sai da URL) logo após aplicado, e reexecutar aqueles
+  // efeitos por causa disso só refaria `setDevices` à toa.
+  const urlInternoRef = useRef(urlInterno)
+  urlInternoRef.current = urlInterno
+  /**
+   * Um `?device=`/`?jid=` recém-aplicado volta a tela para o WhatsApp — a menos
+   * que o mesmo link traga `?interno=`, que vence. A gravação em
+   * `sessionStorage` (`CHAVE_MODO_DO_CHAT`) fica a cargo do efeito de `modo`.
+   */
+  const modoPeloLinkDoWhats = useCallback(() => {
+    if (urlInternoRef.current) return
+    setModo('whats')
+  }, [])
   const [userStates, setUserStates] = useState<ConversationUserState[]>([])
   const [assignments, setAssignments] = useState<Map<string, ConversationAssignment>>(new Map())
   // Só é `true` quando o aparelho NUNCA foi carregado nesta sessão. Voltar para
@@ -179,10 +232,54 @@ export default function ChatHub() {
     getMyStates().then(setUserStates)
   }, [])
 
+  // Em modo interno o contato do WhatsApp NÃO está à vista: se `activeContactJid`
+  // ficasse gravada, o aviso de mensagem desse contato seria silenciado
+  // ("conversa em foco") enquanto a pessoa lê outra coisa. Mas só apagar perdia a
+  // conversa ao sair do `/chat` e voltar — então, nesse modo, o contato vai para
+  // outra chave que o aviso não consulta, e a inicialização do estado o recupera.
   useEffect(() => {
-    if (selectedContact) sessionStorage.setItem('activeContactJid', selectedContact)
-    else sessionStorage.removeItem('activeContactJid')
-  }, [selectedContact])
+    if (modo === 'whats') {
+      if (selectedContact) sessionStorage.setItem('activeContactJid', selectedContact)
+      else sessionStorage.removeItem('activeContactJid')
+      sessionStorage.removeItem(CHAVE_CONTATO_ANTES_DO_INTERNO)
+    } else {
+      sessionStorage.removeItem('activeContactJid')
+      if (selectedContact) sessionStorage.setItem(CHAVE_CONTATO_ANTES_DO_INTERNO, selectedContact)
+      else sessionStorage.removeItem(CHAVE_CONTATO_ANTES_DO_INTERNO)
+    }
+  }, [selectedContact, modo])
+
+  useEffect(() => {
+    sessionStorage.setItem(CHAVE_MODO_DO_CHAT, modo)
+  }, [modo])
+
+  useEffect(() => {
+    if (conversaInternaId) sessionStorage.setItem(CHAVE_CONVERSA_INTERNA, conversaInternaId)
+    else sessionStorage.removeItem(CHAVE_CONVERSA_INTERNA)
+  }, [conversaInternaId])
+
+  /**
+   * Link `/chat?interno=<conversa>` (clique na notificação do Chat interno): abre
+   * o modo interno já nessa conversa. O parâmetro é CONSUMIDO — sai da URL logo
+   * em seguida —, senão um segundo clique numa notificação da mesma conversa não
+   * mudaria a URL e o efeito não rodaria de novo. Só aceita uuid: o valor vem da
+   * barra de endereço.
+   */
+  useEffect(() => {
+    if (!urlInterno) return
+    if (ehUuid(urlInterno)) {
+      setModo('interno')
+      setConversaInternaId(urlInterno.toLowerCase())
+    }
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('interno')
+        return next
+      },
+      { replace: true },
+    )
+  }, [urlInterno, setSearchParams])
 
   useEffect(() => {
     devicesRef.current = devices
@@ -268,10 +365,19 @@ export default function ChatHub() {
     // aparelho realmente existir na lista atual — senão (por exemplo a lista de
     // devices ainda não carregou) o efeito precisa tentar de novo na próxima
     // vez que `allowedDevices` mudar de verdade, e não desistir silenciosamente.
+    // Sem `?device=` na URL (o modo interno a retira) nada está "aplicado": se o
+    // mesmo aparelho voltar num link, é navegação nova e precisa trazer o WhatsApp.
+    if (!urlDeviceId) urlDeviceIdAplicadoRef.current = null
     const urlDeviceIdEhNovo = !!urlDeviceId && urlDeviceIdAplicadoRef.current !== urlDeviceId
     const urlDeviceIdValido = urlDeviceIdEhNovo && filteredDevices.some((d) => d.id === urlDeviceId)
     if (urlDeviceIdValido) {
       urlDeviceIdAplicadoRef.current = urlDeviceId
+      // Um link de WhatsApp (notificação, card do Painel, "abrir conversa" do
+      // e-mail) só faz sentido com o WhatsApp na tela. Com o modo interno gravado
+      // no `sessionStorage`, o aparelho e o contato da URL eram aplicados por
+      // baixo e o painel interno continuava à frente. `?interno=` ganha quando
+      // vem junto (ver `modoPeloLinkDoWhats`).
+      modoPeloLinkDoWhats()
     }
 
     // A mutação do ref fica FORA do updater de propósito: `setState((prev) =>
@@ -287,7 +393,7 @@ export default function ChatHub() {
       }
       return filteredDevices[0]?.id || null
     })
-  }, [allowedDevices, urlDeviceId])
+  }, [allowedDevices, urlDeviceId, modoPeloLinkDoWhats])
 
   /**
    * Handler de troca manual de aparelho pela sidebar. Além de gravar o estado,
@@ -314,6 +420,8 @@ export default function ChatHub() {
    * aparelho ter fechado a conversa de propósito.
    */
   const handleSelectDevice = useCallback((deviceId: string) => {
+    // Escolher um aparelho (inclusive o que já estava selecionado) volta ao WhatsApp.
+    setModo('whats')
     setSelectedDeviceId(deviceId)
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
@@ -347,7 +455,10 @@ export default function ChatHub() {
     if (jidAplicadoRef.current === chave) return
     jidAplicadoRef.current = chave
     setSelectedContact(urlJid)
-  }, [urlJid, urlDeviceId, selectedDeviceId])
+    // Sem isto a conversa abria "por baixo" do painel interno (ver o efeito de
+    // `?device=` acima).
+    modoPeloLinkDoWhats()
+  }, [urlJid, urlDeviceId, selectedDeviceId, modoPeloLinkDoWhats])
 
   useRealtime('devices', (e) => {
     if (e.action === 'create') {
@@ -1146,17 +1257,27 @@ export default function ChatHub() {
   }, [])
 
   /**
+   * "Conversa aberta" é a do modo atual. A do outro modo fica guardada, mas não
+   * pode segurar o botão voltar, o Esc nem a barra do celular.
+   */
+  const conversaAbertaNaTela = modo === 'interno' ? !!conversaInternaId : !!selectedContact
+  const fecharConversaAberta = useCallback(() => {
+    if (modo === 'interno') setConversaInternaId(null)
+    else handleCloseConversation()
+  }, [modo, handleCloseConversation])
+
+  /**
    * No Android, o voltar do sistema sai da conversa para a lista — não fecha o
    * app. Registrado só enquanto há conversa aberta: sem conversa, o voltar
    * segue para o próximo nível (trocar de tela, e na raiz minimizar).
    */
   useEffect(() => {
-    if (!selectedContact) return
+    if (!conversaAbertaNaTela) return
     return registrarVoltar(() => {
-      handleCloseConversation()
+      fecharConversaAberta()
       return true
     })
-  }, [selectedContact, handleCloseConversation])
+  }, [conversaAbertaNaTela, fecharConversaAberta])
 
   /**
    * Avisa o `Layout` que há conversa ocupando a tela, para ele sumir com a barra
@@ -1167,21 +1288,44 @@ export default function ChatHub() {
    * deixaria o app sem navegação nenhuma.
    */
   useEffect(() => {
-    definirConversaAberta(!!selectedContact)
+    definirConversaAberta(conversaAbertaNaTela)
     return () => definirConversaAberta(false)
-  }, [selectedContact])
+  }, [conversaAbertaNaTela])
 
   useEffect(() => {
-    if (!selectedContact) return
+    if (!conversaAbertaNaTela) return
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       if (e.defaultPrevented) return
       e.preventDefault()
-      handleCloseConversation()
+      fecharConversaAberta()
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [selectedContact, handleCloseConversation])
+  }, [conversaAbertaNaTela, fecharConversaAberta])
+
+  /**
+   * Entrar no modo interno também tira `?device=`/`?jid=` da URL. Com eles ali, um
+   * F5 reaplicaria o link do WhatsApp (`modoPeloLinkDoWhats`) e jogaria a pessoa
+   * de volta para o WhatsApp, e uma segunda notificação da MESMA conversa não
+   * mudaria a URL, então o efeito do deep link não rodaria de novo. O aparelho e
+   * o contato continuam guardados no estado e no `sessionStorage`.
+   */
+  const abrirChatInterno = useCallback(() => {
+    setModo('interno')
+    setSearchParams(
+      (prev) => {
+        if (!prev.has('device') && !prev.has('jid')) return prev
+        const next = new URLSearchParams(prev)
+        next.delete('device')
+        next.delete('jid')
+        return next
+      },
+      { replace: true },
+    )
+  }, [setSearchParams])
+  const selecionarConversaInterna = useCallback((id: string) => setConversaInternaId(id.toLowerCase()), [])
+  const fecharConversaInterna = useCallback(() => setConversaInternaId(null), [])
 
   const handleOpenInfo = useCallback((deviceId: string, remoteSender: string) => {
     setSelectedContact(remoteSender)
@@ -1434,7 +1578,22 @@ export default function ChatHub() {
   return (
     <div ref={containerRef} className="h-full w-full relative bg-chat-app border-chat-border flex rounded-none md:rounded-2xl border overflow-hidden shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
 
-      {(!isMobile || !selectedContact) && (
+      {modo === 'interno' && (
+        <Suspense fallback={<div className="h-full flex-1 bg-chat-sidebar" aria-busy="true" />}>
+          <ChatInternoPaineis
+            isMobile={isMobile}
+            larguraDaLista={sidebarWidth}
+            aoArrastarDivisoria={handlePointerDown}
+            devices={devices}
+            onSelectDevice={handleSelectDevice}
+            conversaId={conversaInternaId}
+            onSelecionar={selecionarConversaInterna}
+            onFecharConversa={fecharConversaInterna}
+          />
+        </Suspense>
+      )}
+
+      {modo === 'whats' && (!isMobile || !selectedContact) && (
         isMobile ? (
           <ChatList
             devices={devices}
@@ -1456,6 +1615,8 @@ export default function ChatHub() {
             onRefreshAll={handleRefreshAll}
             isRefreshingAll={isRefreshingAll}
             carregandoConversas={carregandoConversas}
+            onAbrirChatInterno={abrirChatInterno}
+            naoLidasChatInterno={naoLidasChatInterno}
           />
         ) : (
           <div
@@ -1482,6 +1643,8 @@ export default function ChatHub() {
               onRefreshAll={handleRefreshAll}
               isRefreshingAll={isRefreshingAll}
             carregandoConversas={carregandoConversas}
+              onAbrirChatInterno={abrirChatInterno}
+              naoLidasChatInterno={naoLidasChatInterno}
             />
             <div
               className="absolute -right-[6px] top-0 bottom-0 w-[14px] cursor-col-resize z-10 flex items-center justify-center"
@@ -1492,7 +1655,7 @@ export default function ChatHub() {
           </div>
         )
       )}
-      {(!isMobile || selectedContact) && (
+      {modo === 'whats' && (!isMobile || selectedContact) && (
         <ChatWindow
           device={selectedDevice}
           contact={selectedContact}

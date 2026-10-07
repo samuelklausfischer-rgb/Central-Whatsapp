@@ -9,6 +9,7 @@ import {
   Select,
   SelectContent,
   SelectItem,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -18,7 +19,7 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { format, startOfDay, differenceInCalendarDays } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { Check, CheckCheck, Smartphone, Search, X, MessageCircle, Pin, RefreshCw, UserCheck, UsersRound, BellOff, Eye, EyeOff, PanelTopClose, PanelTopOpen } from 'lucide-react'
+import { Check, CheckCheck, Smartphone, Search, X, MessageCircle, MessagesSquare, Pin, RefreshCw, UserCheck, UsersRound, BellOff, Eye, EyeOff, PanelTopClose, PanelTopOpen } from 'lucide-react'
 import {
   AlertDialog,
   AlertDialogContent,
@@ -49,6 +50,7 @@ import type { ConversationUserState } from '@/services/conversation_states'
 import type { ConversationAssignment, Label } from '@/lib/supabase/types'
 import { chaveDaConversa } from '@/stores/conversationMessages'
 import { buildContactIndex, findContactByIdentifier, resolveContactDisplayName } from '@/lib/contacts/normalize'
+import { VALOR_CHAT_INTERNO } from '@/lib/chat-interno'
 
 /** Etiqueta já resolvida (nome + cor), pronta para desenhar na linha da lista. */
 interface EtiquetaResumo {
@@ -83,6 +85,27 @@ export interface ChatListProps {
    * carregamento aparecia como "Nenhuma conversa por aqui".
    */
   carregandoConversas?: boolean
+  /**
+   * Entrada "Chat interno" do seletor. Escolhê-la NÃO seleciona aparelho nenhum:
+   * quem decide é o `ChatHub`, que troca de modo (ver `VALOR_CHAT_INTERNO`).
+   * Sem este callback o seletor é só de aparelhos, como sempre foi.
+   */
+  onAbrirChatInterno?: () => void
+  /** Mensagens não lidas do Chat interno (sem contar conversas silenciadas). */
+  naoLidasChatInterno?: number
+}
+
+/** Contagem do Chat interno ao lado do seletor — o mesmo selo azul das linhas. */
+function SeloChatInterno({ total, className }: { total: number; className?: string }) {
+  if (total <= 0) return null
+  return (
+    <span
+      className={cn('flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-bold text-primary-foreground', className)}
+      aria-label={`${total} mensagens não lidas no chat interno`}
+    >
+      {total > 99 ? '99+' : total}
+    </span>
+  )
 }
 
 function formatChatTimestamp(dateString: string | undefined | null): string {
@@ -417,6 +440,8 @@ export function ChatList({
   onRefreshAll,
   isRefreshingAll,
   carregandoConversas = false,
+  onAbrirChatInterno,
+  naoLidasChatInterno = 0,
 }: ChatListProps) {
   const { user } = useAuth()
   const [searchQuery, setSearchQuery] = useState('')
@@ -750,6 +775,21 @@ export function ChatList({
                 <BellOff className="h-4 w-4" />
               </button>
             )}
+            {/*
+              Atalho do Chat interno, SEMPRE visível: o seletor de aparelho some quando
+              o cabeçalho está colapsado, e o selo de não lidas não pode sumir junto.
+            */}
+            {onAbrirChatInterno && (
+              <button
+                onClick={onAbrirChatInterno}
+                className="relative text-chat-muted hover:text-chat-text transition-colors"
+                title="Chat interno"
+                aria-label={naoLidasChatInterno > 0 ? `Chat interno — ${naoLidasChatInterno} não lidas` : 'Chat interno'}
+              >
+                <MessagesSquare className="h-4 w-4" />
+                <SeloChatInterno total={naoLidasChatInterno} className="absolute -right-2.5 -top-2 h-4 min-w-4 px-1 text-[9px]" />
+              </button>
+            )}
             {onRefreshAll && (
               <button
                 onClick={onRefreshAll}
@@ -805,7 +845,15 @@ export function ChatList({
           inert={headerCollapsed}
         >
           <div className="overflow-hidden min-h-0">
-            <Select value={selectedDeviceId ?? ''} onValueChange={onSelectDevice}>
+            <div className="relative">
+            <Select
+              value={selectedDeviceId ?? ''}
+              onValueChange={(valor) => {
+                // "Chat interno" não é aparelho: vira troca de modo, nunca `selectedDeviceId`.
+                if (valor === VALOR_CHAT_INTERNO) onAbrirChatInterno?.()
+                else onSelectDevice(valor)
+              }}
+            >
               <SelectTrigger className="w-full bg-chat-sidebar border-chat-border h-12">
                 <SelectValue placeholder="Selecione um dispositivo..." />
               </SelectTrigger>
@@ -838,8 +886,29 @@ export function ChatList({
                     </div>
                   </SelectItem>
                 ))}
+                {onAbrirChatInterno && (
+                  <>
+                    {devices.length > 0 && <SelectSeparator />}
+                    <SelectItem value={VALOR_CHAT_INTERNO} className="py-3">
+                      <div className="flex items-center gap-3">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/15 text-primary">
+                          <MessagesSquare className="h-4 w-4" />
+                        </span>
+                        <div className="flex flex-col text-left">
+                          <span className="text-sm font-medium leading-none text-chat-text">Chat interno</span>
+                          <span className="text-xs text-chat-muted mt-1.5">Conversas com a equipe</span>
+                        </div>
+                        <SeloChatInterno total={naoLidasChatInterno} />
+                      </div>
+                    </SelectItem>
+                  </>
+                )}
               </SelectContent>
             </Select>
+            {/* Selo sobre o próprio seletor: com um aparelho escolhido, o item "Chat
+                interno" só aparece com a lista aberta — sem isto a contagem ficaria escondida. */}
+            <SeloChatInterno total={naoLidasChatInterno} className="pointer-events-none absolute right-9 top-1/2 -translate-y-1/2" />
+            </div>
           </div>
         </div>
 
