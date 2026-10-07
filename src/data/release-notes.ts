@@ -34,6 +34,18 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.226',
+    date: '2026-10-07 19:30',
+    title: 'Mensagem enviada não some mais por causa do 9',
+    details: [
+      '🐛 Corrigido: ao iniciar conversa digitando o número com o 9 a mais (ou a menos) do que o WhatsApp usa, a mensagem saía mas ficava numa conversa separada — e quando o contato respondia, parecia que ela tinha sumido. Agora ela vai direto para a conversa certa e a tela acompanha',
+      '🔁 Nova conversa: se o número digitado já tem conversa com o 9 trocado, o app abre essa, com o histórico, em vez de criar uma vazia ao lado',
+      '🧹 22 conversas que estavam divididas assim foram juntadas',
+    ],
+    usabilidade:
+      'Nada muda no jeito de usar: digite o número como preferir em "Nova conversa". Se aparecer "Essa conversa já existia", é o app abrindo a conversa certa.',
+  },
+  {
     version: '0.0.225',
     date: '2026-10-07 19:00',
     title: 'Faturamento: como emitir a nota de cada unidade',

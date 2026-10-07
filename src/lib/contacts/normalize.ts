@@ -45,6 +45,24 @@ export function normalizeToDigits(raw: string): string {
 }
 
 /**
+ * A mesma conversa escrita com o nono dígito a mais ou a menos.
+ *
+ * `55 DD 9 XXXXXXXX` <-> `55 DD XXXXXXXX`. Para muitos celulares o JID do
+ * WhatsApp NÃO tem o 9, e para outros tem — o número digitado não diz qual.
+ * Devolve `null` para tudo que não for celular brasileiro nesse formato (grupo,
+ * LID, fixo, estrangeiro). Mesma regra de `soDifereNoNonoDigito` no webhook e de
+ * `private.chave_canonica_do_envio` no banco, com uma trava a mais: aqui não há
+ * resposta do WhatsApp para confirmar, então o assinante precisa começar em 6-9
+ * (celular). Sem ela, um fixo `55 31 3333-4444` viraria um celular inexistente.
+ */
+export function outraFormaDoNonoDigito(jid: string | null | undefined): string | null {
+  if (!jid) return null
+  if (/^55[0-9]{2}9[6-9][0-9]{7}$/.test(jid)) return jid.slice(0, 4) + jid.slice(5)
+  if (/^55[0-9]{2}[6-9][0-9]{7}$/.test(jid)) return `${jid.slice(0, 4)}9${jid.slice(4)}`
+  return null
+}
+
+/**
  * Normalize a contact ID to a comparable form.
  * Returns null if the input is invalid.
  */
