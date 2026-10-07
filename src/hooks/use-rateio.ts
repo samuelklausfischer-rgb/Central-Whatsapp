@@ -15,12 +15,18 @@ export function useRateioUpload() {
   const [status, setStatus] = useState('')
   const [erro, setErro] = useState<string | null>(null)
   const [resultado, setResultado] = useState<RateioResultado | null>(null)
+  // Execução recém-gravada no histórico, base do painel "Lançar no Omie". `execucaoId` fica
+  // null quando a gravação falhou ou ainda não aconteceu; `omieIndisponivel` diz o motivo.
+  const [execucaoId, setExecucaoId] = useState<string | null>(null)
+  const [omieIndisponivel, setOmieIndisponivel] = useState<string | null>(null)
 
   const processar = useCallback(
     async (arquivo: File, empresa: RateioEmpresa, adicionais: RateioAdicional[] = []) => {
       setEnviando(true)
       setErro(null)
       setResultado(null)
+      setExecucaoId(null)
+      setOmieIndisponivel(null)
       setStatus('Processando planilha, aguarde...')
       try {
         const json = await processarRateio(arquivo, empresa, adicionais)
@@ -30,7 +36,7 @@ export function useRateioUpload() {
         // Histórico é secundário ao resultado — se a gravação falhar, o usuário já
         // tem o resumo e o download na tela; só avisamos no console.
         try {
-          await insertRateioExecucao({
+          const gravada = await insertRateioExecucao({
             empresa,
             arquivo_nome: arquivo.name,
             total_variavel: json.resumo.total_variavel,
@@ -45,9 +51,20 @@ export function useRateioUpload() {
             adicional_total: json.resumo.adicional_total ?? 0,
             resultado_xlsx_nome: json.arquivo?.nome,
             resultado_xlsx_base64: json.arquivo?.base64,
+            linhas: json.linhas ?? null,
           })
+          if (!json.linhas?.length) {
+            setOmieIndisponivel('O cálculo não devolveu as linhas por unidade; esta execução não pode ser lançada no Omie.')
+          } else if (!gravada.linhasGravadas) {
+            setOmieIndisponivel(
+              'O banco ainda não tem a coluna das linhas (migração pendente); esta execução não pode ser lançada no Omie.',
+            )
+          } else {
+            setExecucaoId(gravada.id)
+          }
         } catch (histErr) {
           console.error('Falha ao gravar histórico do rateio:', (histErr as Error).message)
+          setOmieIndisponivel('Não foi possível gravar o histórico desta execução, então ela não pode ser lançada no Omie.')
         }
 
         return json
@@ -62,7 +79,7 @@ export function useRateioUpload() {
     [],
   )
 
-  return { processar, enviando, status, erro, resultado }
+  return { processar, enviando, status, erro, resultado, execucaoId, omieIndisponivel }
 }
 
 export function useRateioHistorico(empresa: RateioEmpresa) {

@@ -32,11 +32,29 @@ export interface RateioPendencia {
   referencia: string
 }
 
+// Uma unidade do rateio, como o motor devolve em `resposta.linhas` e como é gravada em
+// `dash_rateio_execucoes.linhas` (contrato docs/rateio-omie/CONTRATO.md). `unidade` é o nome
+// exibido no Excel; as taxas aparecem só quando existem, por isso o índice aberto.
+export interface RateioLinha {
+  unidade: string
+  soma: number
+  total: number
+  PORTAL?: number
+  INTEGRACAO?: number
+  SERVIDOR?: number
+  ROBO?: number
+  STORAGE?: number
+  ADICIONAL?: number
+  [taxa: string]: string | number | undefined
+}
+
 export interface RateioResultado {
   ok: boolean
   mensagem?: string
   resumo: RateioResumo
   pendencias: RateioPendencia[]
+  // Ausente enquanto o motor (n8n) não devolve as linhas: sem elas a execução não é lançável no Omie.
+  linhas?: RateioLinha[]
   arquivo: { nome: string; mime: string; base64: string }
 }
 
@@ -106,11 +124,43 @@ export async function processarRateio(
   return json
 }
 
-// Grava uma execução de rateio no histórico. Falha aqui não deve impedir o usuário
-// de ver/baixar o resultado que acabou de gerar (chamador decide se é fatal).
-export async function insertRateioExecucao(row: Record<string, unknown>): Promise<void> {
-  const { error } = await supabaseFinanceiro.from(TABLE_RATEIO).insert(row)
+export interface RateioExecucaoGravada {
+  id: string
+  // false quando a coluna `linhas` ainda não existe no banco e a gravação caiu para o
+  // insert sem ela (migração não aplicada): a execução fica no histórico, mas não é lançável.
+  linhasGravadas: boolean
+}
+
+// O banco ainda pode não ter a coluna `linhas` (PostgREST: PGRST204 / "schema cache";
+// Postgres: 42703 / "column ... does not exist").
+function colunaLinhasAusente(error: { code?: string; message?: string }): boolean {
+  const msg = error.message || ''
+  if (!/linhas/i.test(msg)) return false
+  return error.code === 'PGRST204' || error.code === '42703' || /does not exist|schema cache|could not find/i.test(msg)
+}
+
+// Grava uma execução de rateio no histórico e devolve o id da linha criada. Falha aqui não
+// deve impedir o usuário de ver/baixar o resultado que acabou de gerar (chamador decide se é fatal).
+export async function insertRateioExecucao(row: Record<string, unknown>): Promise<RateioExecucaoGravada> {
+  let { data, error } = await supabaseFinanceiro.from(TABLE_RATEIO).insert(row).select('id').single()
+  let linhasGravadas = row.linhas != null
+
+  if (error && 'linhas' in row && colunaLinhasAusente(error)) {
+    // Migração ainda não aplicada: grava sem `linhas` para não quebrar o histórico.
+    console.warn(
+      'A coluna "linhas" ainda não existe em dash_rateio_execucoes (aplique a migração do rateio-omie). ' +
+        'Gravando a execução sem as linhas; o lançamento no Omie fica indisponível para ela.',
+    )
+    const semLinhas = { ...row }
+    delete semLinhas.linhas
+    ;({ data, error } = await supabaseFinanceiro.from(TABLE_RATEIO).insert(semLinhas).select('id').single())
+    linhasGravadas = false
+  }
+
   if (error) throw new Error(error.message)
+  const id = (data as { id?: string } | null)?.id
+  if (!id) throw new Error('O histórico não devolveu o id da execução gravada')
+  return { id, linhasGravadas }
 }
 
 // Não traz o xlsx (pesado) — use fetchRateioArquivo(id) sob demanda no download.
