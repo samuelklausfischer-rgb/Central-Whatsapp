@@ -4,6 +4,7 @@
 import type { Agregado } from './consolidado'
 import { ORDEM_GRUPOS, TIPO_PENDENCIA } from './consolidado'
 import { MODELO, SITUACAO } from './format'
+import type { InstrucaoNF } from './tipos'
 
 export interface MetaConsolidado {
   competencia: string                      // 'AAAA-MM' ou 'AAAA-MM-DD'
@@ -11,6 +12,7 @@ export interface MetaConsolidado {
   geradoEm: Date
   config: Record<string, string>           // tabela config (chave → valor)
   ignorados: { nome_bruto: string; motivo: string }[]
+  instrucoesNF?: Map<string, InstrucaoNF[]> // unidade_id → instruções de emissão de NF (aba "Agenda de NF")
 }
 
 // ── paleta e formatos ────────────────────────────────────────────────────────
@@ -302,6 +304,49 @@ export async function gerarConsolidado(agg: Agregado, meta: MetaConsolidado): Pr
       cor: (l, c) => { const u = origemFinal[l]; return !u ? undefined : c === 4 ? corSituacao(u.situacao) : c === 10 && u.nPendencias > 0 ? 'atencao' : undefined },
     })
     if (!porGrupo && linhasFinais.length) barras(ws, `I${t.primeira}:I${t.ultima}`, 'FF9DC3E6')
+  }
+
+  // 2b) Agenda de NF — uma linha por unidade de contrato (somando os grupos), com o que o
+  // financeiro precisa para emitir a nota (planilhas de 14 - POP FINANCEIRO). Sem paciente.
+  if (meta.instrucoesNF) {
+    const ws = wb.addWorksheet('Agenda de NF', { properties: { tabColor: { argb: 'FF548235' } } })
+    titulo(ws, 'Agenda de emissão das notas fiscais', `${subBase} · prazos, envio e documentos pelas instruções do financeiro · ordenado por prazo`)
+    configurarPagina(ws, 4, 2)
+    const porUnidade = new Map<string, { empresa: string; pasta: string; total: number; grupos: Set<string> }>()
+    for (const u of agg.porUnidade) {
+      const x = porUnidade.get(u.unidadeId) ?? { empresa: u.empresa, pasta: u.pasta, total: 0, grupos: new Set<string>() }
+      x.total = Math.round((x.total + u.total) * 100) / 100
+      if (u.grupoMobilemed) x.grupos.add(u.grupoMobilemed)
+      porUnidade.set(u.unidadeId, x)
+    }
+    const juntar = (is: InstrucaoNF[], f: (i: InstrucaoNF) => string | null | undefined) =>
+      [...new Set(is.map(f).filter((v): v is string => !!v && !!v.trim()))].join('\n') || null
+    const linhas = [...porUnidade.entries()].map(([id, u]) => {
+      const is = meta.instrucoesNF!.get(id) ?? []
+      return {
+        sem: !is.length,
+        prazo: juntar(is, i => i.prazo_nf) ?? '',
+        valores: [
+          empresaBonita(u.empresa), u.pasta, [...u.grupos].sort((a, b) => ORDEM_GRUPOS.indexOf(a) - ORDEM_GRUPOS.indexOf(b)).join(' · '), u.total,
+          is.length ? juntar(is, i => i.prazo_nf) : 'sem instrução cadastrada',
+          juntar(is, i => i.prazo_relatorio),
+          juntar(is, i => [...(i.envio_emails ?? []), i.envio_portal ? `Portal: ${i.envio_portal}` : ''].filter(Boolean).join('\n')),
+          juntar(is, i => (i.documentos ?? []).join('\n')),
+          juntar(is, i => i.notas_separadas_por), juntar(is, i => i.retencoes), juntar(is, i => i.responsavel),
+        ] as Valor[],
+      }
+    }).sort((a, b) => Number(a.sem) - Number(b.sem) || a.prazo.localeCompare(b.prazo) || String(a.valores[1]).localeCompare(String(b.valores[1])))
+    tabela(ws, 4, 1, [
+      { titulo: 'Empresa', largura: 12 }, { titulo: 'Unidade (pasta)', largura: 32, quebrar: true }, { titulo: 'Grupos Mobilemed', largura: 22, quebrar: true },
+      { titulo: 'Total a faturar', largura: 16, fmt: 'moeda' }, { titulo: 'Prazo da nota', largura: 26, quebrar: true },
+      { titulo: 'Prazo do relatório', largura: 22, quebrar: true }, { titulo: 'Enviar para', largura: 38, quebrar: true },
+      { titulo: 'Documentos', largura: 34, quebrar: true }, { titulo: 'Notas separadas por', largura: 20, quebrar: true },
+      { titulo: 'Retenções', largura: 22, quebrar: true }, { titulo: 'Responsável', largura: 16, quebrar: true },
+    ], linhas.map(l => l.valores), {
+      total: ['TOTAL', null, null, 'soma', null, null, null, null, null, null, null],
+      autofiltro: true,
+      cor: (l, c) => linhas[l].sem && c === 4 ? 'atencao' : undefined,
+    })
   }
 
   // 3) Por modalidade ────────────────────────────────────────────────────────

@@ -3,6 +3,21 @@
 // Aba "Exames": lista completa dos exames faturados.
 import { CABECALHO, type ExameLinha } from './excel'
 import type { Relatorio, ResumoLinhaRel } from './relatorioUnidade'
+import type { InstrucaoNF } from './tipos'
+
+/** Linhas "rótulo → texto" do bloco "Como emitir a nota fiscal" (só o que a planilha do financeiro preencheu). */
+export function linhasInstrucaoNF(i: InstrucaoNF): [string, string][] {
+  const lista = (v: string[] | null) => (v ?? []).filter(Boolean).join('\n')
+  const envio = [lista(i.envio_emails), i.envio_portal ? `Portal: ${i.envio_portal}` : '', i.envio_canal && !i.envio_emails?.length && !i.envio_portal ? i.envio_canal : '']
+    .filter(Boolean).join('\n')
+  const pares: [string, string | null][] = [
+    ['Prazo da nota', i.prazo_nf], ['Prazo do relatório', i.prazo_relatorio], ['Enviar para', envio || null],
+    ['Documentos', lista(i.documentos) || null], ['Notas separadas por', i.notas_separadas_por],
+    ['Descrição do serviço', i.descricao_servico_nf], ['Retenções', i.retencoes], ['Período', i.periodo],
+    ['Regras', i.regras], ['Responsável', i.responsavel], ['Observações', i.observacoes],
+  ]
+  return pares.filter((p): p is [string, string] => !!p[1] && !!p[1].trim())
+}
 
 const MES = ['', 'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
 
@@ -14,7 +29,7 @@ const fill = (argb: string) => ({ type: 'pattern' as const, pattern: 'solid' as 
 const fina = { style: 'thin' as const, color: { argb: BORDA } }
 const BORDAS = { top: fina, left: fina, bottom: fina, right: fina }
 
-export async function faturaUnidadeXlsx(rel: Relatorio, competencia: string, resumo: ResumoLinhaRel[], exames: ExameLinha[]): Promise<Uint8Array> {
+export async function faturaUnidadeXlsx(rel: Relatorio, competencia: string, resumo: ResumoLinhaRel[], exames: ExameLinha[], instrucoesNF: InstrucaoNF[] = []): Promise<Uint8Array> {
   const ExcelJS = (await import('exceljs')).default
   const wb = new ExcelJS.Workbook()
   wb.creator = 'Faturamento por Unidade'
@@ -113,6 +128,45 @@ export async function faturaUnidadeXlsx(rel: Relatorio, competencia: string, res
   const nota = ws.getCell(r, 1)
   nota.value = `Lista completa dos ${exames.length.toLocaleString('pt-BR')} exames na aba "Exames". Valores pelo contrato vigente na competência.`
   nota.font = { name: FONTE, size: 9, italic: true, color: { argb: TEXTO_CINZA } }
+
+  // ── como emitir a nota fiscal (planilhas do financeiro, tabela instrucao_nf) ──
+  r += 2
+  const secNF = ws.getCell(r, 1)
+  secNF.value = 'COMO EMITIR A NOTA FISCAL'
+  secNF.font = { name: FONTE, size: 12, bold: true, color: { argb: AZUL } }
+  for (let c = 1; c <= 4; c++) ws.getCell(r, c).border = { bottom: { style: 'medium', color: { argb: AZUL } } }
+  r++
+  if (!instrucoesNF.length) {
+    const x = ws.getCell(r, 1)
+    x.value = 'Sem instrução cadastrada para esta unidade nas planilhas do financeiro (14 - POP FINANCEIRO).'
+    x.font = { name: FONTE, size: 10, italic: true, color: { argb: TEXTO_CINZA } }
+    x.fill = fill(AMBAR)
+    ws.mergeCells(r, 1, r, 4)
+  }
+  for (const inst of instrucoesNF) {
+    if (instrucoesNF.length > 1) {
+      ws.mergeCells(r, 1, r, 4)
+      const h = ws.getCell(r, 1)
+      h.value = inst.nome_planilha
+      h.font = { name: FONTE, size: 10, bold: true, color: { argb: AZUL } }
+      r++
+    }
+    for (const [rotulo, texto] of linhasInstrucaoNF(inst)) {
+      ws.mergeCells(r, 2, r, 4)
+      const a = ws.getCell(r, 1)
+      const b = ws.getCell(r, 2)
+      a.value = rotulo
+      a.font = { name: FONTE, size: 10, bold: true, color: { argb: AZUL } }
+      a.fill = fill(CINZA); a.border = BORDAS; a.alignment = { vertical: 'top' }
+      b.value = texto
+      b.font = { name: FONTE, size: 10 }; b.border = BORDAS; b.alignment = { vertical: 'top', wrapText: true }
+      for (let c = 3; c <= 4; c++) ws.getCell(r, c).border = BORDAS
+      const linhasTexto = texto.split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(l.length / 60)), 0)
+      ws.getRow(r).height = Math.max(16, linhasTexto * 14 + 2)
+      r++
+    }
+    r++
+  }
 
   // ── aba Exames ──────────────────────────────────────────────────────────────
   const we = wb.addWorksheet('Exames', { properties: { tabColor: { argb: 'FF2E75B6' } } })

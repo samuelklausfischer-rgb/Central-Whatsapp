@@ -34,6 +34,17 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.225',
+    date: '2026-10-07 19:00',
+    title: 'Faturamento: como emitir a nota de cada unidade',
+    details: [
+      '🧾 Faturamento: o relatório de cada unidade ganhou o bloco "Como emitir a nota fiscal", com o prazo, para quem enviar (e-mail ou portal), os documentos exigidos, as notas separadas, as retenções e o responsável. Vem das planilhas de instruções do financeiro',
+      '📅 O Excel consolidado ganhou a aba "Agenda de NF": uma linha por unidade, com o total a faturar e o prazo da nota, em ordem de prazo',
+    ],
+    usabilidade:
+      'Gere o relatório do mês e baixe o ZIP por grupo: cada fatura já traz, no fim da aba Fatura, o passo a passo da nota daquela unidade. Unidade sem instrução aparece marcada em amarelo.',
+  },
+  {
     version: '0.0.224',
     date: '2026-10-07 18:00',
     title: 'Chat interno, aba do WhatsApp e e-mail em blocos',

@@ -40,6 +40,7 @@ export interface InfoAlias { grupo: string | null; subunidade: string | null }
 export interface Relatorio {
   grupo: Grupo; rotuloGrupo: string; pasta: string | null; empresa: string | null
   subunidade: string | null; periodo: string; nomes: string[]
+  unidade_id?: string | null // unidade de contrato (para achar as instruções de NF)
 }
 
 /** Junta os nomes simulados em relatórios: (grupo, unidade, subunidade, período). Nome sem contrato sai sozinho. */
@@ -52,6 +53,7 @@ export function agruparRelatorios(nomes: NomeSimulado[], alias: Map<string, Info
     const chave = n.unidade_id ? [grupo, n.unidade_id, sub ?? '', n.periodo].join('|') : ['sem', n.nome_bruto, n.periodo].join('|')
     const r = mapa.get(chave) ?? {
       grupo, rotuloGrupo: grupo, pasta: n.pasta, empresa: n.empresa, subunidade: sub, periodo: n.periodo, nomes: [],
+      unidade_id: n.unidade_id,
     }
     if (!r.nomes.includes(n.nome_bruto)) r.nomes.push(n.nome_bruto)
     mapa.set(chave, r)
