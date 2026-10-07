@@ -126,6 +126,17 @@ export interface EmailAttachmentRow {
   guardado_em: string | null
 }
 
+/**
+ * Uma imagem embutida (`cid:`) como a rota `inline` da edge function a devolve.
+ * `content_id` vem como a Microsoft escreveu; quem compara usa `normalizarCid`.
+ */
+export interface ImagemCidDoServidor {
+  attachment_id: string
+  content_id: string
+  mime_type: string | null
+  nome?: string | null
+}
+
 export interface EmailState {
   id: string
   email_id: string

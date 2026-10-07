@@ -26,6 +26,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
  *   renovar      — renova os avisos que vão vencer (pg_cron, 6h)
  *   avisar       — a Microsoft chama AQUI quando algo muda
  *   anexo        — devolve o binário de um anexo, sob demanda
+ *   inline       — descobre e grava o Content-ID das imagens `cid:` de uma mensagem (07/10/2026)
  *   enviar       — envia, responde, responde a todos e encaminha (08/09/2026)
  *   marcar       — lido/não lido e estrela, com efeito no Outlook (08/09/2026)
  */
@@ -705,33 +706,253 @@ async function gravarMensagem(
 }
 
 /**
+ * O Graph aceita `contentId` num `$select` com corte de tipo? `null` = ainda não
+ * se sabe; `false` = já se viu que não (e a função segue direto para o caminho
+ * individual, sem gastar uma chamada que sabidamente falha em cada mensagem).
+ * Vale por instância da função — basta para um lote de sincronização.
+ */
+let selecaoDeContentIdEmLote: boolean | null = null
+
+/**
+ * Máximo de consultas individuais de Content-ID por mensagem. Vão uma por vez: o
+ * Outlook limita a 4 requisições simultâneas por caixa, e sincronização e leitor
+ * disputam o mesmo limite. Cada uma devolve o `contentBytes` inteiro (até 2 MB por
+ * imagem candidata), por isso o teto é baixo.
+ */
+const LIMITE_DE_CONSULTAS_DE_CONTENT_ID = 15
+
+/**
+ * Quem está pedindo os anexos.
+ *  - `sincronizacao`: importar/delta/avisar, em lote e sem ninguém esperando. Só a
+ *    tentativa BARATA (o lote, que não traz conteúdo); se falhar, a ficha vai sem
+ *    Content-ID e o preenchimento fica para quando alguém abrir o e-mail.
+ *  - `sob-demanda`: a rota `inline`, de UMA mensagem que a pessoa abriu. Só aqui
+ *    vale o caminho caro, anexo por anexo.
+ */
+type ModoDaConsultaDeAnexos = 'sincronizacao' | 'sob-demanda'
+
+/** Imagem maior que isto não é candidata a "embutida": o detalhe dela traz o conteúdo em base64 e não compensa. */
+const TAMANHO_MAXIMO_DE_IMAGEM_CANDIDATA = 2 * 1024 * 1024
+
+/** Uma linha de erro do Graph, curta e sem o corpo da mensagem. */
+function descreverFalhaDoGraph(r: { status: number; dados: any }): string {
+  const codigo = r.dados?.error?.code ? ` ${r.dados.error.code}` : ''
+  const texto = r.dados?.error?.message ? `: ${String(r.dados.error.message).slice(0, 140)}` : ''
+  return `HTTP ${r.status}${codigo}${texto}`
+}
+
+interface FichaDeAnexo {
+  graph_attachment_id: string
+  name: string
+  mime_type: string | null
+  size: number | null
+  is_inline: boolean
+  content_id: string | null
+}
+
+/**
+ * Lista os anexos de uma mensagem COM o `contentId`.
+ *
+ * O `contentId` NÃO existe no tipo-base `microsoft.graph.attachment` — só em
+ * `fileAttachment`. Pedi-lo no `$select` de `/attachments` faz o Graph recusar a
+ * requisição INTEIRA (400 "Could not find a property named 'contentId' on type
+ * 'microsoft.graph.attachment'"), do mesmo jeito que o `wellKnownName` derrubou
+ * a lista de pastas. Por isso `content_id` ficou nulo nas 2.002 linhas embutidas:
+ * a consulta antiga nunca o pedia.
+ *
+ * Cadeia, da mais barata para a mais segura:
+ *  1. Lista com SÓ propriedades do tipo-base (`id,name,contentType,size,isInline`)
+ *     — a consulta que já funcionava.
+ *  2. Em lote, com corte de tipo na rota:
+ *     `/attachments/microsoft.graph.fileAttachment?$select=id,contentId`.
+ *     (Corte de tipo em coleção é OData padrão, mas não está documentado para
+ *     anexos de mensagem — por isso é uma TENTATIVA, com a resposta registrada.)
+ *  3. SÓ em `sob-demanda`, e se (2) falhar: `GET /attachments/{id}` sem `$select`,
+ *     um por vez, só para os candidatos (embutidos ou imagens pequenas), no máximo
+ *     `LIMITE_DE_CONSULTAS_DE_CONTENT_ID`. É o caminho documentado em "Get
+ *     attachment" e devolve o `fileAttachment` completo, com `contentId` — e com o
+ *     `contentBytes` junto, o que é CARO: 25 anexos × 2 MB por mensagem, repetido
+ *     para cada mensagem de uma importação, estoura o tempo da função e leva
+ *     estrangulamento (429) da Microsoft. Na `sincronizacao` esse passo não existe:
+ *     a ficha é gravada sem Content-ID e a rota `inline` completa depois.
+ *
+ * O Graph não documenta `$select` com corte de tipo (`microsoft.graph.fileAttachment/contentId`)
+ * para a lista de anexos, então ele NÃO é tentado.
+ *
+ * Nunca silencioso: `erros` tem o que ficou SEM resolver; `diagnostico`, as
+ * tentativas que falharam mas foram contornadas (na `sincronizacao`, inclusive o
+ * preenchimento adiado — que não é erro, só vai para o diagnóstico).
+ * Docs: https://learn.microsoft.com/en-us/graph/api/message-list-attachments?view=graph-rest-1.0
+ *       https://learn.microsoft.com/en-us/graph/api/resources/fileattachment?view=graph-rest-1.0
+ */
+async function listarFichasDeAnexos(
+  token: string,
+  graphMsgId: string,
+  modo: ModoDaConsultaDeAnexos = 'sincronizacao',
+): Promise<{ fichas: FichaDeAnexo[]; erros: string[]; diagnostico: string[]; via: string }> {
+  const erros: string[] = []
+  const diagnostico: string[] = []
+  // Ids sem `encodeURIComponent` de propósito: é assim que a rota `anexo` os usa em produção.
+  const raiz = `${GRAPH}/me/messages/${graphMsgId}/attachments`
+
+  const lista = await graph(token, `${raiz}?$select=id,name,contentType,size,isInline`)
+  if (!lista.ok) {
+    erros.push(`lista de anexos: ${descreverFalhaDoGraph(lista)}`)
+    return { fichas: [], erros, diagnostico, via: 'falhou' }
+  }
+
+  const fichas: FichaDeAnexo[] = (lista.dados.value ?? []).map((a: any) => ({
+    graph_attachment_id: String(a.id),
+    name: a.name ?? 'anexo',
+    mime_type: a.contentType ?? null,
+    size: a.size ?? null,
+    is_inline: Boolean(a.isInline),
+    content_id: null,
+  }))
+
+  // Quem pode ter Content-ID: o que o Graph marcou como embutido e as imagens
+  // pequenas (o Outlook de mesa às vezes manda imagem citada por `cid:` com
+  // `isInline` falso).
+  const candidatas = fichas.filter(
+    (f) =>
+      f.is_inline ||
+      ((f.mime_type ?? '').toLowerCase().startsWith('image/') &&
+        (f.size ?? 0) <= TAMANHO_MAXIMO_DE_IMAGEM_CANDIDATA),
+  )
+  if (candidatas.length === 0) return { fichas, erros, diagnostico, via: 'sem-candidatas' }
+
+  let via = 'nenhuma'
+
+  if (selecaoDeContentIdEmLote !== false) {
+    const lote = await graph(token, `${raiz}/microsoft.graph.fileAttachment?$select=id,contentId`)
+    if (lote.ok && Array.isArray(lote.dados.value)) {
+      selecaoDeContentIdEmLote = true
+      const idPorAnexo = new Map<string, unknown>(
+        lote.dados.value.map((a: any) => [String(a.id), a.contentId] as [string, unknown]),
+      )
+      for (const f of candidatas) {
+        const cid = idPorAnexo.get(f.graph_attachment_id)
+        if (typeof cid === 'string' && cid) f.content_id = cid
+      }
+      via = 'lote'
+    } else {
+      // Só 400/404 provam que o Graph não entende o corte; 429/5xx são passageiros.
+      if (!lote.ok && (lote.status === 400 || lote.status === 404)) selecaoDeContentIdEmLote = false
+      diagnostico.push(`contentId em lote indisponível (${descreverFalhaDoGraph(lote)})`)
+    }
+  }
+
+  // Depois do lote, só os embutidos que ainda ficaram sem id merecem a consulta
+  // individual (uma foto anexada de verdade não tem Content-ID e não precisa dela).
+  const precisamDeDetalhe =
+    via === 'lote'
+      ? candidatas.filter((f) => f.is_inline && !f.content_id)
+      : candidatas.filter((f) => !f.content_id)
+
+  // Sincronização para aqui. O que falta fica sem Content-ID (a ficha é gravada do
+  // mesmo jeito, sem a chave `content_id`) e a rota `inline` preenche quando
+  // alguém abrir o e-mail. Não é erro, então vai para o diagnóstico.
+  if (modo === 'sincronizacao') {
+    if (precisamDeDetalhe.length > 0) {
+      if (via !== 'lote') via = 'adiado'
+      diagnostico.push(
+        `${precisamDeDetalhe.length} anexo(s) sem Content-ID: preenchimento adiado até o e-mail ser aberto`,
+      )
+    }
+    return { fichas, erros, diagnostico, via }
+  }
+
+  if (precisamDeDetalhe.length > 0) {
+    const alvos = precisamDeDetalhe.slice(0, LIMITE_DE_CONSULTAS_DE_CONTENT_ID)
+    let achados = 0
+    for (const f of alvos) {
+      const detalhe = await graph(token, `${raiz}/${f.graph_attachment_id}`)
+      if (!detalhe.ok) {
+        erros.push(`detalhe do anexo: ${descreverFalhaDoGraph(detalhe)}`)
+        continue
+      }
+      if (typeof detalhe.dados.contentId === 'string' && detalhe.dados.contentId) {
+        f.content_id = detalhe.dados.contentId
+        achados++
+      }
+    }
+    if (precisamDeDetalhe.length > alvos.length) {
+      erros.push(`contentId: só ${alvos.length} de ${precisamDeDetalhe.length} anexos foram consultados`)
+    }
+    if (achados > 0 && via === 'nenhuma') via = 'individual'
+  }
+
+  const embutidosSemId = fichas.filter((f) => f.is_inline && !f.content_id).length
+  if (embutidosSemId > 0) erros.push(`${embutidosSemId} anexo(s) embutido(s) sem Content-ID`)
+
+  return { fichas, erros, diagnostico, via }
+}
+
+/**
+ * Esta mensagem tem anexo a registrar?
+ *
+ * `hasAttachments` NÃO basta: o Graph não o marca quando os únicos anexos são
+ * imagens embutidas — e 874 corpos com `cid:` ficaram sem nenhuma linha por isso.
+ * Quem cita `cid:` no HTML tem imagem embutida, então também entra.
+ */
+function precisaDeAnexos(msg: Record<string, any>): boolean {
+  if (msg.hasAttachments) return true
+  return msg.body?.contentType === 'html' && /\bcid:/i.test(String(msg.body?.content ?? ''))
+}
+
+/**
  * Guarda a FICHA dos anexos, não o conteúdo.
  *
  * Por decisão de 26/08/2026 o binário continua na Microsoft e é buscado quando
  * alguém clica. Baixar tudo na importação encheria o disco com anexo que
  * ninguém vai abrir — e deixaria a primeira carga muito mais lenta.
+ *
+ * Desde 07/10/2026 grava também o `content_id` (ver `listarFichasDeAnexos`).
+ * A gravação é em DOIS envios, e não por capricho: com `merge-duplicates` o
+ * PostgREST atualiza toda coluna presente no JSON. Quem não teve o Content-ID
+ * resolvido vai SEM a chave `content_id`, para que uma consulta que falhou hoje
+ * nunca apague o valor que uma bem-sucedida gravou ontem. (O índice único de
+ * `on_conflict` é o completo `email_id, graph_attachment_id` — não parcial —,
+ * conferido no banco em 07/10/2026.)
+ *
+ * Devolve o que aconteceu em vez de engolir: a sincronização só registra no log,
+ * mas a rota `inline` repassa para a tela.
  */
-async function registrarAnexos(emailId: string, graphMsgId: string, token: string) {
-  const { ok, dados } = await graph(
-    token,
-    `${GRAPH}/me/messages/${graphMsgId}/attachments?$select=id,name,contentType,size,isInline`,
-  )
-  if (!ok) return
-  const linhas = (dados.value ?? []).map((a: any) => ({
-    email_id: emailId,
-    graph_attachment_id: a.id,
-    name: a.name ?? 'anexo',
-    mime_type: a.contentType ?? null,
-    size: a.size ?? null,
-    is_inline: Boolean(a.isInline),
-    content_id: a.contentId ?? null,
-  }))
-  if (linhas.length === 0) return
-  await rest('email_attachments?on_conflict=email_id,graph_attachment_id', {
-    method: 'POST',
-    headers: { Prefer: 'resolution=merge-duplicates' },
-    body: JSON.stringify(linhas),
-  })
+async function registrarAnexos(
+  emailId: string,
+  graphMsgId: string,
+  token: string,
+  modo: ModoDaConsultaDeAnexos = 'sincronizacao',
+) {
+  const { fichas, erros, diagnostico, via } = await listarFichasDeAnexos(token, graphMsgId, modo)
+  let gravados = 0
+
+  const gravar = async (grupo: FichaDeAnexo[], comContentId: boolean) => {
+    if (grupo.length === 0) return
+    const linhas = grupo.map((f) => ({
+      email_id: emailId,
+      graph_attachment_id: f.graph_attachment_id,
+      name: f.name,
+      mime_type: f.mime_type,
+      size: f.size,
+      is_inline: f.is_inline,
+      ...(comContentId ? { content_id: f.content_id } : {}),
+    }))
+    const r = await rest('email_attachments?on_conflict=email_id,graph_attachment_id', {
+      method: 'POST',
+      headers: { Prefer: 'resolution=merge-duplicates' },
+      body: JSON.stringify(linhas),
+    })
+    if (r.ok) gravados += grupo.length
+    else erros.push(`gravação dos anexos: HTTP ${r.status} ${(await r.text().catch(() => '')).slice(0, 140)}`)
+  }
+  await gravar(fichas.filter((f) => f.content_id), true)
+  await gravar(fichas.filter((f) => !f.content_id), false)
+
+  if (erros.length > 0) {
+    console.error(`[email-microsoft] anexos do e-mail ${emailId} (via ${via}): ${erros.join(' | ')}`)
+  }
+  return { gravados, erros, diagnostico, via }
 }
 
 async function abrirCorrida(accountId: string, origem: string): Promise<string | null> {
@@ -794,7 +1015,7 @@ async function importarHistorico(accountId: string, token: string, dias: number)
         const { id } = await gravarMensagem(accountId, msg, pastas, meuEndereco)
         if (id) {
           novos++
-          if (msg.hasAttachments) await registrarAnexos(id, msg.id, token)
+          if (precisaDeAnexos(msg)) await registrarAnexos(id, msg.id, token)
         }
       }
       url = dados['@odata.nextLink'] ?? ''
@@ -854,7 +1075,7 @@ async function varrerDelta(accountId: string, token: string) {
         const { id } = await gravarMensagem(accountId, msg, pastas, meuEndereco)
         if (id) {
           mudou++
-          if (msg.hasAttachments) await registrarAnexos(id, msg.id, token)
+          if (precisaDeAnexos(msg)) await registrarAnexos(id, msg.id, token)
         }
       }
       deltaNovo = dados['@odata.deltaLink'] ?? ''
@@ -1046,7 +1267,7 @@ Deno.serve(async (req) => {
         const { id } = await gravarMensagem(accountId, dados, pastas, meuEndereco)
         if (id) {
           novos++
-          if (dados.hasAttachments) await registrarAnexos(id, dados.id, token)
+          if (precisaDeAnexos(dados)) await registrarAnexos(id, dados.id, token)
         }
       }
       await fecharCorrida(corrida, { novos })
@@ -1592,6 +1813,83 @@ Deno.serve(async (req) => {
         // não deve ser renderizado dentro do nosso domínio.
         'Content-Disposition': `attachment; filename="${encodeURIComponent(a.name)}"`,
       },
+    })
+  }
+
+  /**
+   * IMAGENS EMBUTIDAS (`cid:`) — descobre o Content-ID de cada anexo da mensagem
+   * e devolve `[{attachment_id, content_id}]`, para a tela baixar cada imagem pela
+   * rota `anexo` e trocar o `cid:` do corpo por ela.
+   *
+   * Nasceu em 07/10/2026 porque o Content-ID nunca foi gravado (a consulta de
+   * anexos não o pedia) e 874 e-mails com `cid:` nem tinham linha de anexo. Em
+   * vez de um preenchimento em massa — que custaria uma ida à Microsoft por
+   * mensagem antiga —, o preenchimento é SOB DEMANDA: só a mensagem que alguém
+   * abriu e que de fato cita `cid:` sem ter o Content-ID gravado vai ao Graph, e
+   * o resultado fica no banco para a próxima vez.
+   *
+   * `cids` (opcional, separados por vírgula, normalizados pela tela) são os
+   * Content-IDs que o corpo exibido cita. Se todos já estão gravados, nem toca no
+   * Graph. Sem ele, a decisão é pelo que o banco mostra (nenhuma linha, ou
+   * embutido sem Content-ID).
+   */
+  if (rota === 'inline') {
+    const emailId = (url.searchParams.get('email_id') || '').trim()
+    if (!emailId) return json({ error: 'Falta dizer qual e-mail.' }, 400)
+
+    const r = await rest(`emails?id=eq.${encodeURIComponent(emailId)}&select=graph_id,account_id`)
+    const alvo = r.ok ? (await r.json())[0] : null
+    // 410 e não 404: o 404 desta função já significa "rota desconhecida" para a
+    // tela (`email_attachments.ts` desliga a resolução de imagens da sessão ao vê-lo).
+    if (!alvo) return json({ error: 'E-mail não encontrado.' }, 410)
+    if (!(await podeVerConta(alvo.account_id))) return json({ error: 'Sem acesso.' }, 403)
+
+    // Mesma forma canônica que `normalizarCid` da tela: sem `cid:`/`<>`, decodificado, minúsculo.
+    const normalizar = (bruto: string) => {
+      let cid = bruto.trim().replace(/^cid:/i, '').replace(/^<|>$/g, '')
+      try { cid = decodeURIComponent(cid) } catch { /* `%` solto: fica como veio */ }
+      return cid.trim().toLowerCase()
+    }
+    const pedidos = (url.searchParams.get('cids') || '').split(',').map(normalizar).filter(Boolean)
+
+    const lerLinhas = async (): Promise<any[]> => {
+      const x = await rest(
+        `email_attachments?email_id=eq.${encodeURIComponent(emailId)}&select=id,name,mime_type,is_inline,content_id`,
+      )
+      return x.ok ? await x.json() : []
+    }
+
+    let linhas = await lerLinhas()
+    const gravados = new Set(linhas.filter((l) => l.content_id).map((l) => normalizar(String(l.content_id))))
+    const faltaAlgo = pedidos.length > 0
+      ? pedidos.some((c) => !gravados.has(c))
+      : linhas.length === 0 || linhas.some((l) => l.is_inline && !l.content_id)
+
+    let erros: string[] = []
+    let diagnostico: string[] = []
+    let via = 'banco'
+    if (faltaAlgo && alvo.graph_id) {
+      const token = await tokenValido(alvo.account_id, s)
+      if (!token) return json({ error: 'Conexão expirada — reconecte a caixa.' }, 401)
+      const resultado = await registrarAnexos(emailId, alvo.graph_id, token, 'sob-demanda')
+      erros = resultado.erros
+      diagnostico = resultado.diagnostico
+      via = resultado.via
+      linhas = await lerLinhas()
+    }
+
+    return json({
+      anexos: linhas
+        .filter((l) => l.content_id)
+        .map((l) => ({
+          attachment_id: l.id,
+          content_id: l.content_id,
+          mime_type: l.mime_type ?? null,
+          nome: l.name ?? null,
+        })),
+      erros,
+      diagnostico,
+      via,
     })
   }
 
