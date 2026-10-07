@@ -54,6 +54,12 @@ export interface Device {
   deleted_at: string | null
   created_at: string
   updated_at: string
+  /**
+   * Início da queda ATUAL; `null` enquanto conectado. Só muda quando o aparelho
+   * passa de conectado para fora do ar (gatilho `devices_marca_queda`), então
+   * serve de identidade da queda — é o que o X da faixa vermelha guarda.
+   */
+  desconectado_em?: string | null
 }
 
 export interface UserAllowedDevice {

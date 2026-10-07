@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader2, RefreshCw, WifiOff } from 'lucide-react'
+import { Loader2, RefreshCw, WifiOff, X } from 'lucide-react'
 import { useAuth } from '@/hooks/use-auth'
 import { useRealtime } from '@/hooks/use-realtime'
 import { getDevices } from '@/services/devices'
@@ -53,10 +53,58 @@ import type { Device } from '@/lib/supabase/types'
  * novo depois, é um episódio novo e pode alarmar de novo. A faixa em si (visual)
  * não tem esse limite: ela fica exibida o tempo todo em que o aparelho segue
  * desconectado, só o som/notificação é que dispara uma vez só.
+ *
+ * ── O X: fechada, a faixa só volta numa queda NOVA ──
+ *
+ * Pedido de 07/10/2026: o RH ficou dias fora do ar e a faixa aparecia para todo
+ * mundo, toda vez que abria o app. Fechar vale para a QUEDA, não para o aparelho:
+ * se o aparelho conectar e cair de novo, é outro problema e precisa avisar.
+ *
+ * A identidade da queda vem do banco — `devices.desconectado_em`, gravado por
+ * gatilho só na passagem de conectado para fora do ar. Guardar só "fechei o RH"
+ * no navegador não bastaria: se o RH conectasse e caísse de novo com o app
+ * fechado, o app veria "desconectado" antes e depois e nunca saberia que é outra
+ * queda. O X guarda, por pessoa e por aparelho, o `desconectado_em` que fechou;
+ * a faixa aparece de novo quando ele muda. Fechar também cala o som e a
+ * notificação dessa queda ao reabrir o app.
  */
 
 /** Abaixo disto, uma queda é só instabilidade — não é "permanece desconectado". */
 const CARENCIA_MS = 30_000
+
+/**
+ * Sem a coluna (banco antigo), a queda não tem identidade: o X ainda funciona,
+ * mas só é "esquecido" quando o app VÊ o aparelho reconectar.
+ */
+const QUEDA_SEM_REGISTRO = 'sem-registro'
+
+function idDaQueda(device: Device): string {
+  return device.desconectado_em ?? QUEDA_SEM_REGISTRO
+}
+
+/** aparelho -> queda que esta pessoa fechou. Por pessoa: cada um fecha o seu. */
+type QuedasFechadas = Record<string, string>
+
+const chaveDasQuedasFechadas = (userId: string) => `alerta-desconectado-fechado:${userId}`
+
+function lerQuedasFechadas(userId: string | undefined): QuedasFechadas {
+  if (!userId) return {}
+  try {
+    const bruto = JSON.parse(localStorage.getItem(chaveDasQuedasFechadas(userId)) ?? '{}')
+    return bruto && typeof bruto === 'object' ? (bruto as QuedasFechadas) : {}
+  } catch {
+    return {}
+  }
+}
+
+function gravarQuedasFechadas(userId: string | undefined, valor: QuedasFechadas): void {
+  if (!userId) return
+  try {
+    localStorage.setItem(chaveDasQuedasFechadas(userId), JSON.stringify(valor))
+  } catch {
+    // Armazenamento cheio ou bloqueado: o X vale só até recarregar.
+  }
+}
 
 /**
  * `'open'` é valor legado (ver `pages/Index.tsx`, que ainda trata os dois como
@@ -123,6 +171,36 @@ export function AlertaDeviceDesconectado() {
   // Quem já tocou som/notificação no episódio atual (limpo ao reconectar).
   const jaAvisadoRef = useRef<Set<string>>(new Set())
 
+  // Quedas que esta pessoa fechou no X. State para a faixa re-renderizar; ref
+  // para o timer de carência e os handlers do Realtime lerem o valor atual.
+  const userId = user?.id
+  const [quedasFechadas, setQuedasFechadas] = useState<QuedasFechadas>(() => lerQuedasFechadas(userId))
+  const quedasFechadasRef = useRef<QuedasFechadas>(quedasFechadas)
+  quedasFechadasRef.current = quedasFechadas
+
+  useEffect(() => {
+    setQuedasFechadas(lerQuedasFechadas(userId))
+  }, [userId])
+
+  const atualizarQuedasFechadas = useCallback(
+    (proximo: QuedasFechadas) => {
+      quedasFechadasRef.current = proximo
+      setQuedasFechadas(proximo)
+      gravarQuedasFechadas(userId, proximo)
+    },
+    [userId],
+  )
+
+  /** Reconectou ou sumiu: a queda acabou, então o X dela não vale mais. */
+  const esquecerQuedaFechada = useCallback(
+    (deviceId: string) => {
+      if (!(deviceId in quedasFechadasRef.current)) return
+      const { [deviceId]: _encerrada, ...resto } = quedasFechadasRef.current
+      atualizarQuedasFechadas(resto)
+    },
+    [atualizarQuedasFechadas],
+  )
+
   const alarmar = useCallback((device: Device) => {
     tocarSomDeNotificacao()
     if (!('Notification' in window) || Notification.permission !== 'granted') return
@@ -165,6 +243,7 @@ export function AlertaDeviceDesconectado() {
           timersRef.current.delete(device.id)
         }
         jaAvisadoRef.current.delete(device.id)
+        esquecerQuedaFechada(device.id)
         if (alarmadosIdsRef.current.delete(device.id)) recalcularAlarmados()
         return
       }
@@ -184,12 +263,13 @@ export function AlertaDeviceDesconectado() {
 
         if (!jaAvisadoRef.current.has(device.id)) {
           jaAvisadoRef.current.add(device.id)
-          alarmar(atual)
+          // Queda que a pessoa já fechou no X: reabrir o app não toca de novo.
+          if (quedasFechadasRef.current[device.id] !== idDaQueda(atual)) alarmar(atual)
         }
       }, CARENCIA_MS)
       timersRef.current.set(device.id, timer)
     },
-    [alarmar, recalcularAlarmados],
+    [alarmar, recalcularAlarmados, esquecerQuedaFechada],
   )
 
   const removerDevice = useCallback(
@@ -199,9 +279,10 @@ export function AlertaDeviceDesconectado() {
       timersRef.current.delete(id)
       jaAvisadoRef.current.delete(id)
       devicesRef.current.delete(id)
+      esquecerQuedaFechada(id)
       if (alarmadosIdsRef.current.delete(id)) recalcularAlarmados()
     },
-    [recalcularAlarmados],
+    [recalcularAlarmados, esquecerQuedaFechada],
   )
 
   useEffect(() => {
@@ -264,21 +345,35 @@ export function AlertaDeviceDesconectado() {
     }
   }, [alarmados, qrAberto, toast])
 
-  if (alarmados.length === 0 && !qrAberto) return null
+  // Só o que a pessoa NÃO fechou nesta queda. `alarmados` segue inteiro para o
+  // dialog do QR, que pode estar aberto para um aparelho cuja faixa foi fechada.
+  const visiveis = alarmados.filter((d) => quedasFechadas[d.id] !== idDaQueda(d))
 
-  const nomes = alarmados.map((d) => d.name).join(', ')
-  const algumReconectando = alarmados.some((d) => estaReconectando(d.status))
+  const fecharFaixa = () => {
+    // Recomeça só com os alarmados de agora: entrada de aparelho que já não
+    // está caído não serve para nada e só cresceria no armazenamento.
+    const proximo: QuedasFechadas = {}
+    for (const d of alarmados) {
+      proximo[d.id] = visiveis.some((v) => v.id === d.id) ? idDaQueda(d) : quedasFechadas[d.id]
+    }
+    atualizarQuedasFechadas(proximo)
+  }
+
+  if (visiveis.length === 0 && !qrAberto) return null
+
+  const nomes = visiveis.map((d) => d.name).join(', ')
+  const algumReconectando = visiveis.some((d) => estaReconectando(d.status))
   const texto =
-    alarmados.length === 1
+    visiveis.length === 1
       ? `WhatsApp "${nomes}" ${algumReconectando ? 'reconectando…' : 'desconectado'} — reconecte para não perder mensagens.`
       : `WhatsApp desconectados: ${nomes} — reconecte para não perder mensagens.`
 
   return (
     <>
-      {alarmados.length > 0 && (
+      {visiveis.length > 0 && (
         <div
           role="alert"
-          className="relative z-50 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-destructive px-4 py-2 text-center text-sm font-medium text-destructive-foreground"
+          className="relative z-50 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-destructive py-2 pl-4 pr-10 text-center text-sm font-medium text-destructive-foreground"
         >
           {/* Só o ícone pulsa — a faixa inteira piscando seria cansativo de olhar
               pelo tempo em que o aparelho ficar fora do ar (pode ser horas). */}
@@ -287,14 +382,14 @@ export function AlertaDeviceDesconectado() {
           {/* Reconectar é de TODO MUNDO — ver o comentário em `abrirReconexao`.
               Com mais de um aparelho caído, um botão por aparelho, senão não dá
               para escolher qual QR gerar. */}
-          {alarmados.map((d) => (
+          {visiveis.map((d) => (
             <button
               key={d.id}
               type="button"
               onClick={() => abrirReconexao(d)}
               className="shrink-0 underline underline-offset-2 hover:no-underline"
             >
-              {alarmados.length === 1 ? 'Reconectar' : `Reconectar ${d.name}`}
+              {visiveis.length === 1 ? 'Reconectar' : `Reconectar ${d.name}`}
             </button>
           ))}
           {user?.is_admin && (
@@ -306,6 +401,15 @@ export function AlertaDeviceDesconectado() {
               Configurações
             </button>
           )}
+          <button
+            type="button"
+            onClick={fecharFaixa}
+            aria-label="Fechar aviso"
+            title="Fechar — só volta se o aparelho conectar e cair de novo"
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 opacity-80 hover:bg-black/15 hover:opacity-100"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
         </div>
       )}
 
