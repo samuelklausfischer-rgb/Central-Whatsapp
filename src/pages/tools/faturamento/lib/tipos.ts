@@ -62,3 +62,12 @@ export interface RespostaSimular {
   build: string; nome_bruto?: string; unidade?: string | null; faturados?: number
   fora_do_periodo?: number; total?: number; pendencias?: string[]; erro?: string
 }
+
+/** Instrução de emissão de nota fiscal de uma unidade (tabela instrucao_nf, planilhas do financeiro). */
+export interface InstrucaoNF {
+  unidade_id: string | null; nome_planilha: string; empresa: string | null; responsavel: string | null
+  prazo_nf: string | null; prazo_relatorio: string | null; envio_canal: string | null
+  envio_emails: string[] | null; envio_portal: string | null; documentos: string[] | null
+  notas_separadas_por: string | null; descricao_servico_nf: string | null; retencoes: string | null
+  periodo: string | null; regras: string | null; observacoes: string | null
+}

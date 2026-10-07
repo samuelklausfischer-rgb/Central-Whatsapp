@@ -6,7 +6,7 @@ import { appEnv } from '@/lib/env'
 import { db } from './supabase'
 import { paginar } from './pool'
 import { gerarXlsx, montarPlanilha, type ExameLinha, type ResumoItem } from './excel'
-import type { RespostaSimular, Simulacao, SimulacaoNome, SimulacaoPendencia, RegrasUnidade } from './tipos'
+import type { InstrucaoNF, RespostaSimular, Simulacao, SimulacaoNome, SimulacaoPendencia, RegrasUnidade } from './tipos'
 import { agregar, type ResumoLinha, type UnidadeEntrada } from './consolidado'
 import { gerarConsolidado, nomeArquivoConsolidado } from './consolidadoXlsx'
 import { normNome } from '../nucleo/motor'
@@ -84,7 +84,24 @@ export async function xlsxDoRelatorio(simulacaoId: string, competencia: string, 
     valor_unitario: r.valor_unitario == null ? null : Number(r.valor_unitario),
   })))
   const numerico = exames.map(e => ({ ...e, quantidade: Number(e.quantidade), valor_unitario: Number(e.valor_unitario), valor_total: Number(e.valor_total) }))
-  return faturaUnidadeXlsx(rel, competencia, resumo, numerico)
+  const instrucoes = rel.unidade_id ? (await carregarInstrucoesNF()).get(rel.unidade_id) ?? [] : []
+  return faturaUnidadeXlsx(rel, competencia, resumo, numerico, instrucoes)
+}
+
+// Instruções de emissão de NF por unidade (tabela instrucao_nf). Mudam pouco: uma leitura
+// serve para o ZIP inteiro (106 relatórios), e vale por 5 minutos.
+let cacheNF: { em: number; dados: Promise<Map<string, InstrucaoNF[]>> } | null = null
+export function carregarInstrucoesNF(): Promise<Map<string, InstrucaoNF[]>> {
+  if (cacheNF && Date.now() - cacheNF.em < 5 * 60_000) return cacheNF.dados
+  const dados = paginar<InstrucaoNF>((de, ate) => db.from('instrucao_nf').select('*').order('nome_planilha').range(de, ate))
+    .then(linhas => {
+      const m = new Map<string, InstrucaoNF[]>()
+      for (const l of linhas) if (l.unidade_id) m.set(l.unidade_id, [...(m.get(l.unidade_id) ?? []), l])
+      return m
+    })
+    .catch(e => { cacheNF = null; throw e })
+  cacheNF = { em: Date.now(), dados }
+  return dados
 }
 
 export function baixarArquivo(conteudo: Blob, nome: string) {
@@ -128,6 +145,7 @@ export async function montarConsolidado(simulacaoId: string): Promise<{ bytes: U
   const bytes = await gerarConsolidado(agg, {
     competencia, arquivoNome: simulacao.arquivo_nome, geradoEm: new Date(),
     config: Object.fromEntries(config.map(c => [c.chave, c.valor])), ignorados,
+    instrucoesNF: await carregarInstrucoesNF(),
   })
   return { bytes, nome: nomeArquivoConsolidado(competencia) }
 }
