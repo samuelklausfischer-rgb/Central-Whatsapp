@@ -34,7 +34,7 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
-    version: '0.0.222',
+    version: '0.0.224',
     date: '2026-10-07 18:00',
     title: 'Chat interno, aba do WhatsApp e e-mail em blocos',
     details: [
@@ -45,6 +45,28 @@ export const releaseNotes: ReleaseNote[] = [
     ],
     usabilidade:
       'Abra o Whats, toque no seletor de aparelho e escolha "Chat interno". Em "Nova conversa" escolha a pessoa; em "Novo grupo" dê um nome e marque quem participa.',
+  },
+  {
+    version: '0.0.223',
+    date: '2026-10-07 13:00',
+    title: 'Mensagem com link não dá mais "falhou" à toa',
+    details: [
+      '🐛 Corrigido: mensagem com link (como o ZIP de exame da Mobilemed) dava "Operation timed out" e aparecia como falha — mas tinha chegado na paciente. Agora o link vai na hora, sem a prévia',
+      '🐛 Corrigido: quando o WhatsApp demora para confirmar, a mensagem não aparece mais como "não saiu". O balão mostra "conferindo no WhatsApp…" e, em até 3 minutos, a mensagem entra no histórico ou vira falha de verdade',
+    ],
+    usabilidade:
+      'Se aparecer "Estamos conferindo se a mensagem chegou — não reenvie", espere o balão "conferindo no WhatsApp…" sumir. Só use "Tentar de novo" se ele virar "não saiu".',
+  },
+  {
+    version: '0.0.222',
+    date: '2026-10-06 19:00',
+    title: 'Faturamento: estudo que conta mais de 1',
+    details: [
+      '🔢 Faturamento: na tela da unidade dá para dizer que um estudo conta mais de 1 — por exemplo, na Jandaia, "mãos e punhos para idade óssea" conta 4. O relatório já multiplica a quantidade e o valor',
+      '♻️ A regra antiga do "ABDOME TOTAL conta 2" virou uma dessas regras e continua valendo nas mesmas unidades',
+    ],
+    usabilidade:
+      'Abra Faturamento > Configuração > a unidade > Regras de faturamento e escreva uma regra por linha, no formato PADRÃO = N (ex.: MAOS E PUNHOS.*IDADE OSSEA = 4). Acento e maiúscula não importam.',
   },
   {
     version: '0.0.221',

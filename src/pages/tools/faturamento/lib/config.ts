@@ -1,14 +1,47 @@
 // Lógica pura da tela de Configuração (agrupamento, resumos e textos de regras).
 import type { CriterioData, PapelItem, PrecoVigente, RegrasUnidade } from './tipos'
 import { MODELO, brl } from './format'
-import { diaDeCorte } from '../nucleo/motor'
+import { diaDeCorte, semAcento, type RegraQuantidade } from '../nucleo/motor'
 
 export const GRUPO_PROPRIO_PRN = 'Contrato próprio — PRN'
 export const GRUPO_PROPRIO_MEDIMAGEM = 'Contrato próprio — Medimagem'
 
 export interface GrupoUnidades<T> { nome: string; proprio: boolean; unidades: T[] }
 
-type Regras = Pick<RegrasUnidade, 'janela' | 'criterio_data' | 'franquia_mensal'>
+type Regras = Pick<RegrasUnidade, 'janela' | 'criterio_data' | 'franquia_mensal'> &
+  Partial<Pick<RegrasUnidade, 'regras_quantidade' | 'estudos_conta_2'>>
+
+/** Regras "estudo conta N" que valem: as novas, ou o "conta 2" antigo quando não há novas (igual ao motor). */
+export function regrasQuantidadeEfetivas(r: Partial<Pick<RegrasUnidade, 'regras_quantidade' | 'estudos_conta_2'>> | undefined): RegraQuantidade[] {
+  if (r?.regras_quantidade?.length) return r.regras_quantidade
+  return r?.estudos_conta_2 ? [{ padrao: r.estudos_conta_2, quantidade: 2 }] : []
+}
+
+/** Regras → texto da tela: uma por linha, "PADRÃO = N". */
+export function textoRegrasQuantidade(r: Partial<Pick<RegrasUnidade, 'regras_quantidade' | 'estudos_conta_2'>> | undefined): string {
+  return regrasQuantidadeEfetivas(r).map(x => `${x.padrao} = ${x.quantidade}`).join('\n')
+}
+
+/**
+ * Texto da tela → regras. Cada linha "PADRÃO = N" (N de 2 a 20). O padrão vira maiúscula e
+ * perde o acento, porque a descrição do estudo é comparada assim ("Mãos e punhos" = "MAOS E PUNHOS").
+ */
+export function lerRegrasQuantidade(texto: string): { regras: RegraQuantidade[]; erros: string[] } {
+  const regras: RegraQuantidade[] = []
+  const erros: string[] = []
+  for (const bruta of texto.split(/\r?\n/)) {
+    const linha = bruta.trim()
+    if (!linha) continue
+    const m = /^(.*?)\s*=\s*(\d+)$/.exec(linha)
+    if (!m || !m[1].trim()) { erros.push(`"${linha}": escreva PADRÃO = número`); continue }
+    const quantidade = Number(m[2])
+    if (quantidade < 2 || quantidade > 20) { erros.push(`"${linha}": a quantidade vai de 2 a 20`); continue }
+    const padrao = semAcento(m[1].trim()).toUpperCase()
+    try { new RegExp(padrao) } catch { erros.push(`"${linha}": padrão inválido`); continue }
+    regras.push({ padrao, quantidade })
+  }
+  return { regras, erros }
+}
 
 // Nome do grupo de uma unidade: o grupo do contrato ou, sem grupo, o "Contrato próprio" da empresa.
 export function nomeGrupo(u: { grupo: string | null; empresa: string }): string {
@@ -96,6 +129,7 @@ export function etiquetasRegras(r: Regras | undefined): string[] {
   if (r.criterio_data === 'exame') e.push('pela data do exame')
   else if (r.criterio_data === 'laudo') e.push('pela data do laudo')
   if (r.franquia_mensal) e.push(`franquia ${r.franquia_mensal.toLocaleString('pt-BR')}/mês`)
+  for (const q of regrasQuantidadeEfetivas(r)) e.push(`conta ${q.quantidade}: ${q.padrao.length > 28 ? q.padrao.slice(0, 27) + '…' : q.padrao}`)
   return e
 }
 
@@ -114,6 +148,8 @@ export function comoFatura(modelo: string, r: Regras | undefined): { rotulo: str
     { rotulo: 'Janela', texto: rotuloJanela(r?.janela) },
   ]
   if (r?.franquia_mensal) linhas.push({ rotulo: 'Franquia', texto: `${r.franquia_mensal.toLocaleString('pt-BR')} exames/mês; acima disso cobra o excedente` })
+  const qtd = regrasQuantidadeEfetivas(r)
+  if (qtd.length) linhas.push({ rotulo: 'Estudos que contam mais de 1', texto: qtd.map(x => `${x.padrao} = ${x.quantidade}`).join('; ') })
   return linhas
 }
 

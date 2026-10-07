@@ -172,6 +172,42 @@ export async function marcarTentativaFalhou(id: string, erro: string): Promise<v
   }
 }
 
+/**
+ * Erro de TEMPO ESGOTADO: a requisição já tinha partido quando a espera acabou.
+ *
+ * Em 07/10/2026 um envio voltou como "Operation timed out after 5001
+ * milliseconds with 0 bytes received" e a mensagem chegou na paciente 5,3s
+ * depois do clique. Tempo esgotado não diz se saiu — diz só que a resposta não
+ * chegou a tempo. Os três textos: o do libcurl (extensão `http`, 5s), o do
+ * libcurl em outra versão, e o do Postgres (`statement_timeout`, 8s).
+ */
+const TEMPO_ESGOTADO = /operation timed out|timeout was reached|canceling statement due to statement timeout/i
+
+export function ehTempoEsgotado(erro: string): boolean {
+  return TEMPO_ESGOTADO.test(erro)
+}
+
+/**
+ * Anota o erro mas DEIXA a tentativa `pendente`: não se sabe se saiu.
+ *
+ * `falhou` chama a pessoa a clicar em "Tentar de novo" — e, se a mensagem tinha
+ * saído, a paciente recebe duas vezes. `pendente` entrega a decisão ao
+ * verificador de 1 minuto (`private.verificar_tentativas_de_envio`), que
+ * pergunta à Evolution e, achando, já põe a mensagem no histórico.
+ */
+export async function marcarTentativaIncerta(id: string, erro: string): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from('tentativas_de_envio')
+      .update({ status: 'pendente', erro: erro.slice(0, 500) })
+      .eq('id', id)
+
+    if (error) console.warn('[tentativas] não anotei o envio incerto:', error.message)
+  } catch (e) {
+    console.warn('[tentativas] não anotei o envio incerto:', e)
+  }
+}
+
 /** Apaga a tentativa no sucesso. Silenciosa: a mensagem real já existe. */
 export async function descartarTentativaSilenciosa(id: string): Promise<void> {
   try {

@@ -2036,6 +2036,27 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     }
   }, [device?.id, contact])
 
+  // Enquanto houver tentativa `pendente` (envio que estourou o tempo e pode ter
+  // saído), relê a cada 30s: o verificador do banco resolve em ~2-3 min e, sem
+  // isto, o balão "conferindo…" só sumiria ao reabrir a conversa — ao lado da
+  // mensagem real que o verificador já pôs no histórico.
+  const temTentativaPendente = tentativasAbertas.some((t) => t.status === 'pendente')
+  useEffect(() => {
+    if (!temTentativaPendente || !device?.id || !contact) return
+    let cancelado = false
+    const timer = window.setInterval(() => {
+      listarTentativasAbertas(device.id, contact)
+        .then((linhas) => {
+          if (!cancelado) setTentativasAbertas(linhas)
+        })
+        .catch(() => {})
+    }, 30_000)
+    return () => {
+      cancelado = true
+      window.clearInterval(timer)
+    }
+  }, [temTentativaPendente, device?.id, contact])
+
   /**
    * Reenvia uma tentativa falhada com o mesmo `sendMessage` do resto do
    * arquivo, usando `conteudo`/`anexos`/`reply_to_id` GRAVADOS na tentativa —
@@ -6709,7 +6730,9 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-0.5 text-[10px] text-chat-muted/70">
-                          <Clock className="h-3 w-3" /> enviando…
+                          {/* Pendente COM erro = estourou o tempo e pode ter
+                              saído; o verificador está perguntando à Evolution. */}
+                          <Clock className="h-3 w-3" /> {t.erro ? 'conferindo no WhatsApp…' : 'enviando…'}
                         </span>
                       )}
                     </div>
