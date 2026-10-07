@@ -30,6 +30,7 @@ import {
   aplicarEventoDeMensagem,
   type EstadoDaConversa,
 } from '@/stores/conversationMessages'
+import { outraFormaDoNonoDigito } from '@/lib/contacts/normalize'
 import { getMyStates, getDeviceAssignments, getConversationAssignment, cursorDeLeitura, mesclarNomesDaAtribuicao, type ConversationUserState } from '@/services/conversation_states'
 import type { ConversationAssignment } from '@/lib/supabase/types'
 import { registrarVoltar } from '@/lib/android-back'
@@ -823,6 +824,23 @@ export default function ChatHub() {
         : null)
     // Remove o pending para o eco do realtime não tentar reconciliar de novo.
     pendingTempsRef.current = pendingTempsRef.current.filter((p) => p.tempId !== tempId)
+
+    // A linha pode voltar numa conversa DIFERENTE da que estava na tela: quando o
+    // número digitado difere do JID do WhatsApp só no nono dígito, a RPC grava na
+    // chave do WhatsApp e move a conversa digitada para lá (migration
+    // 20261007190000). Sem acompanhar, a tela ficava na chave digitada — que agora
+    // está vazia — e a mensagem "sumia" no próximo refetch.
+    const chaveReal =
+      realMsg?.id && realMsg?.device_id && realMsg?.remote_sender
+        ? chaveDaConversa(realMsg.device_id, realMsg.remote_sender)
+        : null
+    const mudouDeConversa = !!(chaveDeOrigem && chaveReal && chaveReal !== chaveDeOrigem)
+    const seguirParaCanonica =
+      mudouDeConversa &&
+      !!selectedDeviceIdRef.current &&
+      !!selectedContactRef.current &&
+      chaveDeOrigem === chaveDaConversa(selectedDeviceIdRef.current, selectedContactRef.current)
+
     setConversationMessages((prev) => {
       let proximas: any[]
       if (realMsg && realMsg.id) {
@@ -849,7 +867,17 @@ export default function ChatHub() {
       const conversaAberta = selectedDeviceIdRef.current && selectedContactRef.current
         ? chaveDaConversa(selectedDeviceIdRef.current, selectedContactRef.current)
         : null
-      if (chaveDeOrigem && chaveDeOrigem === conversaAberta) {
+      if (mudouDeConversa && chaveReal) {
+        // A mensagem pertence à conversa canônica. Se ela já está no store, entra
+        // como mensagem nova; se não, nasce com o que estava na tela e o fetch da
+        // troca de conversa (logo abaixo) completa o histórico.
+        const estadoDaCanonica = obterConversa(chaveReal).estado
+        if (estadoDaCanonica === 'ausente' || estadoDaCanonica === 'erro') {
+          definirMensagens(chaveReal, proximas)
+        } else {
+          aplicarEventoDeMensagem(chaveReal, 'create', realMsg, tempId)
+        }
+      } else if (chaveDeOrigem && chaveDeOrigem === conversaAberta) {
         definirMensagensSePresente(chaveDeOrigem, proximas)
       } else if (chaveDeOrigem && realMsg?.id) {
         // Trocou de conversa entre enviar e confirmar. Aplicar na conversa de
@@ -860,6 +888,9 @@ export default function ChatHub() {
       }
       return proximas
     })
+    // Fora do updater: trocar de contato dispara o efeito de seleção, que pinta a
+    // canônica do store e busca o histórico completo dela.
+    if (seguirParaCanonica) setSelectedContact(realMsg.remote_sender)
     if (selectedDeviceId) debouncedRefreshSummaries(selectedDeviceId)
   }, [selectedDeviceId, debouncedRefreshSummaries])
 
@@ -1348,7 +1379,15 @@ export default function ChatHub() {
       return
     }
 
-    const jid = `55${ddd}${numero}`
+    const digitado = `55${ddd}${numero}`
+    // A conversa já existe com o nono dígito ao contrário? Abre ESSA, com o
+    // histórico. Em 07/10/2026 a Ketlin digitou 5532 9 99422738 para alguém que o
+    // WhatsApp conhece como 553299422738: o app abriu uma conversa vazia ao lado
+    // da verdadeira, e a resposta da contato caiu na outra.
+    const temConversa = (rs: string) => conversationSummaries.some((s) => s.remote_sender === rs)
+    const alternativa = outraFormaDoNonoDigito(digitado)
+    const usouAlternativa = !temConversa(digitado) && !!alternativa && temConversa(alternativa)
+    const jid = usouAlternativa && alternativa ? alternativa : digitado
 
     setIsCreatingContact(true)
     try {
@@ -1364,13 +1403,15 @@ export default function ChatHub() {
       setNewContactDdd('')
       setNewContactNumber('')
       setSelectedContact(jid)
-      toast({ title: 'Conversa criada com sucesso' })
+      toast({
+        title: usouAlternativa ? 'Essa conversa já existia — aberta com o histórico' : 'Conversa criada com sucesso',
+      })
     } catch {
       toast({ title: 'Erro ao criar conversa', variant: 'destructive' })
     } finally {
       setIsCreatingContact(false)
     }
-  }, [newContactName, newContactDdd, newContactNumber, toast])
+  }, [newContactName, newContactDdd, newContactNumber, toast, conversationSummaries])
 
   const handleOpenNewContact = useCallback(() => {
     setNewContactName('')
