@@ -25,6 +25,13 @@ const MODULO_SUMIU = /failed to fetch dynamically imported module|error loading 
 const SEM_REDE = /^(failed to fetch|networkerror|load failed)$/i
 
 export function traduzErro(err: unknown, padrao: string): string {
+  // Carimbo de `sendMessage`: o envio estourou o tempo, mas pode ter saído. O
+  // texto cru ("Operation timed out…") faria a pessoa reenviar — e a paciente
+  // receberia duas vezes.
+  if ((err as { envioIncerto?: boolean } | null)?.envioIncerto) {
+    return 'O WhatsApp demorou para confirmar. Estamos conferindo se a mensagem chegou — não reenvie.'
+  }
+
   const bruto = err instanceof Error ? err.message : typeof err === 'string' ? err : ''
   const texto = bruto.trim()
   if (!texto) return padrao

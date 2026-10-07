@@ -3,6 +3,8 @@ import type { Message } from '@/lib/supabase/types'
 import {
   registrarTentativa,
   marcarTentativaFalhou,
+  marcarTentativaIncerta,
+  ehTempoEsgotado,
   descartarTentativaSilenciosa,
   type TentativaDeEnvio,
 } from '@/services/tentativas-de-envio'
@@ -278,8 +280,23 @@ export const sendMessage = async (data: {
       trocaria uma falha visível por uma silenciosa.
     */
     const id = await tentativa
+    const mensagemDeErro = e instanceof Error ? e.message : String(e)
+    /*
+      Tempo esgotado NÃO é falha: a requisição já tinha partido, e em 07/10/2026
+      a mensagem chegou na paciente 5,3s depois do clique. Fica `pendente` para
+      o verificador conferir na Evolution, e o erro sai CARIMBADO com
+      `envioIncerto` para o toast não mandar a pessoa reenviar.
+    */
+    const incerto = ehTempoEsgotado(mensagemDeErro)
+    if (incerto && e instanceof Error) {
+      ;(e as Error & { envioIncerto?: boolean }).envioIncerto = true
+    }
     if (id) {
-      await marcarTentativaFalhou(id, e instanceof Error ? e.message : String(e))
+      if (incerto) {
+        await marcarTentativaIncerta(id, mensagemDeErro)
+      } else {
+        await marcarTentativaFalhou(id, mensagemDeErro)
+      }
       /*
         O id vai CARIMBADO no erro para que a interface saiba, na hora, que a
         falha ficou gravada. Sem isso ela teria que adivinhar: mostraria o balão
