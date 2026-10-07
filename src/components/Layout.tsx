@@ -10,7 +10,8 @@ import { NovidadesDaVersao } from '@/components/ReleaseNotesDialog'
 import { TourDoApp } from '@/components/TourDoApp'
 import { AvisoDeVersaoNova } from '@/components/AvisoDeVersaoNova'
 import { AlertaDeviceDesconectado } from '@/components/AlertaDeviceDesconectado'
-import { ToolHost } from '@/components/tools/ToolHost'
+import { ToolHost, FERRAMENTAS_HOSPEDADAS } from '@/components/tools/ToolHost'
+import { BarraDeAbas, useBarraNoChat } from '@/components/tools/BarraDeAbas'
 import { useAppHeartbeat } from '@/hooks/use-app-heartbeat'
 import { useNotificacoesDeMensagem } from '@/hooks/use-notificacoes-de-mensagem'
 import { useNotificacoes } from '@/hooks/use-notificacoes'
@@ -62,6 +63,12 @@ export default function Layout() {
    * de voltar, e o voltar do Android também sai da conversa para a lista.
    */
   const semCasca = noCelular && conversaAberta
+
+  /**
+   * Abas de ferramenta em cima do WhatsApp (só desktop, só com ferramenta viva).
+   * Precisa ser decidido aqui porque muda a altura do chat — ver o `<main>`.
+   */
+  const barraNoChat = useBarraNoChat()
 
   // Layout só é montado dentro de ProtectedRoute, então aqui já há sessão.
   useAppHeartbeat(true)
@@ -145,7 +152,23 @@ export default function Layout() {
           !isFullBleed && noCelular && 'p-3',
         )}
       >
-        <div className={`mx-auto w-full ${isFullBleed ? 'h-full max-w-none' : 'max-w-7xl'}`}>
+        {/*
+          A barra de abas em cima do `/chat` é um irmão ANTES do container da rota,
+          e não um filho dele: o `ChatHub` não sabe que ela existe e continua
+          sendo `h-full` do pai. Para ele ainda caber, o container troca `h-full`
+          por `flex-1 min-h-0` — o resto da altura do `<main>`, e não 100% dela.
+          Com `h-full` o chat nasceria com a altura inteira, somada à da barra, e
+          o `overflow-hidden` do `<main>` cortaria o campo de mensagem.
+        */}
+        {barraNoChat && <BarraDeAbas ferramentas={FERRAMENTAS_HOSPEDADAS} />}
+        <div
+          className={cn(
+            'mx-auto w-full',
+            isFullBleed
+              ? cn('max-w-none', barraNoChat ? 'flex-1 min-h-0' : 'h-full')
+              : 'max-w-7xl',
+          )}
+        >
           <Outlet />
         </div>
         {/*

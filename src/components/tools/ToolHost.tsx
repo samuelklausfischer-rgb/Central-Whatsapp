@@ -1,14 +1,8 @@
 import { lazy, Suspense, useSyncExternalStore } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
-import {
-  subscreverFerramentas,
-  lerFerramentas,
-  fecharFerramenta,
-  MAX_FERRAMENTAS_VIVAS,
-} from '@/stores/ferramentasVivas'
+import { BarraDeAbas } from '@/components/tools/BarraDeAbas'
+import { subscreverFerramentas, lerFerramentas } from '@/stores/ferramentasVivas'
 
 const AnalisePrn = lazy(() => import('@/pages/tools/AnalisePrn'))
 const RateioMobilemed = lazy(() => import('@/pages/tools/RateioMobilemed'))
@@ -142,7 +136,6 @@ function FerramentaQuebrou({ titulo }: { titulo: string }) {
  */
 export function ToolHost() {
   const { vivas, ativa } = useSyncExternalStore(subscreverFerramentas, lerFerramentas, lerFerramentas)
-  const navigate = useNavigate()
 
   // A raiz é SEMPRE `absolute inset-0` (o `<main>` do Layout é `relative`), com
   // ou sem ferramenta ativa. Manter a mesma caixa o tempo todo evita que trocar
@@ -166,52 +159,13 @@ export function ToolHost() {
         manter várias. Em 17/09/2026 uma usuária chegou a PEDIR abas de navegação
         pelo widget de report, um mês depois de elas existirem e estarem no ar.
         Uma aba só já informa: diz o que está aberto e oferece o ✕ para fechar.
+
+        Desde 07/10/2026 a barra é o `BarraDeAbas` e leva, antes das ferramentas,
+        uma aba fixa do WhatsApp. O mesmo componente é desenhado pelo `Layout` em
+        cima do `/chat` (quando há ferramenta viva), porque aqui dentro ela fica
+        escondida junto com o host assim que a pessoa sai de uma ferramenta.
       */}
-      {!escondido && vivas.length > 0 && (
-        <div className="flex items-center gap-1 px-4 pt-3 pb-2 flex-wrap flex-shrink-0">
-          {vivas.map((slug) => {
-            const f = FERRAMENTAS_HOSPEDADAS[slug]
-            if (!f) return null
-            const ehAtiva = slug === ativa
-            return (
-              <div
-                key={slug}
-                className={cn(
-                  'flex items-center gap-1 pl-3 pr-1.5 py-1 rounded-full text-xs border transition-colors',
-                  ehAtiva
-                    ? 'bg-accent text-foreground border-border'
-                    : 'text-muted-foreground border-transparent hover:bg-accent/50 hover:text-foreground',
-                )}
-              >
-                <button onClick={() => navigate(f.url)} className="font-medium">
-                  {f.titulo}
-                </button>
-                <button
-                  onClick={() => {
-                    fecharFerramenta(slug)
-                    // Fechar a que está na tela precisa levar a pessoa a algum
-                    // lugar — senão sobra um vazio sem explicação.
-                    if (ehAtiva) {
-                      const proxima = vivas.find((s) => s !== slug)
-                      navigate(proxima ? FERRAMENTAS_HOSPEDADAS[proxima]?.url ?? '/dashboard' : '/dashboard')
-                    }
-                  }}
-                  title={`Fechar ${f.titulo}`}
-                  aria-label={`Fechar ${f.titulo}`}
-                  className="p-0.5 rounded-full opacity-50 hover:opacity-100 hover:bg-background/60"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            )
-          })}
-          {vivas.length >= MAX_FERRAMENTAS_VIVAS && (
-            <span className="text-[10px] text-muted-foreground/60 ml-1">
-              abrir outra fecha a mais antiga
-            </span>
-          )}
-        </div>
-      )}
+      {!escondido && vivas.length > 0 && <BarraDeAbas ferramentas={FERRAMENTAS_HOSPEDADAS} />}
 
       <div className="relative flex-1 min-h-0">
         {vivas.map((slug) => {
