@@ -92,10 +92,12 @@ test('CSV real: contagem por empresa e por confiança', { skip: !existsSync(CSV_
   const { porEmpresa, porConfianca } = contar(r.mapa);
   // 2026-10-07: o financeiro confirmou 4 vinculos (+3 gemeos Apice) e 4 linhas sem confirmacao
   // perderam o departamento (MGS Porto Seguro, SESI MS 1, JANDAIA Apice x2) - vinculam na tela.
-  assert.deepEqual(porEmpresa, { PRN: 83, PRN_APICE: 66, MEDIMAGEM: 27, MEDIMAGEM_APICE: 14 });
-  assert.deepEqual(porConfianca, { ALTA: 170, MEDIA: 9, BAIXA: 11 });
-  assert.equal(r.mapa.length, 190);
-  assert.equal(r.descartadas.length, 10);
+  // Depois da 2a rodada (mesmo dia): os 20 com duvida foram confirmados e JANDAIA Apice da PRN ->
+  // JANDAIA. Pendentes (sem departamento): MGS Porto Seguro, SESI MS 1 e JANDAIA na MedImagem Apice.
+  assert.deepEqual(porEmpresa, { PRN: 83, PRN_APICE: 67, MEDIMAGEM: 27, MEDIMAGEM_APICE: 14 });
+  assert.deepEqual(porConfianca, { ALTA: 191 });
+  assert.equal(r.mapa.length, 191);
+  assert.equal(r.descartadas.length, 9);
   assert.equal(r.conflitos.length, 0);
   // chave única por empresa
   const ids = new Set(r.mapa.map((x) => `${x.empresa}|${x._chave}`));
