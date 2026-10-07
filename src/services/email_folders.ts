@@ -11,6 +11,31 @@ export async function getFolders(account_id: string): Promise<EmailFolder[]> {
   return data ?? []
 }
 
+/**
+ * Pastas em que a mensagem já "saiu de circulação" no Outlook: Itens Excluídos e
+ * Lixo Eletrônico. Identificadas pelo apelido do Graph (`well_known_name`), que
+ * `marcarPastasDeSistema` grava na edge function `email-microsoft` — nunca pelo
+ * nome de exibição, que muda com o idioma da caixa.
+ */
+export const APELIDOS_DE_PASTAS_DESCARTADAS = ['deleteditems', 'junkemail'] as const
+
+/**
+ * ids (nossos) das pastas de excluídos/lixo da caixa.
+ *
+ * ⚠️ Só enxerga o que foi sincronizado: caixa que nunca rodou `sincronizarPastas`
+ * não tem linha em `email_folders`, e os e-mails dela chegam com `folder_id`
+ * nulo — para esses não há como saber a pasta, e o resultado aqui é vazio.
+ */
+export async function getPastasDescartadas(account_id: string): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from('email_folders')
+    .select('id')
+    .eq('account_id', account_id)
+    .in('well_known_name', [...APELIDOS_DE_PASTAS_DESCARTADAS])
+  if (error) throw error
+  return new Set((data ?? []).map((p) => p.id as string))
+}
+
 export async function createFolder(
   data: Omit<EmailFolder, 'id' | 'created_at'>
 ): Promise<EmailFolder> {

@@ -34,6 +34,19 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.224',
+    date: '2026-10-07 18:00',
+    title: 'Chat interno, aba do WhatsApp e e-mail em blocos',
+    details: [
+      '💬 Chat interno: no seletor de aparelho do Whats, escolha "Chat interno" para conversar com qualquer pessoa da equipe ou criar grupos. Texto, emoji, responder, foto, arquivo e áudio; só quem participa da conversa lê',
+      '🗂️ Aba "WhatsApp" fixa na barra de abas das ferramentas: dá para ir do Faturamento (ou de qualquer ferramenta) para o WhatsApp e voltar sem perder o que estava aberto',
+      '📧 E-mail: a conversa aparece em blocos, um por mensagem, com quem enviou, dia e hora — a mais nova em cima. O histórico repetido fica recolhido e as imagens carregam sozinhas',
+      '🔐 Administração: novo botão Desativar. A pessoa não entra mais, perde os aparelhos e as conversas dela voltam para a Geral; o histórico fica guardado. Reativar desfaz',
+    ],
+    usabilidade:
+      'Abra o Whats, toque no seletor de aparelho e escolha "Chat interno". Em "Nova conversa" escolha a pessoa; em "Novo grupo" dê um nome e marque quem participa.',
+  },
+  {
     version: '0.0.223',
     date: '2026-10-07 13:00',
     title: 'Mensagem com link não dá mais "falhou" à toa',

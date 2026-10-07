@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase/client'
 import type { Email, EmailFilters } from '@/lib/supabase/email-types'
 import { appEnv } from '@/lib/env'
+import { getPastasDescartadas } from '@/services/email_folders'
 
 /**
  * Colunas da LISTA — de propósito sem `body_html` e `body_text`.
@@ -118,6 +119,64 @@ export async function getEmail(id: string): Promise<Email | null> {
   return data
 }
 
+/**
+ * As mensagens de UMA conversa do Outlook, da mais nova para a mais antiga — sem
+ * corpo, para montar os blocos da visão de conversa.
+ *
+ * Por que `account_id` + `conversation_id` e não `thread_id`: é o par do índice
+ * `emails_conversa_idx`, e o `conversation_id` do Graph só vale dentro da caixa
+ * (a mesma conversa em duas caixas são duas linhas independentes).
+ *
+ * Rascunho fica de fora: é texto que ninguém recebeu, e dois rascunhos da mesma
+ * resposta virariam dois blocos "fantasma". Quem abriu um rascunho de propósito
+ * continua vendo a própria mensagem — `useConversaDoEmail` a reinsere.
+ *
+ * Mesmas colunas da lista (`COLUNAS_DA_LISTA`): sem `body_html`/`body_text`. O
+ * corpo de cada bloco entra por `getEmail(id)` quando o bloco é aberto.
+ *
+ * Itens Excluídos e Lixo Eletrônico ficam de fora: quem apagou uma mensagem de
+ * propósito não quer vê-la reaparecendo no meio da conversa. A EXCEÇÃO é quando
+ * o e-mail aberto (`pastaDaAberta`, o `folder_id` dele) está numa dessas pastas —
+ * aí a pessoa está olhando a pasta de descarte e a conversa vem inteira.
+ * Mensagem sem `folder_id` (caixa cuja árvore de pastas nunca foi sincronizada)
+ * não tem como ser classificada e SEMPRE entra. Se a consulta das pastas falhar,
+ * a conversa vem completa em vez de falhar junto.
+ *
+ * Teto de 100: a maior conversa medida tem 21 mensagens; passar de 100 só pode
+ * ser lixo (lista de distribuição respondida em cadeia) e não deve travar a tela.
+ */
+export async function getMensagensDaConversa(
+  account_id: string,
+  conversation_id: string,
+  pastaDaAberta: string | null = null,
+): Promise<Email[]> {
+  const [{ data, error }, descartadas] = await Promise.all([
+    supabase
+      .from('emails')
+      .select(COLUNAS_DA_LISTA)
+      .eq('account_id', account_id)
+      .eq('conversation_id', conversation_id)
+      .eq('is_draft', false)
+      .order('received_at', { ascending: false })
+      // Desempate estável quando duas mensagens chegam no mesmo instante.
+      .order('created_at', { ascending: false })
+      .limit(100),
+    getPastasDescartadas(account_id).catch((e) => {
+      console.error('pastas de excluídos/lixo:', e)
+      return new Set<string>()
+    }),
+  ])
+  if (error) throw error
+  const lista = semCorpo(data)
+
+  if (pastaDaAberta && descartadas.has(pastaDaAberta)) return lista
+  return lista.filter((m) => !m.folder_id || !descartadas.has(m.folder_id))
+}
+
+/**
+ * @deprecated Sem uso, e traz o corpo de todas as mensagens (`select('*')`). Para a
+ * visão de conversa use `getMensagensDaConversa`.
+ */
 export async function getThreadEmails(thread_id: string): Promise<Email[]> {
   const { data, error } = await supabase
     .from('emails')
