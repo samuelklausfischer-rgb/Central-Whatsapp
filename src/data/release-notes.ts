@@ -34,6 +34,17 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.223',
+    date: '2026-10-07 13:00',
+    title: 'Mensagem com link não dá mais "falhou" à toa',
+    details: [
+      '🐛 Corrigido: mensagem com link (como o ZIP de exame da Mobilemed) dava "Operation timed out" e aparecia como falha — mas tinha chegado na paciente. Agora o link vai na hora, sem a prévia',
+      '🐛 Corrigido: quando o WhatsApp demora para confirmar, a mensagem não aparece mais como "não saiu". O balão mostra "conferindo no WhatsApp…" e, em até 3 minutos, a mensagem entra no histórico ou vira falha de verdade',
+    ],
+    usabilidade:
+      'Se aparecer "Estamos conferindo se a mensagem chegou — não reenvie", espere o balão "conferindo no WhatsApp…" sumir. Só use "Tentar de novo" se ele virar "não saiu".',
+  },
+  {
     version: '0.0.222',
     date: '2026-10-06 19:00',
     title: 'Faturamento: estudo que conta mais de 1',
