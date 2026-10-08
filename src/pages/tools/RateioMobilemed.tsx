@@ -10,8 +10,12 @@ import { useToast } from '@/hooks/use-toast'
 import { FinanceiroAuthProvider, useFinanceiroAuth } from '@/contexts/financeiro-auth-context'
 import { useRateioUpload, useRateioHistorico, useRateioUnidades } from '@/hooks/use-rateio'
 import { RateioHistoricoPanel } from '@/components/rateio/RateioHistoricoPanel'
+import { LancarOmiePanel } from '@/components/rateio/LancarOmiePanel'
 import { fmt, fmtNum, valorNumerico, baixarBase64, rotuloPendencia } from '@/lib/rateio/format'
 import { deleteRateioExecucao, type RateioAdicional, type RateioEmpresa } from '@/services/rateio/rateio-service'
+
+// Lançamento no Omie: só aparece com VITE_RATEIO_OMIE=1. Sem a flag a tela é a de sempre.
+const RATEIO_OMIE_ATIVO = import.meta.env.VITE_RATEIO_OMIE === '1'
 
 const EMPRESAS: { key: RateioEmpresa; label: string }[] = [
   { key: 'PRN', label: 'PRN' },
@@ -71,7 +75,7 @@ function RateioInner() {
   const inputRef = useRef<HTMLInputElement>(null)
   const { toast } = useToast()
 
-  const { processar, enviando, status, erro, resultado } = useRateioUpload()
+  const { processar, enviando, status, erro, resultado, execucaoId, omieIndisponivel } = useRateioUpload()
   const { historico, loading: carregandoHistorico, error: erroHistorico, refetch } = useRateioHistorico(empresa)
   const {
     unidades,
@@ -468,6 +472,10 @@ function RateioInner() {
               <Download className="h-4 w-4" />
               Baixar {resultado?.arquivo?.nome}
             </Button>
+
+            {RATEIO_OMIE_ATIVO && (
+              <LancarOmiePanel key={execucaoId ?? 'sem-execucao'} execucaoId={execucaoId} motivoIndisponivel={omieIndisponivel} />
+            )}
           </section>
         )}
       </div>
