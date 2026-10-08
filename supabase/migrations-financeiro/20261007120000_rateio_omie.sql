@@ -4,7 +4,9 @@
 -- (a pasta supabase/migrations/ deste repo é de outro banco).
 -- Contrato: docs/rateio-omie/CONTRATO.md
 --
--- Idempotente: pode rodar mais de uma vez sem erro.
+-- Aplicado em produção em 2026-10-08 (migrations rateio_omie + rateio_omie_privilegios).
+-- Sem DROP: as tabelas e policies são novas; a policy de INSERT existente é ALTERada.
+-- Rodar de novo falha nos create policy (já existem) - não é preciso rodar de novo.
 -- Segurança: RLS ligada em tudo. Só há policy de SELECT para `authenticated`
 -- (exceto rateio_omie_autorizados, sem policy nenhuma). Ninguém escreve pelo cliente:
 -- só a service role (Edge Function `rateio-omie`) grava, e ela ignora a RLS.
@@ -28,9 +30,9 @@ comment on column public.dash_rateio_execucoes.criado_por is
 -- A policy de INSERT atual (conferida em pg_policies em 2026-10-07) era
 --   dash_rateio_execucoes_insert: FOR INSERT TO authenticated WITH CHECK (true)
 -- e passa a exigir que o autor seja o próprio usuário logado. A policy de SELECT não muda.
-drop policy if exists dash_rateio_execucoes_insert on public.dash_rateio_execucoes;
-create policy dash_rateio_execucoes_insert on public.dash_rateio_execucoes
-  for insert to authenticated with check (criado_por = auth.uid());
+-- ALTER (e não drop+create): o apply_migration do Supabase recusa SQL com DROP POLICY.
+alter policy dash_rateio_execucoes_insert on public.dash_rateio_execucoes
+  with check (criado_por = auth.uid());
 
 -- 2) Mapa unidade -> departamento do Omie, por empresa.
 --    A chave de busca é unidade_chave (mesma regra da função chave() do rateio:
@@ -141,19 +143,15 @@ alter table public.rateio_omie_tentativas  enable row level security;
 alter table public.rateio_omie_autorizados enable row level security;
 
 -- Somente leitura para usuários logados (a tela mostra mapa, config e histórico).
-drop policy if exists rateio_omie_mapa_select on public.rateio_omie_mapa;
 create policy rateio_omie_mapa_select on public.rateio_omie_mapa
   for select to authenticated using (true);
 
-drop policy if exists rateio_omie_config_select on public.rateio_omie_config;
 create policy rateio_omie_config_select on public.rateio_omie_config
   for select to authenticated using (true);
 
-drop policy if exists rateio_omie_lancamentos_select on public.rateio_omie_lancamentos;
 create policy rateio_omie_lancamentos_select on public.rateio_omie_lancamentos
   for select to authenticated using (true);
 
-drop policy if exists rateio_omie_tentativas_select on public.rateio_omie_tentativas;
 create policy rateio_omie_tentativas_select on public.rateio_omie_tentativas
   for select to authenticated using (true);
 
@@ -197,8 +195,7 @@ revoke select on
 -- drop table if exists public.rateio_omie_config;
 -- drop table if exists public.rateio_omie_mapa;
 -- -- restaura a policy de INSERT original de dash_rateio_execucoes (era WITH CHECK (true)):
--- drop policy if exists dash_rateio_execucoes_insert on public.dash_rateio_execucoes;
--- create policy dash_rateio_execucoes_insert on public.dash_rateio_execucoes
---   for insert to authenticated with check (true);
+-- alter policy dash_rateio_execucoes_insert on public.dash_rateio_execucoes
+--   with check (true);
 -- alter table public.dash_rateio_execucoes drop column if exists criado_por;
 -- alter table public.dash_rateio_execucoes drop column if exists linhas;
