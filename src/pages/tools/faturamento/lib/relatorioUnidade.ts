@@ -1,6 +1,8 @@
-// Relatório de faturamento por UNIDADE, separado pelos 4 grupos da Mobilemed:
-// PRN, PRN Apice Tele, Medimagem e Medimagem Apice Tele (decisão do usuário em 05/10/2026).
-// Um arquivo junta todos os nomes da unidade que são do mesmo grupo.
+// Relatório de faturamento por UNIDADE: um arquivo junta todos os nomes da unidade, inclusive os da
+// tele parceira (Ápice Tele, DMX, Onelaudos) — decisão do usuário em 09/10/2026, igual às planilhas
+// feitas à mão (jun e jul/2026: o nome Ápice sempre na mesma planilha da unidade). De 05 a 09/10 saía
+// um arquivo por grupo da Mobilemed. Os 4 grupos (PRN, PRN Apice Tele, Medimagem, Medimagem Apice Tele)
+// seguem valendo para saber de onde veio cada nome e para separar as pastas do ZIP.
 import { normNome } from '../nucleo/motor'
 
 /** Os 4 grupos, na ordem de apresentação. */
@@ -40,27 +42,46 @@ export interface InfoAlias { grupo: string | null; subunidade: string | null }
 export interface Relatorio {
   grupo: Grupo; rotuloGrupo: string; pasta: string | null; empresa: string | null
   subunidade: string | null; periodo: string; nomes: string[]
+  grupos: Grupo[] // grupos da Mobilemed dos nomes do relatório (ex.: PRN + PRN Apice Tele)
   unidade_id?: string | null // unidade de contrato (para achar as instruções de NF)
 }
 
-/** Junta os nomes simulados em relatórios: (grupo, unidade, subunidade, período). Nome sem contrato sai sozinho. */
+/** Grupo da empresa: a tele parceira cai no grupo da casa (PRN Apice Tele → PRN; Medimagem Apice Tele → Medimagem). */
+export const grupoBase = (g: Grupo): Grupo => (g === 'PRN Apice Tele' ? 'PRN' : g === 'Medimagem Apice Tele' ? 'Medimagem' : g)
+
+/**
+ * Junta os nomes simulados em relatórios: UM por unidade de contrato, hospital e período, com os nomes da
+ * casa e os da tele parceira juntos. O relatório fica no grupo da casa (PRN ou Medimagem); unidade que só
+ * teve nome de tele no mês fica no grupo da tele. Nome sem contrato sai sozinho.
+ */
 export function agruparRelatorios(nomes: NomeSimulado[], alias: Map<string, InfoAlias>): Relatorio[] {
   const mapa = new Map<string, Relatorio>()
   for (const n of nomes) {
     const info = alias.get(normNome(n.nome_bruto))
     const grupo = grupoDoNome(n.nome_bruto, info?.grupo, n.empresa)
     const sub = info?.subunidade ?? null
-    const chave = n.unidade_id ? [grupo, n.unidade_id, sub ?? '', n.periodo].join('|') : ['sem', n.nome_bruto, n.periodo].join('|')
+    const chave = n.unidade_id ? [grupoBase(grupo), n.unidade_id, sub ?? '', n.periodo].join('|') : ['sem', n.nome_bruto, n.periodo].join('|')
     const r = mapa.get(chave) ?? {
-      grupo, rotuloGrupo: grupo, pasta: n.pasta, empresa: n.empresa, subunidade: sub, periodo: n.periodo, nomes: [],
+      grupo, rotuloGrupo: grupo, pasta: n.pasta, empresa: n.empresa, subunidade: sub, periodo: n.periodo, nomes: [], grupos: [],
       unidade_id: n.unidade_id,
     }
     if (!r.nomes.includes(n.nome_bruto)) r.nomes.push(n.nome_bruto)
+    if (!r.grupos.includes(grupo)) r.grupos.push(grupo)
+    // na mesma chave só há a casa e a tele dela: com um nome da casa, o relatório vai para o grupo da casa
+    if (ordemDoGrupo(grupo) < ordemDoGrupo(r.grupo)) { r.grupo = grupo; r.rotuloGrupo = grupo }
     mapa.set(chave, r)
   }
+  for (const r of mapa.values()) r.grupos.sort((a, b) => ordemDoGrupo(a) - ordemDoGrupo(b))
   return [...mapa.values()].sort((a, b) =>
     ordemDoGrupo(a.grupo) - ordemDoGrupo(b.grupo) || (a.pasta ?? '~').localeCompare(b.pasta ?? '~') ||
     (a.subunidade ?? '').localeCompare(b.subunidade ?? '') || a.periodo.localeCompare(b.periodo))
+}
+
+/** Grupo do RELATÓRIO de cada nome (a tele vai junto com a casa) — para o consolidado dividir igual aos relatórios. */
+export function grupoDoRelatorioPorNome(nomes: NomeSimulado[], alias: Map<string, InfoAlias>): Map<string, Grupo> {
+  const m = new Map<string, Grupo>()
+  for (const r of agruparRelatorios(nomes, alias)) for (const nb of r.nomes) if (!m.has(nb)) m.set(nb, r.grupo)
+  return m
 }
 
 export interface ResumoLinhaRel { rotulo: string; quantidade: number; valor_unitario: number | null; total: number; fixo: boolean }

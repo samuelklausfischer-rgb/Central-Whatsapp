@@ -32,10 +32,12 @@ export async function guardarNoAcervo(
     const chave = chaveExame(l)
     const ocorrencia = (ocorrencias.get(chave) ?? 0) + 1
     ocorrencias.set(chave, ocorrencia)
-    const r: Record<string, unknown> = { chave, ocorrencia, arquivo_nome: arquivoNome, recebido_em: agora }
+    const r: Record<string, unknown> = { chave, ocorrencia, arquivo_nome: l.arquivo_nome ?? arquivoNome, recebido_em: agora }
     for (const c of CAMPOS) r[c] = l[c] ?? null
     r.data_exame_d = dataISO(l.data_exame)
     r.data_laudo_d = dataISO(l.data_conclusao)
+    // mês do Bruto em que o exame veio: diz o mês do 1º laudo do reassinado (sem ele, o banco tenta pelo nome do arquivo)
+    r.mes_arquivo = l.mes_arquivo ?? null
     return r
   })
   const lotes: Record<string, unknown>[][] = []
@@ -93,4 +95,14 @@ export async function acervoCobre(desde: string, ate: string): Promise<boolean> 
     .gte('data_laudo_d', desde).lte('data_laudo_d', ate)
   if (error) throw new Error(`acervo: ${error.message}`)
   return (count ?? 0) > 0
+}
+
+/**
+ * O acervo já tem exame vindo do Bruto do mês `mes` ('AAAA-MM-01')? Com o Bruto do mês seguinte guardado, o
+ * laudo reassinado cai no mês do 1º laudo sem dúvida (motor, intervaloDoLaudo).
+ */
+export async function acervoTemMes(mes: string): Promise<boolean> {
+  const { data, error } = await db.from('exame_bruto').select('chave').eq('mes_arquivo', mes).limit(1)
+  if (error) throw new Error(`acervo: ${error.message}`)
+  return (data ?? []).length > 0
 }

@@ -7,7 +7,7 @@ import { baixarConsolidado, carregarInfoAlias, simularNome, verificarFuncao, typ
 import { grupoDoNome, GRUPOS, type InfoAlias } from '../lib/relatorioUnidade'
 import { normNome } from '../nucleo/motor'
 import { brl } from '../lib/format'
-import { acervoCobre, guardarNoAcervo, janelasPorNome, nomesComCorte, nomesNoAcervo } from '../lib/acervo'
+import { acervoCobre, acervoTemMes, guardarNoAcervo, janelasPorNome, nomesComCorte, nomesNoAcervo } from '../lib/acervo'
 
 interface ResultadoNome { nome: string; unidade: string | null; faturados: number; total: number; pendencias: string[]; erro?: string; ignorado?: boolean }
 
@@ -60,9 +60,11 @@ export default function Simular() {
   const fimMesAnterior = (c: string) => new Date(Date.UTC(+c.slice(0, 4), +c.slice(5, 7) - 1, 0)).toISOString().slice(0, 10)
   /** Último dia da competência ('AAAA-MM' → 'AAAA-MM-DD'). */
   const fimDoMes = (c: string) => new Date(Date.UTC(+c.slice(0, 4), +c.slice(5, 7), 0)).toISOString().slice(0, 10)
+  /** 1º dia do mês seguinte à competência ('AAAA-MM' → 'AAAA-MM-01'). */
+  const mesSeguinteISO = (c: string) => new Date(Date.UTC(+c.slice(0, 4), +c.slice(5, 7), 1)).toISOString().slice(0, 10)
   const ddmm = (isoData: string) => `${isoData.slice(8, 10)}/${isoData.slice(5, 7)}`
   // build mínimo da função fat-simular que lê o acervo (pedido com do_acervo)
-  const FUNCAO_MINIMA = 'fat-simular-2026-10-06b'
+  const FUNCAO_MINIMA = 'fat-simular-2026-10-09c'
 
   /** Só guarda os exames no acervo (ex.: subir o Bruto do mês anterior uma vez, para os cortes). */
   async function soGuardar() {
@@ -109,6 +111,13 @@ export default function Simular() {
         if (faltando.length && !confirm(`Estas unidades fecham com dia de corte e o acervo ainda não tem os dias do mês anterior:\n\n${faltando.join('\n')}\n\nSuba antes o Bruto do mês anterior com "Só guardar no acervo". Gerar mesmo assim (essas unidades sairão com o período incompleto)?`)) {
           setFase('parado'); setGuardando(null); return
         }
+      }
+      // Bruto do mês seguinte: tira a dúvida do laudo reassinado (1º laudo neste mês ou no seguinte?) e traz o
+      // exame feito no fim do mês e transferido no seguinte (unidades pela data do exame). Só para mês já fechado.
+      const seguinte = mesSeguinteISO(competencia)
+      if (seguinte.slice(0, 7) <= new Date().toISOString().slice(0, 7) && !(await acervoTemMes(seguinte)) &&
+        !confirm(`O acervo ainda não tem o Bruto de ${mmaaaa(seguinte)}.\n\nSem ele, laudos reassinados em ${mmaaaa(seguinte)} podem cair no mês errado (saem como pendência "reassinado_incerto") e exames feitos no fim de ${mmaaaa(competencia)} e transferidos em ${mmaaaa(seguinte)} ficam de fora.\n\nRecomendado: exporte da Mobilemed o relatório de ${mmaaaa(seguinte)} do dia 1 até hoje, suba com "Só guardar no acervo" e gere de novo. Gerar mesmo assim?`)) {
+        setFase('parado'); setGuardando(null); return
       }
       // quem calcular: os nomes do arquivo + os que têm exame guardado na competência
       // (ex.: laudo de setembro que só veio no Bruto de agosto)
@@ -200,7 +209,7 @@ export default function Simular() {
             : <> A competência escolhida é <b>{mmaaaa(competencia)}</b>: assim quase nenhum exame entra no relatório. <button className="underline" onClick={() => setCompetencia(detectado.competencia)}>Usar {mmaaaa(detectado.competencia)}</button></>}
         </p>
       )}
-      <p className="text-xs text-slate-500">Os arquivos são lidos aqui no navegador e enviados aos poucos, um nome de unidade por vez. Os relatórios ficam guardados por 30 dias. Os exames ficam no acervo por 3 meses e o cálculo lê de lá: cada exame entra no mês do seu laudo, venha do arquivo que vier, e as unidades com dia de corte (ex.: 27→26) pegam os dias do mês anterior. Dica: exporte da Mobilemed os 2 últimos meses — assim os laudos que saíram depois do envio anterior entram no mês certo.</p>
+      <p className="text-xs text-slate-500">Os arquivos são lidos aqui no navegador e enviados aos poucos, um nome de unidade por vez. Os relatórios ficam guardados por 30 dias. Os exames ficam no acervo por 3 meses e o cálculo lê de lá: cada exame entra no mês do seu laudo, venha do arquivo que vier, e as unidades com dia de corte (ex.: 27→26) pegam os dias do mês anterior. Para fechar um mês: suba o Bruto do mês anterior (uma vez), o do mês e um parcial do mês seguinte (do dia 1 até hoje) — um arquivo por mês, com o nome que a Mobilemed dá. Assim os laudos que saíram depois e os laudos reassinados entram no mês certo.</p>
       {guardando && (
         <p className="text-sm text-slate-600">Guardando exames no acervo: {guardando.feitos.toLocaleString('pt-BR')} de {guardando.total.toLocaleString('pt-BR')}…</p>
       )}
@@ -219,6 +228,7 @@ export default function Simular() {
                   <td className="pr-3">{a.grupo || 'grupo não informado'}</td>
                   <td className="pr-3">{a.nome}</td>
                   <td className="pr-3 text-right">{a.exames.toLocaleString('pt-BR')} exames</td>
+                  <td className="pr-3">{a.mes ? `Bruto de ${mmaaaa(a.mes)}` : <span className="text-amber-700" title="Com o arquivo de um mês só, o laudo reassinado entra no mês do 1º laudo.">⚠️ mês não identificado: use o arquivo da Mobilemed de um mês só, sem renomear</span>}</td>
                   <td>{a.repetidos ? `${a.repetidos.toLocaleString('pt-BR')} já vieram em outro arquivo (não contados de novo)` : ''}</td>
                 </tr>
               ))}

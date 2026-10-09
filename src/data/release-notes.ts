@@ -34,6 +34,21 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.228',
+    date: '2026-10-09 12:00',
+    title: 'Faturamento: laudo reassinado no mês certo e Ápice Tele junto da unidade',
+    details: [
+      '🐛 Corrigido: laudo reassinado era cobrado pela data da nova assinatura. Exame de agosto reassinado em setembro saía de novo em setembro (46 exames em set/2026), e exame de setembro reassinado em outubro sumia de setembro (29 exames). Agora conta o mês do 1º laudo, pelo Bruto do mês em que o exame veio',
+      '🧾 O relatório de cada unidade junta os nomes da casa e os da tele parceira (Ápice Tele, DMX, Onelaudos) num arquivo só, como o financeiro faz à mão. O quadro "Grupo da Mobilemed" mostra de quais grupos vieram os exames',
+      '📅 Ao escolher o Bruto, a tela mostra de que mês é cada arquivo e avisa quando não dá para saber (arquivo com mais de um mês)',
+      '📆 Ação intensificada: nas unidades que têm (CISRJ, CISTEC, Jacobina e Guanambi), o exame feito no sábado ou domingo sai num relatório à parte, com o mesmo preço, como o financeiro faz à mão',
+      '🧮 Rio Grande: a franquia de 1.000 exames passa a contar a unidade inteira (nome PRN + Ápice), e não cada nome separado',
+      '🏥 FHEMIG pela data do laudo (27 a 26), com um relatório por hospital, como o financeiro faz (João XXIII, Amélia Lins e João Paulo II juntos)',
+    ],
+    usabilidade:
+      'Exporte da Mobilemed um arquivo por mês (do dia 1 ao fim do mês). Suba o do mês anterior com "Só guardar no acervo" e depois o do mês com "Processar".',
+  },
+  {
     version: '0.0.227',
     date: '2026-10-07 19:45',
     title: 'Dá para fechar o aviso de WhatsApp desconectado',
