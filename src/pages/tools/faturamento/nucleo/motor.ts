@@ -235,38 +235,62 @@ function coringa(item: string): { eh: boolean; base: string; excluidas: Set<stri
   return { eh: true, base: antes, excluidas: tokens(depois) }
 }
 
+/** Quantas letras do começo duas palavras têm em comum. */
+function prefixoComum(a: string, b: string): number {
+  let i = 0
+  while (i < a.length && i < b.length && a[i] === b[i]) i++
+  return i
+}
+
+/**
+ * Quanto o item combina com o estudo: palavra igual vale 2; mesma palavra com outro final (7+ letras iguais no
+ * começo, ex.: ONCOLÓGICO × ONCOLOGIA) vale 2; só o começo parecido (5–6 letras, ex.: ANGIOTC × ANGIOTOMOGRAFIA) vale 1.
+ */
 function semelhanca(estudo: string, item: string): number {
   const te = tokens(estudo), ti = tokens(item)
   let n = 0
   for (const t of ti) {
-    if (te.has(t)) n += 2
-    else for (const e of te) if (e.length >= 5 && t.length >= 5 && (e.startsWith(t.slice(0, 5)) || t.startsWith(e.slice(0, 5)))) { n += 1; break }
+    if (te.has(t)) { n += 2; continue }
+    let melhor = 0
+    for (const e of te) {
+      if (e.length < 5 || t.length < 5) continue
+      const p = prefixoComum(e, t)
+      melhor = Math.max(melhor, p >= 7 ? 2 : p >= 5 ? 1 : 0)
+    }
+    n += melhor
   }
   return n
 }
 
+/**
+ * Item de preço do exame. Vale o item que MAIS combina com o estudo (ex.: angiotomografia para "ANGIOTC TÓRAX");
+ * a urgência só escolhe entre os itens que combinam igual (eletivo × urgente do mesmo procedimento). Antes (até
+ * 09/10/2026) a urgência vinha primeiro e a angio de urgência da FAEPU saía pelo "TC geral urgente" (R$ 38 em vez de 45).
+ */
 export function escolherItem(linha: LinhaBruto, candidatos: ItemPreco[], urgente: boolean, precoUnico: boolean): ItemPreco | null {
   if (!candidatos.length) return null
   if (precoUnico && candidatos.length === 1) return candidatos[0]
   const mod = normModalidade(linha.modalidade)
-  let porMod = candidatos.filter(c => !c.modalidade || c.modalidade === mod)
+  const porMod = candidatos.filter(c => !c.modalidade || c.modalidade === mod)
   if (!porMod.length) return null // nunca empresta preço de outra modalidade (sem item → pendência sem_preco)
-  const papelDesejado: Papel = urgente ? 'urgencia' : 'normal'
-  const porPapel = porMod.filter(c => c.papel === papelDesejado)
-  if (porPapel.length) porMod = porPapel
   if (porMod.length === 1) return porMod[0]
-  // desempate: semelhança com a descrição do estudo; empate → item coringa ("todas, exceto…") e depois o mais genérico
+  const papelDesejado: Papel = urgente ? 'urgencia' : 'normal'
   const te = tokens(linha.estudo_descricao ?? '')
-  let melhor = porMod[0], mScore = -1, mEspec = Infinity
-  for (const c of porMod) {
+  const avaliados = porMod.flatMap(c => {
     const cg = coringa(c.exame)
-    if (cg.eh && cg.excluidas.size && [...cg.excluidas].every(t => te.has(t))) continue // estudo é justamente o "exceto"
+    if (cg.eh && cg.excluidas.size && [...cg.excluidas].every(t => te.has(t))) return [] // estudo é justamente o "exceto"
     const s = semelhanca(linha.estudo_descricao ?? '', cg.base)
-    // item de uma região do corpo (ex.: "Abdômen Total") que não casou com o estudo fica por último no desempate
+    // desempate: item coringa ("todas, exceto…"), depois o mais genérico; item de uma região do corpo
+    // (ex.: "Abdômen Total") que não casou com o estudo fica por último
     const espec = cg.eh ? -1 : (s === 0 && REGIAO.test(normNome(c.exame)) ? 1000 : tokens(c.exame).size)
-    if (s > mScore || (s === mScore && espec < mEspec)) { melhor = c; mScore = s; mEspec = espec }
-  }
-  return melhor
+    return [{ c, s, espec }]
+  })
+  if (!avaliados.length) return porMod[0]
+  const max = Math.max(...avaliados.map(a => a.s))
+  let pool = avaliados.filter(a => a.s === max)
+  const doPapel = pool.filter(a => a.c.papel === papelDesejado)
+  if (doPapel.length) pool = doPapel
+  return pool.reduce((m, a) => (a.espec < m.espec ? a : m)).c
 }
 
 // ---------------------------------------------------------------- cálculo de um nome do Bruto
