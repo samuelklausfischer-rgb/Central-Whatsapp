@@ -64,7 +64,7 @@ export default function Simular() {
   const mesSeguinteISO = (c: string) => new Date(Date.UTC(+c.slice(0, 4), +c.slice(5, 7), 1)).toISOString().slice(0, 10)
   const ddmm = (isoData: string) => `${isoData.slice(8, 10)}/${isoData.slice(5, 7)}`
   // build mínimo da função fat-simular que lê o acervo (pedido com do_acervo)
-  const FUNCAO_MINIMA = 'fat-simular-2026-10-09c'
+  const FUNCAO_MINIMA = 'fat-simular-2026-10-09d'
 
   /** Só guarda os exames no acervo (ex.: subir o Bruto do mês anterior uma vez, para os cortes). */
   async function soGuardar() {
