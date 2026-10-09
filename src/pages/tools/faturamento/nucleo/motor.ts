@@ -297,7 +297,14 @@ export function calcular(nomeBruto: string, linhas: LinhaBruto[], ctx: ContextoU
   if (ctx.situacao === 'vencido' || ctx.situacao === 'encerrado' || ctx.situacao === 'minuta')
     pend.push({ tipo: 'situacao', detalhe: `contrato ${ctx.situacao} (${ctx.pasta}) — faturado mesmo assim, confirmar` })
 
-  const doSub = (i: ItemPreco) => !ctx.subunidade || normNome(i.exame).startsWith(normNome(ctx.subunidade))
+  // preço do hospital (subunidade): pela coluna subunidade do item; nos itens com hospital no nome ("HGES (Salvador)
+  // — Raio-x", padrão do Exército), pelo começo do nome. Item genérico (sem " — " e sem subunidade) vale para todos
+  // os hospitais da unidade (FHEMIG: o mesmo contrato para os 8 hospitais, um relatório por hospital).
+  const doSub = (i: ItemPreco) => {
+    if (!ctx.subunidade) return true
+    if (i.subunidade) return normNome(i.subunidade) === normNome(ctx.subunidade)
+    return normNome(i.exame).startsWith(normNome(ctx.subunidade)) || !i.exame.includes(' — ')
+  }
   // reassinado (ver intervaloDoLaudo): o 1º laudo caiu num intervalo dentro do mês do Bruto. Com dia de corte ou
   // quinzena, o intervalo pode atravessar a divisa do período: aí não se chuta — vai para o período que começa na
   // divisa (o mesmo de antes, pela reassinatura) e vira pendência. Também é pendência a dúvida do mês seguinte.
