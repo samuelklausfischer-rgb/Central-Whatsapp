@@ -57,7 +57,7 @@ export async function faturaUnidadeXlsx(rel: Relatorio, competencia: string, res
   st.font = { name: FONTE, size: 10, italic: true, color: { argb: TEXTO_CINZA } }
 
   const info: [string, string][] = [
-    ['Grupo da Mobilemed', rel.rotuloGrupo],
+    ['Grupo da Mobilemed', (rel.grupos?.length ? rel.grupos : [rel.rotuloGrupo]).join(' + ')],
     ['Unidade (contrato)', unidade],
     ['Empresa', empresa],
     ['Competência', comp + (rel.periodo ? ` — ${rel.periodo}` : '')],

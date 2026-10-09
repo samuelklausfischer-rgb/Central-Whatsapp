@@ -20,6 +20,10 @@ export interface LinhaBruto {
   status?: string
   imagem_chave?: string
   digitador?: string
+  /** Último mês de Bruto mensal em que o exame veio ('AAAA-MM-01'), guardado no acervo. Ver intervaloDoLaudo. */
+  mes_arquivo?: string | null
+  /** Arquivo de onde a linha veio (leitura no navegador; vai para o acervo). */
+  arquivo_nome?: string
 }
 
 export type Papel = 'normal' | 'urgencia' | 'fixo' | 'excedente'
@@ -134,6 +138,51 @@ function iso(d: Date): string { return d.toISOString().slice(0, 10) }
 function fimDoDia(a: number, m: number, d: number): Date { return new Date(Date.UTC(a, m, d, 23, 59, 59)) }
 function ultimoDia(a: number, m: number): number { return new Date(Date.UTC(a, m + 1, 0)).getUTCDate() }
 
+/**
+ * Quando caiu o 1º laudo de um exame REASSINADO.
+ *
+ * Quando o laudo é reassinado, a Mobilemed troca a data de conclusão pela da nova assinatura. Mas o
+ * Bruto mensal traz o exame transferido no mês OU laudado (1ª assinatura) no mês — conferido no Bruto
+ * de set/2026 (Arco Verde, 09/10/2026). Então o 1º laudo do reassinado é, no máximo, do último mês de
+ * Bruto em que o exame veio (`mes_arquivo`). Se a conclusão passou desse mês, o 1º laudo foi entre a
+ * transferência (ou o dia 1) e o fim do mês do arquivo: é o intervalo devolvido.
+ * `transferidoNoMes`: a transferência também é desse mês, então o exame pode ter vindo no Bruto só por
+ * ela, com o 1º laudo no mês seguinte — dúvida que só o Bruto do mês seguinte no acervo tira (se o exame
+ * vier nele, o `mes_arquivo` passa a ser o seguinte).
+ * Null = vale a conclusão (não é reassinado, conclusão dentro do mês do arquivo ou sem `mes_arquivo`,
+ * como nos exames mandados no pedido pelo app de testes).
+ */
+export function intervaloDoLaudo(l: LinhaBruto): { de: Date; ate: Date; transferidoNoMes: boolean } | null {
+  const d = parseDataBR(l.data_conclusao)
+  if (!d || !l.mes_arquivo || normNome(l.status ?? '') !== 'REASSINADO') return null
+  const m = /^(\d{4})-(\d{2})/.exec(l.mes_arquivo)
+  if (!m) return null
+  const a = +m[1], mes = +m[2] - 1
+  const inicio = new Date(Date.UTC(a, mes, 1))
+  const fim = fimDoDia(a, mes, ultimoDia(a, mes))
+  if (d <= fim) return null
+  const t = parseDataBR(l.data_transferencia)
+  const transferidoNoMes = !!t && t >= inicio && t <= fim
+  return { de: transferidoNoMes ? t! : inicio, ate: fim, transferidoNoMes }
+}
+
+/** Data do laudo que vale para faturar: a do 1º laudo do reassinado (início do intervalo) ou a conclusão. */
+export function dataDoLaudo(l: LinhaBruto): Date | null {
+  return intervaloDoLaudo(l)?.de ?? parseDataBR(l.data_conclusao)
+}
+
+/** Opções do cálculo que vêm do acervo. */
+export interface OpcoesCalculo {
+  /** O acervo já tem o Bruto do mês seguinte à competência (tira a dúvida do reassinado, ver intervaloDoLaudo). */
+  mesSeguinteNoAcervo?: boolean
+  /**
+   * Exames dos OUTROS nomes do Bruto da mesma unidade (ex.: RIO GRANDE PRN e RIO GRANDE - APICE TELE).
+   * Só servem para a franquia, que é da unidade: o exame é franquia ou excedente pela posição dele entre
+   * todos os exames da unidade no período, e não só entre os do próprio nome.
+   */
+  linhasDosOutrosNomes?: LinhaBruto[]
+}
+
 /** Períodos de faturamento da competência 'AAAA-MM' conforme a janela da unidade. */
 export function periodos(competencia: string, janela: ContextoUnidade['janela']): Periodo[] {
   const [a, m1] = competencia.split('-').map(Number)
@@ -212,7 +261,7 @@ export function escolherItem(linha: LinhaBruto, candidatos: ItemPreco[], urgente
 }
 
 // ---------------------------------------------------------------- cálculo de um nome do Bruto
-export function calcular(nomeBruto: string, linhas: LinhaBruto[], ctx: ContextoUnidade | null, competencia: string, cfg: Config): Resultado {
+export function calcular(nomeBruto: string, linhas: LinhaBruto[], ctx: ContextoUnidade | null, competencia: string, cfg: Config, opcoes: OpcoesCalculo = {}): Resultado {
   if (!ctx) {
     return {
       exames: [], resumo: [], fora_do_periodo: 0,
@@ -240,6 +289,18 @@ export function calcular(nomeBruto: string, linhas: LinhaBruto[], ctx: ContextoU
     pend.push({ tipo: 'situacao', detalhe: `contrato ${ctx.situacao} (${ctx.pasta}) — faturado mesmo assim, confirmar` })
 
   const doSub = (i: ItemPreco) => !ctx.subunidade || normNome(i.exame).startsWith(normNome(ctx.subunidade))
+  // reassinado (ver intervaloDoLaudo): o 1º laudo caiu num intervalo dentro do mês do Bruto. Com dia de corte ou
+  // quinzena, o intervalo pode atravessar a divisa do período: aí não se chuta — vai para o período que começa na
+  // divisa (o mesmo de antes, pela reassinatura) e vira pendência. Também é pendência a dúvida do mês seguinte.
+  const divisa = diaDeCorte(ctx.janela) ?? (ctx.janela === 'quinzena' ? 16 : null)
+  const laudo = (l: LinhaBruto): { data: Date | null; incerto: boolean } => {
+    const iv = intervaloDoLaudo(l)
+    if (!iv) return { data: parseDataBR(l.data_conclusao), incerto: false }
+    if (divisa && iv.de.getUTCDate() < divisa && iv.ate.getUTCDate() >= divisa)
+      return { data: new Date(Date.UTC(iv.ate.getUTCFullYear(), iv.ate.getUTCMonth(), divisa)), incerto: true }
+    return { data: iv.de, incerto: iv.transferidoNoMes && !opcoes.mesSeguinteNoAcervo }
+  }
+  const dataDoCriterio = (l: LinhaBruto) => criterio === 'laudo' ? laudo(l).data : parseDataBR(l.data_exame)
 
   for (const p of periodos(competencia, ctx.janela)) {
     const itens = (ctx.itensPorPeriodo[p.rotulo] ?? []).filter(doSub)
@@ -247,23 +308,36 @@ export function calcular(nomeBruto: string, linhas: LinhaBruto[], ctx: ContextoU
     const cobraveis = itens.filter(i => (i.papel === 'normal' || i.papel === 'urgencia') && i.valor != null)
     const excedente = itens.find(i => i.papel === 'excedente' && i.valor != null) ?? null
 
-    const sel = linhas.filter(l => {
-      const d = parseDataBR(criterio === 'laudo' ? l.data_conclusao : l.data_exame)
+    const entra = (l: LinhaBruto) => {
+      const d = dataDoCriterio(l)
       const dentro = !!d && d >= p.inicio && d <= p.fim
       const statusPassa = fixo || !!ctx.todos_status || statusOk.has(normNome(l.status ?? ''))
       const dupPassa = cfg.duplicadoEntra || normNome(l.duplicado ?? '') !== 'SIM'
       return dentro && statusPassa && dupPassa
-    })
+    }
+    const sel = linhas.filter(entra)
     sel.forEach(l => usadas.add(l))
-    const ordenadas = [...sel].sort((a, b) =>
-      (parseDataBR(criterio === 'laudo' ? a.data_conclusao : a.data_exame)?.getTime() ?? 0) -
-      (parseDataBR(criterio === 'laudo' ? b.data_conclusao : b.data_exame)?.getTime() ?? 0))
+    const ordenadas = [...sel].sort((a, b) => (dataDoCriterio(a)?.getTime() ?? 0) - (dataDoCriterio(b)?.getTime() ?? 0))
+    // franquia da UNIDADE: posição do exame entre os exames de todos os nomes dela no período. A ordem é a mesma
+    // no cálculo de cada nome (data e, no empate, nome/paciente/estudo), então cada exame tem uma posição só.
+    const chaveOrdem = (l: LinhaBruto) => [l.unidade, l.data_exame, l.nome_paciente, l.estudo_descricao, l.accession_number].map(v => v ?? '').join('|')
+    const posicaoNaFranquia = new Map<LinhaBruto, number>()
+    if (ctx.franquia_mensal && excedente) {
+      const daUnidade = [...sel, ...(opcoes.linhasDosOutrosNomes ?? []).filter(entra)]
+      daUnidade.sort((a, b) => (dataDoCriterio(a)?.getTime() ?? 0) - (dataDoCriterio(b)?.getTime() ?? 0) || chaveOrdem(a).localeCompare(chaveOrdem(b)))
+      daUnidade.forEach((l, i) => posicaoNaFranquia.set(l, i))
+    }
+    const incertos = criterio === 'laudo' ? sel.filter(l => laudo(l).incerto).length : 0
+    if (incertos) pend.push({
+      tipo: 'reassinado_incerto', qtd_exames: incertos,
+      detalhe: `${incertos} laudo(s) reassinado(s) sem a data do 1º laudo${p.rotulo ? ` (${p.rotulo})` : ''}: suba o Bruto do mês seguinte (do dia 1 até hoje) com "Só guardar no acervo" e gere de novo; se continuar, confira o 1º laudo na Mobilemed`,
+    })
 
     let semPreco = 0
-    ordenadas.forEach((l, idx) => {
+    ordenadas.forEach(l => {
       const base = { ...l, periodo: p.rotulo, quantidade: 1 }
       if (ctx.franquia_mensal && excedente) {
-        if (idx < ctx.franquia_mensal) exames.push({ ...base, item_preco_id: null, item_exame: 'franquia do valor fixo', valor_unitario: 0, valor_total: 0, motivo: 'franquia' })
+        if (posicaoNaFranquia.get(l)! < ctx.franquia_mensal) exames.push({ ...base, item_preco_id: null, item_exame: 'franquia do valor fixo', valor_unitario: 0, valor_total: 0, motivo: 'franquia' })
         else exames.push({ ...base, item_preco_id: excedente.item_preco_id, item_exame: excedente.exame, valor_unitario: excedente.valor!, valor_total: round2(excedente.valor!), motivo: 'excedente' })
         return
       }

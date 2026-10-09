@@ -31,8 +31,11 @@ export interface EntradaConsolidado {
   unidades: UnidadeEntrada[]
   pendencias: SimulacaoPendencia[]
   nomes: SimulacaoNome[]
-  /** grupo da Mobilemed (PRN, PRN Apice Tele…) e hospital de cada nome — divide as linhas como os relatórios por unidade */
-  gruposDosNomes?: Record<string, { grupo: string; subunidade: string | null }>
+  /**
+   * grupo do relatório e hospital de cada nome — divide as linhas como os relatórios por unidade (a tele parceira
+   * vai junto com a casa); `grupoNome` = grupo da Mobilemed do próprio nome, para as listas por nome
+   */
+  gruposDosNomes?: Record<string, { grupo: string; subunidade: string | null; grupoNome?: string }>
 }
 
 export interface PorEmpresa { total: number; exames: number; unidades: number }
@@ -93,6 +96,7 @@ export function agregar(entrada: EntradaConsolidado): Agregado {
 
   // ── por unidade de contrato × grupo da Mobilemed × hospital (mesma divisão dos relatórios por unidade) ──
   const grupoDe = (nome: string) => entrada.gruposDosNomes?.[nome] ?? { grupo: '', subunidade: null }
+  const grupoProprio = (nome: string) => { const g = grupoDe(nome); return g.grupoNome ?? g.grupo }
   const chaveDe = (nome: string, uid: string) => { const g = grupoDe(nome); return `${g.grupo}|${uid}|${g.subunidade ?? ''}` }
   const acc = new Map<string, { uid: string; grupo: string; sub: string | null; exames: number; valorExames: number; valorFixo: number; nomes: Set<string> }>()
   for (const r of resumo) {
@@ -244,7 +248,7 @@ export function agregar(entrada: EntradaConsolidado): Agregado {
   const porNome: LinhaNome[] = entrada.nomes.map(n => {
     const u = n.unidade_id ? unidadePorId.get(n.unidade_id) : undefined
     return {
-      grupo: grupoDe(n.nome_bruto).grupo,
+      grupo: grupoProprio(n.nome_bruto),
       nome_bruto: n.nome_bruto, periodo: n.periodo ?? '', unidade: n.pasta ?? u?.pasta ?? null, empresa: n.empresa ?? u?.empresa ?? null,
       qtd: Number(n.qtd_exames ?? 0), total: Number(n.total ?? 0), pendencias: Number(n.n_pendencias ?? 0),
     }
@@ -255,14 +259,14 @@ export function agregar(entrada: EntradaConsolidado): Agregado {
     if (presentes.has(nome)) continue
     const uid = nomeParaUnidade.get(nome)
     const u = uid ? unidadePorId.get(uid) : undefined
-    porNome.push({ grupo: grupoDe(nome).grupo, nome_bruto: nome, periodo: '', unidade: u?.pasta ?? null, empresa: u?.empresa ?? null, qtd: 0, total: 0, pendencias: x.n })
+    porNome.push({ grupo: grupoProprio(nome), nome_bruto: nome, periodo: '', unidade: u?.pasta ?? null, empresa: u?.empresa ?? null, qtd: 0, total: 0, pendencias: x.n })
   }
   porNome.sort((a, b) => ordemGrupo(a.grupo) - ordemGrupo(b.grupo) || ptBR(a.nome_bruto, b.nome_bruto) || ptBR(a.periodo, b.periodo))
 
   // ── lista de pendências ────────────────────────────────────────────────────
   const pendencias: LinhaPendencia[] = entrada.pendencias.map(p => {
     const uid = unidadeDaPendencia(p)
-    return { tipo: p.tipo, grupo: p.nome_bruto ? grupoDe(p.nome_bruto).grupo : '', unidade: uid ? unidadePorId.get(uid)?.pasta ?? null : null, nome_bruto: p.nome_bruto, detalhe: p.detalhe, qtd_exames: p.qtd_exames }
+    return { tipo: p.tipo, grupo: p.nome_bruto ? grupoProprio(p.nome_bruto) : '', unidade: uid ? unidadePorId.get(uid)?.pasta ?? null : null, nome_bruto: p.nome_bruto, detalhe: p.detalhe, qtd_exames: p.qtd_exames }
   }).sort((a, b) => ordemGrupo(a.grupo) - ordemGrupo(b.grupo) || ptBR(a.tipo, b.tipo) || ptBR(a.nome_bruto ?? '', b.nome_bruto ?? ''))
 
   // ── exceções de regra por unidade (para a aba Premissas) ───────────────────

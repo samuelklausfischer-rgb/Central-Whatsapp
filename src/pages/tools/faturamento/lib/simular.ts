@@ -10,7 +10,7 @@ import type { InstrucaoNF, RespostaSimular, Simulacao, SimulacaoNome, SimulacaoP
 import { agregar, type ResumoLinha, type UnidadeEntrada } from './consolidado'
 import { gerarConsolidado, nomeArquivoConsolidado } from './consolidadoXlsx'
 import { normNome } from '../nucleo/motor'
-import { faturaUnidadeXlsx, grupoDoNome, juntarResumo, type InfoAlias, type Relatorio } from './relatorioUnidade'
+import { faturaUnidadeXlsx, grupoDoNome, grupoDoRelatorioPorNome, juntarResumo, type InfoAlias, type Relatorio } from './relatorioUnidade'
 
 export type ModoCalculo = 'servidor' | 'local'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -132,13 +132,16 @@ export async function montarConsolidado(simulacaoId: string): Promise<{ bytes: U
   ])
   const regraPorId = new Map(regras.map(r => [r.id, r]))
   const unidades = unidadesBase.map(u => ({ ...u, ...(regraPorId.get(u.id) ? { janela: regraPorId.get(u.id)!.janela, criterio_data: regraPorId.get(u.id)!.criterio_data, franquia_mensal: regraPorId.get(u.id)!.franquia_mensal } : {}) }))
-  // grupo da Mobilemed e hospital de cada nome → as abas "Por unidade" saem divididas igual aos relatórios por unidade
+  // grupo do relatório e hospital de cada nome → as abas "Por unidade" saem divididas igual aos relatórios por
+  // unidade (o nome da tele parceira vai junto com a unidade, no grupo da casa)
   const info = await carregarInfoAlias()
   const empresaDe = new Map(nomes.map(n => [n.nome_bruto, n.empresa]))
+  const grupoDoRel = grupoDoRelatorioPorNome(nomes, info)
   const todosNomes = new Set([...nomes.map(n => n.nome_bruto), ...pendencias.map(p => p.nome_bruto).filter((x): x is string => !!x)])
   const gruposDosNomes = Object.fromEntries([...todosNomes].map(nome => {
     const ia = info.get(normNome(nome))
-    return [nome, { grupo: grupoDoNome(nome, ia?.grupo, empresaDe.get(nome) ?? null), subunidade: ia?.subunidade ?? null }]
+    const proprio = grupoDoNome(nome, ia?.grupo, empresaDe.get(nome) ?? null)
+    return [nome, { grupo: grupoDoRel.get(nome) ?? proprio, subunidade: ia?.subunidade ?? null, grupoNome: proprio }]
   }))
   const agg = agregar({ simulacao, resumo, unidades, pendencias, nomes, gruposDosNomes })
   const competencia = simulacao.competencia.slice(0, 7)

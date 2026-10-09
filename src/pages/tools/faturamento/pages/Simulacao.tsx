@@ -84,7 +84,7 @@ export default function Simulacao() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nomes, grupo, soPendencia, busca, infoAlias])
 
-  // relatórios por unidade, separados pelo grupo da Mobilemed (PRN, PRN Ápice Tele, Medimagem, Medimagem Ápice Tele…)
+  // relatórios por unidade: os nomes da casa e os da tele parceira (Ápice, DMX, Onelaudos) juntos, no grupo da casa
   const relatorios = useMemo(() => {
     if (!infoAlias) return []
     const tot = new Map(nomes.map(n => [chave(n), n]))
