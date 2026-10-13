@@ -34,6 +34,16 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.229',
+    date: '2026-10-13 12:00',
+    title: 'Faturamento: relatório de cada unidade numa aba só',
+    details: [
+      '🧾 O relatório de cada unidade (dentro do ZIP) agora tem uma aba só: a lista de todos os exames e, no fim, a tabela MODALIDADE · QUANTIDADE · VALOR, com os valores fixos (locação, mensalidade…) e a linha TOTAL em amarelo',
+      '📋 As instruções de emissão da nota continuam na aba "Agenda de NF" do Excel consolidado',
+    ],
+    usabilidade: 'Gere o ZIP "Faturas por unidade" como antes e abra o arquivo da unidade: role até o fim da lista para ver o total por modalidade.',
+  },
+  {
     version: '0.0.228',
     date: '2026-10-09 12:00',
     title: 'Faturamento: laudo reassinado no mês certo e Ápice Tele junto da unidade',
