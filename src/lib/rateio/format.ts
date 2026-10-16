@@ -24,6 +24,16 @@ export function valorNumerico(v: string | number | null | undefined): number {
   return Number.isFinite(n) ? n : 0
 }
 
+// Rótulos amigáveis das pendências do rateio; tipo desconhecido aparece como veio.
+const PENDENCIA_LABELS: Record<string, string> = {
+  ADICIONAL_UNIDADE_FORA_DO_RESULTADO:
+    'Serviço adicional em unidade sem exames no mês ou fora do cadastro (valor lançado em linha própria)',
+}
+
+export function rotuloPendencia(tipo: string): string {
+  return PENDENCIA_LABELS[tipo] || tipo
+}
+
 // Decodifica um arquivo base64 (vindo da resposta do webhook de rateio ou do
 // histórico) e dispara o download no navegador.
 export function baixarBase64(nome: string, mime: string, base64: string): void {
