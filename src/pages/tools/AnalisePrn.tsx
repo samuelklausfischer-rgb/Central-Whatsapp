@@ -30,6 +30,52 @@ import { extractHistoricalRows, HISTORY_MONTH_WINDOW } from '@/lib/prn-analise/p
 import { formatMonthList } from '@/lib/prn-analise/audit-utils'
 import { ToolFrame } from '@/components/tools/ToolFrame'
 import { appEnv } from '@/lib/env'
+import supabase from '@/lib/supabase/client'
+import type { EmbedCredential } from '@/lib/tool-embed'
+
+/**
+ * Sessão do Hub entregue à "Conferência de pagamentos" (aba Omie).
+ *
+ * O servidor dela deixou de ser aberto: toda chamada a /api exige o access token
+ * do Supabase DESTE projeto, e a permissão é a mesma do menu (ferramenta
+ * `analise-prn`, conferida lá com o token da própria pessoa). Mesmo desenho da
+ * Conciliação: credencial `supabase-session`, e só o Hub renova — o filho usa o
+ * access token e reenvia o `ready` se precisar de um novo.
+ *
+ * Funções no escopo do módulo (identidade estável), como o ToolFrame espera.
+ */
+async function getCredentialConferencia(): Promise<EmbedCredential> {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+
+  if (!session?.access_token) {
+    throw new Error('Sessão não encontrada. Saia e entre novamente no Hub PRN.')
+  }
+
+  return {
+    kind: 'supabase-session',
+    access_token: session.access_token,
+    // O filho só usa o access token (quem renova é o Hub): o refresh token não sai desta origem.
+    refresh_token: '',
+  }
+}
+
+function watchConferencia(send: (credential: EmbedCredential) => void) {
+  const {
+    data: { subscription },
+  } = supabase.auth.onAuthStateChange((event, session) => {
+    if (event !== 'TOKEN_REFRESHED' && event !== 'SIGNED_IN') return
+    if (!session?.access_token) return
+    send({
+      kind: 'supabase-session',
+      access_token: session.access_token,
+      refresh_token: '', // não vaza o refresh token para a origem da Conferência (só o access token)
+    })
+  })
+
+  return () => subscription.unsubscribe()
+}
 
 const normalizePrnPayloadWithDailyFile = async (payload: any, dailyFile: File, referenceDate?: string) => {
   const parsed = await parsePrnDailyReceipts(dailyFile, { referenceDate })
@@ -512,7 +558,13 @@ export default function AnalisePrn() {
             title="Conferência de pagamentos"
             baseUrl={appEnv.VITE_CONFERENCIA_PAGAMENTO_APP_URL}
             envVarName="VITE_CONFERENCIA_PAGAMENTO_APP_URL"
+            // `ao-carregar` continua sendo quem libera a tela (a versão antiga da
+            // Conferência nunca manda `ready`), mas agora a versão nova pede a sessão
+            // e recebe — ver a nota do tipo em ToolFrame. Publicar o Hub primeiro é
+            // inofensivo para a versão antiga.
             prontidao="ao-carregar"
+            getCredential={getCredentialConferencia}
+            watch={watchConferencia}
           />
         </div>
 
