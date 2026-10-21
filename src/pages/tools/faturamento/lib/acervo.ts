@@ -5,7 +5,7 @@
 // Bruto que sobe fica guardado aqui, e o cálculo (função fat-simular, pedido com
 // do_acervo) lê do acervo: assim cada exame entra no mês do seu laudo (ou do exame, na
 // unidade que fatura pela data do exame), venha de qual arquivo vier. As unidades com
-// dia de corte (27→26, 21→20…) também pegam daqui os dias do mês anterior.
+// dia de corte também pegam daqui os dias fora do mês (21→20 vai até o mês seguinte; FHEMIG 27→26 vem do anterior).
 import { db } from './supabase'
 import { executarEmPool, paginar } from './pool'
 import { chaveExame } from './bruto'
@@ -85,10 +85,10 @@ export async function nomesNoAcervo(desde: string, ate: string): Promise<Map<str
 }
 
 /**
- * O acervo tem os dias do mês anterior que o corte precisa? Conta laudos guardados entre
+ * O acervo tem os dias fora do mês que o corte precisa? Conta laudos guardados entre
  * `desde` e `ate` (de QUALQUER unidade): se o Bruto daquele mês já subiu, há milhares.
  * Pelo laudo, e não pela data do exame, porque o Bruto novo também traz exame antigo
- * laudado agora — contar pela data do exame daria "coberto" sem o mês anterior ter subido.
+ * laudado agora — contar pela data do exame daria "coberto" sem aquele mês ter subido.
  */
 export async function acervoCobre(desde: string, ate: string): Promise<boolean> {
   const { count, error } = await db.from('exame_bruto').select('chave', { count: 'exact', head: true })
