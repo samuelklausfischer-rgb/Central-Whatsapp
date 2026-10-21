@@ -13,7 +13,7 @@ const STORAGE_BUCKET = 'chat-attachments'
 // Trocar A CADA deploy. É o único jeito de provar que o isolate do Deno recarregou:
 // conferir o arquivo dentro do container mostra o que está em disco, não o que está
 // rodando. A verificação é um POST à função conferindo este campo na resposta.
-const BUILD_MARKER = 'botoes-pin-skdm-2026-09-25'
+const BUILD_MARKER = 'mensagem-fixada-alvo-2026-10-21'
 
 type MediaType = 'image' | 'video' | 'audio' | 'document' | 'sticker'
 
@@ -516,7 +516,8 @@ function getContactInfos(msgObj: Record<string, unknown>): ContactInfo[] | null 
 
 type CitacaoInfo = {
   reply_to_id: string | null
-  reply_to_snapshot: { content: string; sender_name: string; id: string } | null
+  // `expira_em` só existe nos avisos de fixação (ver `resolverFixacao`).
+  reply_to_snapshot: { content: string; sender_name: string; id: string; expira_em?: string | null } | null
 }
 
 /**
@@ -631,6 +632,71 @@ async function resolverCitacao(
   }
 
   return vazio
+}
+
+/**
+ * QUAL mensagem foi fixada (ou desafixada).
+ *
+ * O evento `pinInChatMessage` traz em `key.id` o id da mensagem fixada, `type`
+ * 1 = fixar / 2 = desafixar, e a duração escolhida (24h, 7 ou 30 dias) em
+ * `messageContextInfo.messageAddOnDurationInSecs` — formato conferido no
+ * registro cru da Evolution (`findMessages`) em 21/10/2026. Até aqui só o rótulo
+ * "[Mensagem fixada]" era gravado e a tela não tinha como dizer o que foi fixado.
+ *
+ * Reaproveita as colunas da citação, como `resolverCitacao`: `reply_to_id`
+ * aponta a mensagem fixada (o front pula até ela) e o snapshot carrega a prévia
+ * e `expira_em`, que a faixa do topo usa para parar de mostrar uma fixação
+ * vencida. Sem a original no banco, o snapshot fica com o id do WhatsApp e
+ * conteúdo vazio — o front mostra o aviso sem prévia.
+ *
+ * NUNCA LANÇA, pelo mesmo motivo de `resolverCitacao`.
+ */
+async function resolverFixacao(
+  pin: Record<string, any>,
+  duracaoSegundos: unknown,
+  deviceId: string,
+  headers: Record<string, string>,
+): Promise<CitacaoInfo> {
+  const vazio: CitacaoInfo = { reply_to_id: null, reply_to_snapshot: null }
+  const alvoId = typeof pin?.key?.id === 'string' && pin.key.id ? pin.key.id : null
+  if (!alvoId) return vazio
+
+  const desafixar = pin.type === 2 || pin.type === 'UNPIN_FOR_ALL'
+  const segundos = Number(duracaoSegundos)
+  const expira_em = !desafixar && Number.isFinite(segundos) && segundos > 0
+    ? new Date(Date.now() + segundos * 1000).toISOString()
+    : null
+
+  try {
+    const resp = await fetch(
+      `${SUPABASE_URL}/rest/v1/messages?device_id=eq.${deviceId}&external_id=eq.${encodeURIComponent(alvoId)}&select=id,content,sender_name`,
+      { headers },
+    )
+    if (resp.ok) {
+      const arr = await resp.json().catch(() => null)
+      const orig = Array.isArray(arr) && arr.length > 0 ? arr[0] : null
+      if (orig?.id) {
+        return {
+          reply_to_id: orig.id,
+          reply_to_snapshot: {
+            id: orig.id,
+            content: textoParaCitacao(orig.content ?? ''),
+            sender_name: orig.sender_name ?? '',
+            expira_em,
+          },
+        }
+      }
+    } else {
+      console.warn('[fixacao] busca da original falhou', { status: resp.status, alvoId })
+    }
+  } catch (err) {
+    console.warn('[fixacao] busca da original com erro', String(err))
+  }
+
+  return {
+    reply_to_id: null,
+    reply_to_snapshot: { id: alvoId, content: '', sender_name: '', expira_em },
+  }
 }
 
 /**
@@ -1638,7 +1704,16 @@ async function tratarWebhook(req: Request): Promise<Response> {
     mediaWarn('media_attachment_null_before_insert', { messageId: externalId, mediaType: mediaInfo.type })
   }
 
-  const citacao = await resolverCitacao(messageData.contextInfo, device.id, headers)
+  // Aviso de fixação: o "citado" é a mensagem fixada. A duração vem no
+  // `messageContextInfo` do envelope cru, fora do que o `unwrapMessage` devolve.
+  const citacao = msgObj.pinInChatMessage
+    ? await resolverFixacao(
+        msgObj.pinInChatMessage,
+        (messageData.message as Record<string, any> | undefined)?.messageContextInfo?.messageAddOnDurationInSecs,
+        device.id,
+        headers,
+      )
+    : await resolverCitacao(messageData.contextInfo, device.id, headers)
 
   // ITEM 12: só ÁUDIO RECEBIDO (nunca enviado, nunca outro tipo de mídia)
   // entra na transcrição automática. `Prefer: return=representation` só é
@@ -1772,8 +1847,12 @@ function extractContent(msgObj: Record<string, unknown>): string {
   if (m.reactionMessage) return '[Reação]'
   // Evento de fixar mensagem: sem conteúdo de usuário nenhum e sem anexo. O
   // front vai renderizar este rótulo como linha de sistema centralizada, não
-  // como balão.
-  if (m.pinInChatMessage) return '[Mensagem fixada]'
+  // como balão. `type` 2 é desafixar — antes caía no mesmo rótulo e a conversa
+  // dizia "fixada" justamente quando a fixação acabava.
+  if (m.pinInChatMessage) {
+    const t = m.pinInChatMessage.type
+    return t === 2 || t === 'UNPIN_FOR_ALL' ? '[Mensagem desafixada]' : '[Mensagem fixada]'
+  }
   const templateInfo = getTemplateInfo(m)
   // MESMO padrão do `listMessage` logo abaixo: o `content` vira só o
   // rótulo/prévia — o texto de verdade continua vivo em `body`, dentro do

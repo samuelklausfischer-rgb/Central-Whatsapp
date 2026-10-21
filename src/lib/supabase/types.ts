@@ -96,7 +96,8 @@ export interface Message {
   attachments: Record<string, unknown> | null
   reactions: Record<string, unknown>[] | null
   reply_to_id: string | null
-  reply_to_snapshot: { content: string; sender_name: string; id: string } | null
+  /** `expira_em` só nos avisos de fixação (ver `avisoDeFixacao` no ChatWindow). */
+  reply_to_snapshot: { content: string; sender_name: string; id: string; expira_em?: string | null } | null
   edited_at: string | null
   deleted_at: string | null
   revoked_at: string | null

@@ -34,6 +34,18 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.229',
+    date: '2026-10-21 10:00',
+    title: 'Dá para ver qual mensagem foi fixada',
+    details: [
+      '🐛 Corrigido: quando alguém fixava uma mensagem no WhatsApp, a conversa mostrava só "📌 Mensagem fixada", sem dizer qual. Agora aparece quem fixou e o trecho da mensagem; clicar leva até ela',
+      '📌 A mensagem fixada fica numa faixa no topo da conversa, como no WhatsApp, até ser desafixada ou vencer o prazo escolhido no celular (24 horas, 7 ou 30 dias)',
+      '🐛 Corrigido: desafixar uma mensagem aparecia como "Mensagem fixada". Agora aparece como desafixada e a faixa do topo some',
+    ],
+    usabilidade:
+      'Clique na faixa "Mensagem fixada" no topo da conversa, ou no trecho abaixo do aviso 📌, para ir direto até a mensagem.',
+  },
+  {
     version: '0.0.228',
     date: '2026-10-09 12:00',
     title: 'Faturamento: laudo reassinado no mês certo e Ápice Tele junto da unidade',
