@@ -543,6 +543,20 @@ function VeuDeEnvio({ pct }: { pct?: number }) {
   )
 }
 
+/**
+ * Rótulos que o `evolution-webhook` grava para o evento de fixar/desafixar
+ * (`pinInChatMessage`). Desde 21/10/2026 o aviso também traz QUAL mensagem:
+ * `reply_to_id` aponta a fixada e o `reply_to_snapshot` leva a prévia e o
+ * `expira_em` da fixação (ver `resolverFixacao` no webhook). Os avisos antigos
+ * podem não ter nada disso — a tela precisa funcionar só com o rótulo.
+ */
+const avisoDeFixacao = (content?: string | null): 'fixar' | 'desafixar' | null => {
+  const t = content?.trim()
+  if (t === '[Mensagem fixada]') return 'fixar'
+  if (t === '[Mensagem desafixada]') return 'desafixar'
+  return null
+}
+
 const isTechnicalPlaceholder = (content?: string) => {
   if (!content) return false
   const trimmed = content.trim()
@@ -552,7 +566,7 @@ const isTechnicalPlaceholder = (content?: string) => {
   // para o resto do arquivo que já usa `isTechnicalPlaceholder` como "não é
   // texto de conversa de verdade" (a busca, que não deve achar ocorrência
   // dentro dela, e a prévia de citação).
-  if (trimmed === '[Mensagem fixada]') return true
+  if (avisoDeFixacao(trimmed)) return true
   const normalized = trimmed.toLowerCase().replace(/[\u0080-\u009F]/g, '')
   return (
     ['[audio]', '[áudio]', '[ãudio]', 'audio', 'áudio', 'ãudio', 'mensagem de audio', 'mensagem de áudio'].includes(
@@ -4254,6 +4268,51 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     [mensagensPorId, resolverAutorDaMensagem],
   )
 
+  /**
+   * Prévia da mensagem FIXADA por um aviso de fixação. A original carregada vale
+   * mais que o snapshot (pode ter sido editada ou apagada depois); de anexo sem
+   * legenda mostra o nome do arquivo, que diz mais que "Documento".
+   */
+  const previaDaFixada = useCallback(
+    (aviso: any): string => {
+      const original = aviso.reply_to_id ? mensagensPorId.get(aviso.reply_to_id) : null
+      if (original?.deleted_at || original?.revoked_at) return 'Mensagem apagada'
+      const texto = original && !isTechnicalPlaceholder(original.content) ? original.content?.trim() : ''
+      if (texto) return texto
+      const anexo = Array.isArray(original?.attachments) ? original.attachments[0] : null
+      if (typeof anexo?.name === 'string' && anexo.name) return anexo.name
+      const doSnapshot = aviso.reply_to_snapshot?.content
+      if (doSnapshot) return isTechnicalPlaceholder(doSnapshot) ? 'Voz' : doSnapshot
+      return 'Mensagem fora do histórico carregado'
+    },
+    [mensagensPorId],
+  )
+
+  /**
+   * Fixações em vigor, na ordem em que foram feitas — é o que a faixa do topo
+   * mostra, como no WhatsApp. Percorre os avisos em ordem cronológica: fixar
+   * liga, desafixar desliga a mesma mensagem, e a que passou do `expira_em`
+   * (24h/7d/30d escolhidos no celular) sai sozinha. Só enxerga os avisos das
+   * mensagens carregadas; aviso antigo sem `reply_to_snapshot` não tem alvo e
+   * fica de fora.
+   */
+  const fixacoesAtivas = useMemo(() => {
+    const porAlvo = new Map<string, any>()
+    for (const m of messages as any[]) {
+      if (m.deleted_at) continue
+      const tipo = avisoDeFixacao(m.content)
+      const alvo = tipo ? m.reply_to_id || m.reply_to_snapshot?.id : null
+      if (!alvo) continue
+      porAlvo.delete(alvo)
+      if (tipo === 'fixar') porAlvo.set(alvo, m)
+    }
+    return Array.from(porAlvo.values()).filter((aviso) => {
+      const expira = Date.parse(aviso.reply_to_snapshot?.expira_em ?? '')
+      return !Number.isFinite(expira) || expira > agora
+    })
+  }, [messages, agora])
+  const fixacaoNoTopo = fixacoesAtivas.length > 0 ? fixacoesAtivas[fixacoesAtivas.length - 1] : null
+
   // ——— Ações em lote da barra de seleção ———
   // Cada uma pergunta antes ao `lib/selection-actions` o que da seleção serve
   // para ela. O resultado também alimenta o estado desabilitado dos ícones, para
@@ -4753,27 +4812,51 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
             !previousMsg || getDateKey(previousMsg.created_at) !== getDateKey(msg.created_at)
           // Decide o espaço acima do balão (12px ao trocar de quem fala, 2px
           // dentro da mesma sequência) e onde nasce o rabinho.
-          // A linha de sistema "[Mensagem fixada]" não é balão de ninguém: o que
+          // A linha de sistema de fixar/desafixar não é balão de ninguém: o que
           // vem depois dela começa sequência nova (senão herdaria o autor dela).
           const anteriorEhFixada =
-            !!previousMsg && !previousMsg.deleted_at && previousMsg.content?.trim() === '[Mensagem fixada]'
+            !!previousMsg && !previousMsg.deleted_at && !!avisoDeFixacao(previousMsg.content)
           const inicioDeSequencia = ehInicioDeSequencia(
             msg,
             previousMsg,
             shouldShowDateSeparator || anteriorEhFixada,
             user?.id,
           )
-          // Aviso de "mensagem fixada": linha de sistema centralizada e
-          // discreta, no mesmo estilo do divisor de data — nunca um balão (um
-          // balão aqui sugeriria que alguém "disse" isto).
-          if (!msg.deleted_at && msg.content?.trim() === '[Mensagem fixada]') {
+          // Aviso de fixar/desafixar: linha de sistema centralizada e discreta,
+          // no mesmo estilo do divisor de data — nunca um balão (um balão aqui
+          // sugeriria que alguém "disse" isto). Embaixo, a prévia da mensagem
+          // fixada; com `reply_to_id` ela pula até a original, como a citação.
+          const tipoDeFixacao = msg.deleted_at ? null : avisoDeFixacao(msg.content)
+          if (tipoDeFixacao) {
+            const quemFixou = isMe ? 'Você' : resolverAutorDaMensagem(msg)
+            const verbo = tipoDeFixacao === 'fixar' ? 'fixou' : 'desafixou'
+            const temAlvo = !!msg.reply_to_snapshot
+            const podePular = !!msg.reply_to_id
             return (
               <React.Fragment key={msg.chaveRender ?? msg.id}>
                 {shouldShowDateSeparator && (
                   <SeparadorDeData rotulo={rotuloDaData(msg.created_at)} />
                 )}
-                <div className="my-3 flex justify-center">
-                  <span className="text-[12px] italic text-chat-muted/60">📌 Mensagem fixada</span>
+                <div className="my-3 flex flex-col items-center gap-1 px-4">
+                  <span className="text-[12px] italic text-chat-muted/60">
+                    {temAlvo ? `📌 ${quemFixou} ${verbo} uma mensagem` : `📌 Mensagem ${tipoDeFixacao === 'fixar' ? 'fixada' : 'desafixada'}`}
+                  </span>
+                  {temAlvo && (
+                    <button
+                      type="button"
+                      disabled={!podePular}
+                      onClick={() => pularParaMensagemOriginal(msg.reply_to_id)}
+                      title={podePular ? 'Ir para a mensagem' : undefined}
+                      className={cn(
+                        'max-w-[min(420px,100%)] rounded-md border-l-2 border-chat-text/20 bg-chat-text/[0.04] px-2 py-1 text-left text-[12px] text-chat-muted/80',
+                        podePular
+                          ? 'cursor-pointer transition-colors hover:bg-chat-text/[0.08] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-400/50'
+                          : 'cursor-default',
+                      )}
+                    >
+                      <span className="line-clamp-2 break-words">{previaDaFixada(msg)}</span>
+                    </button>
+                  )}
                 </div>
               </React.Fragment>
             )
@@ -5778,6 +5861,8 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
     reenviarFalha,
     resolverNomeDaMencao,
     nomeDaCitacao,
+    resolverAutorDaMensagem,
+    previaDaFixada,
     onOpenConversationByJid,
     toast,
   ])
@@ -6617,6 +6702,25 @@ export function ChatWindow({ device, contact, conversation, assignment: assignme
             </button>
           </div>
         </div>
+      )}
+      {/* Mensagem fixada, como no WhatsApp: faixa no topo com a mais recente;
+          clicar leva até ela. Ver `fixacoesAtivas`. */}
+      {fixacaoNoTopo && (
+        <button
+          type="button"
+          onClick={() => pularParaMensagemOriginal(fixacaoNoTopo.reply_to_id)}
+          disabled={!fixacaoNoTopo.reply_to_id}
+          title={fixacaoNoTopo.reply_to_id ? 'Ir para a mensagem fixada' : undefined}
+          className="flex w-full items-center gap-2 px-4 py-1.5 text-left bg-chat-header border-b border-chat-border flex-shrink-0 enabled:hover:bg-chat-hover transition-colors"
+        >
+          <Pin className="h-3.5 w-3.5 shrink-0 text-chat-muted/70" />
+          <div className="min-w-0 flex-1">
+            <div className="text-[11px] font-semibold text-chat-muted/90">
+              {fixacoesAtivas.length > 1 ? `${fixacoesAtivas.length} mensagens fixadas` : 'Mensagem fixada'}
+            </div>
+            <div className="truncate text-[12px] text-chat-muted/70">{previaDaFixada(fixacaoNoTopo)}</div>
+          </div>
+        </button>
       )}
       <div className="relative flex-1 overflow-hidden bg-chat-conversation">
         <div className="pointer-events-none absolute inset-0 z-0 chat-conversation-bg-layer" />
