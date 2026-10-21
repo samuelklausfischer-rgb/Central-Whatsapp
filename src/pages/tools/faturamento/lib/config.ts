@@ -99,25 +99,26 @@ export function resumoPreco(u: { n_itens: number }, itens: PrecoVigente[]): stri
 }
 
 export const ROTULO_JANELA: Record<string, string> = {
-  mes: 'mês calendário', ciclo_27_26: 'ciclo do dia 27 ao dia 26', quinzena: 'quinzenal (dias 1–15 e 16–fim do mês)',
+  mes: 'mês calendário', ciclo_27_26: 'ciclo do dia 27 do mês anterior ao dia 26 (FHEMIG)', quinzena: 'quinzenal (dias 1–15 e 16–fim do mês)',
 }
 
-/** Opções da tela da unidade: mês, quinzena e os dias de corte 2–28 (o 27 usa o nome antigo ciclo_27_26). */
+/**
+ * Opções da tela da unidade: mês, quinzena, os dias de corte 2–28 (do dia NN da competência ao NN−1 do mês
+ * seguinte) e o ciclo da FHEMIG, que é o único que vem do mês anterior.
+ */
 export const OPCOES_JANELA: { valor: string; rotulo: string }[] = [
   { valor: 'mes', rotulo: ROTULO_JANELA.mes },
   { valor: 'quinzena', rotulo: ROTULO_JANELA.quinzena },
-  ...Array.from({ length: 27 }, (_, i) => i + 2).map(d => ({
-    valor: d === 27 ? 'ciclo_27_26' : `corte_${d}`,
-    rotulo: `corte: do dia ${d} do mês anterior ao dia ${d - 1}`,
-  })),
+  ...Array.from({ length: 27 }, (_, i) => i + 2).map(d => ({ valor: `corte_${d}`, rotulo: `corte: ${rotuloJanela(`corte_${d}`)}` })),
+  { valor: 'ciclo_27_26', rotulo: ROTULO_JANELA.ciclo_27_26 },
 ]
 
-/** Texto da janela, incluindo os cortes 'corte_NN' (do dia NN do mês anterior ao dia NN−1). */
+/** Texto da janela, incluindo os cortes 'corte_NN' (do dia NN da competência ao dia NN−1 do mês seguinte). */
 export function rotuloJanela(janela: string | null | undefined): string {
   const j = janela ?? 'mes'
   if (ROTULO_JANELA[j]) return ROTULO_JANELA[j]
   const d = diaDeCorte(j)
-  return d ? `do dia ${d} do mês anterior ao dia ${d - 1}` : j
+  return d ? `do dia ${d} do mês ao dia ${d - 1} do mês seguinte` : j
 }
 
 export function etiquetasRegras(r: Regras | undefined): string[] {

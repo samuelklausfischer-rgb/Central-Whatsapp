@@ -72,8 +72,10 @@ export interface ContextoUnidade {
 /**
  * Período de faturamento da unidade:
  * - 'mes': mês fechado; 'quinzena': dias 1–15 e 16–fim;
- * - 'corte_NN': do dia NN do mês anterior ao dia NN−1 da competência (ex.: corte_21 = 21/08 a 20/09);
- * - 'ciclo_27_26': nome antigo de corte_27 (FHEMIG), mantido para não quebrar o cadastro.
+ * - 'corte_NN': do dia NN da competência ao dia NN−1 do mês SEGUINTE (ex.: setembro, corte_21 = 21/09 a 20/10).
+ *   É como o financeiro faz: na pasta de junho estão "LEBON REGIS 21.06 A 20.07", "CUJUBIM 12.06 Á 11.07" e
+ *   "Santarém 14.06 á 13.07" (planilhas à mão, conferido em 21/10/2026);
+ * - 'ciclo_27_26': do dia 27 do mês ANTERIOR ao dia 26 da competência (FHEMIG: julho = 27/06 a 26/07).
  */
 export type Janela = 'mes' | 'quinzena' | 'ciclo_27_26' | `corte_${number}`
 
@@ -198,8 +200,10 @@ export function periodos(competencia: string, janela: ContextoUnidade['janela'])
   const m = m1 - 1
   const corte = diaDeCorte(janela)
   if (corte) {
-    const inicio = new Date(Date.UTC(a, m - 1, corte))
-    const fim = fimDoDia(a, m, corte - 1)
+    // corte_NN vai para a frente; só o ciclo da FHEMIG (ciclo_27_26) vem do mês anterior
+    const m0 = janela === 'ciclo_27_26' ? m - 1 : m
+    const inicio = new Date(Date.UTC(a, m0, corte))
+    const fim = fimDoDia(a, m0 + 1, corte - 1)
     return [{ rotulo: '', inicio, fim, dataPreco: iso(fim) }]
   }
   if (janela === 'quinzena') {

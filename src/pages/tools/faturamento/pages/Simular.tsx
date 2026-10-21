@@ -64,9 +64,9 @@ export default function Simular() {
   const mesSeguinteISO = (c: string) => new Date(Date.UTC(+c.slice(0, 4), +c.slice(5, 7), 1)).toISOString().slice(0, 10)
   const ddmm = (isoData: string) => `${isoData.slice(8, 10)}/${isoData.slice(5, 7)}`
   // build mínimo da função fat-simular que lê o acervo (pedido com do_acervo)
-  const FUNCAO_MINIMA = 'fat-simular-2026-10-09d'
+  const FUNCAO_MINIMA = 'fat-simular-2026-10-21a' // corte_NN para a frente
 
-  /** Só guarda os exames no acervo (ex.: subir o Bruto do mês anterior uma vez, para os cortes). */
+  /** Só guarda os exames no acervo (ex.: subir o Bruto do mês anterior ou do seguinte uma vez, para os cortes). */
   async function soGuardar() {
     if (!arquivos.length) { setErro('Escolha o(s) arquivo(s) Bruto (.xlsx).'); return }
     setErro(null); setSoGuardado(null)
@@ -96,19 +96,29 @@ export default function Simular() {
       setResumoLeitura({ exames: linhas.length, nomes: nomes.size, arquivos: lidos })
 
       // Acervo: guarda o envio e calcula lendo do acervo — cada exame entra no mês do seu
-      // laudo (ou do exame), venha de qual Bruto vier; unidades com dia de corte pegam os
-      // dias do mês anterior que já estavam guardados.
+      // laudo (ou do exame), venha de qual Bruto vier; unidades com dia de corte pegam os dias
+      // fora do mês que já estavam guardados.
       setFase('guardando')
       await guardarNoAcervo(linhas, arquivos.map(f => f.name).join(' + '), (f, t) => setGuardando({ feitos: f, total: t }))
+      // Dia de corte: o período sai do mês da competência — corte_NN vai até o dia NN−1 do mês SEGUINTE (setembro de
+      // Lebon Régis = 21/09 a 20/10) e o ciclo da FHEMIG vem do dia 27 do mês ANTERIOR. Confere se o acervo tem esses dias.
       const corte = nomesComCorte([...nomes.keys()], await janelasPorNome(), competencia)
+      const hoje = new Date().toISOString().slice(0, 10)
       if (corte.length) {
-        const fimAnt = fimMesAnterior(competencia)
         const faltando: string[] = []
-        for (const ini of [...new Set(corte.map(c => c.inicio))].sort()) {
-          if (ini > fimAnt || await acervoCobre(ini, fimAnt)) continue
-          for (const c of corte.filter(x => x.inicio === ini)) faltando.push(`• ${c.nome}: precisa de ${ddmm(ini)} a ${ddmm(fimAnt)}`)
+        const trechos = new Map<string, string[]>() // "de|ate" (dias fora do mês da competência) -> nomes
+        const juntar = (de: string, ate: string, nome: string) => trechos.set(`${de}|${ate}`, [...(trechos.get(`${de}|${ate}`) ?? []), nome])
+        for (const c of corte) {
+          if (c.inicio < `${competencia}-01`) juntar(c.inicio, fimMesAnterior(competencia), c.nome)
+          if (c.fim > fimDoMes(competencia)) juntar(mesSeguinteISO(competencia), c.fim, c.nome)
         }
-        if (faltando.length && !confirm(`Estas unidades fecham com dia de corte e o acervo ainda não tem os dias do mês anterior:\n\n${faltando.join('\n')}\n\nSuba antes o Bruto do mês anterior com "Só guardar no acervo". Gerar mesmo assim (essas unidades sairão com o período incompleto)?`)) {
+        for (const [k, quem] of [...trechos].sort()) {
+          const [de, ate] = k.split('|')
+          if (ate >= hoje) { for (const n of quem) faltando.push(`• ${n}: o período só fecha em ${ddmm(ate)} (ainda incompleto)`); continue }
+          if (await acervoCobre(de, ate)) continue
+          for (const n of quem) faltando.push(`• ${n}: precisa de ${ddmm(de)} a ${ddmm(ate)}`)
+        }
+        if (faltando.length && !confirm(`Estas unidades fecham com dia de corte e o acervo ainda não tem todos os dias do período:\n\n${faltando.join('\n')}\n\nSuba antes o Bruto que falta com "Só guardar no acervo". Gerar mesmo assim (essas unidades sairão com o período incompleto)?`)) {
           setFase('parado'); setGuardando(null); return
         }
       }
@@ -120,8 +130,10 @@ export default function Simular() {
         setFase('parado'); setGuardando(null); return
       }
       // quem calcular: os nomes do arquivo + os que têm exame guardado na competência
-      // (ex.: laudo de setembro que só veio no Bruto de agosto)
-      const noAcervo = await nomesNoAcervo(`${competencia}-01`, fimDoMes(competencia))
+      // (ex.: laudo de setembro que só veio no Bruto de agosto) ou nos dias de corte fora dela
+      const buscaDe = [`${competencia}-01`, ...corte.map(c => c.inicio)].sort()[0]
+      const buscaAte = [fimDoMes(competencia), ...corte.map(c => c.fim)].sort().at(-1)!
+      const noAcervo = await nomesNoAcervo(buscaDe, buscaAte)
       const nomesCalc = [...new Set([...nomes.keys(), ...noAcervo.keys()])]
       setGuardando(null)
       setTotal(nomesCalc.length)

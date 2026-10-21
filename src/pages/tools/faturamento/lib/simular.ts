@@ -84,8 +84,7 @@ export async function xlsxDoRelatorio(simulacaoId: string, competencia: string, 
     valor_unitario: r.valor_unitario == null ? null : Number(r.valor_unitario),
   })))
   const numerico = exames.map(e => ({ ...e, quantidade: Number(e.quantidade), valor_unitario: Number(e.valor_unitario), valor_total: Number(e.valor_total) }))
-  const instrucoes = rel.unidade_id ? (await carregarInstrucoesNF()).get(rel.unidade_id) ?? [] : []
-  return faturaUnidadeXlsx(rel, competencia, resumo, numerico, instrucoes)
+  return faturaUnidadeXlsx(rel, competencia, resumo, numerico)
 }
 
 // Instruções de emissão de NF por unidade (tabela instrucao_nf). Mudam pouco: uma leitura
