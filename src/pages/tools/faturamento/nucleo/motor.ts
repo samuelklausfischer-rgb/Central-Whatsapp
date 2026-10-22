@@ -275,8 +275,17 @@ export function escolherItem(linha: LinhaBruto, candidatos: ItemPreco[], urgente
   if (!candidatos.length) return null
   if (precoUnico && candidatos.length === 1) return candidatos[0]
   const mod = normModalidade(linha.modalidade)
-  const porMod = candidatos.filter(c => !c.modalidade || c.modalidade === mod)
+  let porMod = candidatos.filter(c => !c.modalidade || c.modalidade === mod)
   if (!porMod.length) return null // nunca empresta preço de outra modalidade (sem item → pendência sem_preco)
+  // contrato que cobra o exame SEM laudo e o COM laudo por preços diferentes (Nova Mutum: "Radiografia sem laudo"
+  // R$ 32,30 × "Radiografia com laudo" R$ 32,31): o item vai pelo laudo do exame (Assinado/Reassinado = com laudo).
+  // Só liga quando há item "sem laudo"; nome com "com laudo" sozinho (Cuiabá, Ipatinga) não muda nada.
+  const tipoLaudo = (c: ItemPreco) => /\bSEM LAUDO\b/.test(normNome(c.exame)) ? 'sem' : /\bCOM LAUDO\b/.test(normNome(c.exame)) ? 'com' : null
+  if (porMod.some(c => tipoLaudo(c) === 'sem')) {
+    const temLaudo = ['ASSINADO', 'REASSINADO'].includes(normNome(linha.status ?? ''))
+    const doLaudo = porMod.filter(c => tipoLaudo(c) === (temLaudo ? 'com' : 'sem') || tipoLaudo(c) === null)
+    if (doLaudo.length) porMod = doLaudo
+  }
   if (porMod.length === 1) return porMod[0]
   const papelDesejado: Papel = urgente ? 'urgencia' : 'normal'
   const te = tokens(linha.estudo_descricao ?? '')
