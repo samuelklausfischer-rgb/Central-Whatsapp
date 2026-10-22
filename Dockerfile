@@ -19,6 +19,9 @@ ARG VITE_LICITACAO_APP_URL="https://frontends-front-licitacao.srofjl.easypanel.h
 ARG VITE_GESTAO_MEDICA_APP_URL="https://frontends-gestao-medica.srofjl.easypanel.host"
 ARG VITE_PROPOSTA_APP_URL="https://frontends-propostacomercial.srofjl.easypanel.host"
 ARG VITE_CONCILIACAO_APP_URL="https://frontends-conciliacao.srofjl.easypanel.host"
+# Painel "Lançar no Omie" da ferramenta Rateio Mobilemed: "1" mostra, qualquer outro valor esconde.
+ARG VITE_RATEIO_OMIE="0"
+ENV VITE_RATEIO_OMIE=$VITE_RATEIO_OMIE
 ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
 ENV VITE_SUPABASE_PUBLISHABLE_KEY=$VITE_SUPABASE_PUBLISHABLE_KEY
 ENV VITE_FINANCEIRO_SUPABASE_URL=$VITE_FINANCEIRO_SUPABASE_URL
