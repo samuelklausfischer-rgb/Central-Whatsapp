@@ -9,6 +9,7 @@ import { useToast } from '@/hooks/use-toast'
 import { FinanceiroAuthProvider, useFinanceiroAuth } from '@/contexts/financeiro-auth-context'
 import { useRateioUpload, useRateioHistorico } from '@/hooks/use-rateio'
 import { RateioHistoricoPanel } from '@/components/rateio/RateioHistoricoPanel'
+import { RateioPendencias } from '@/components/rateio/RateioPendencias'
 import { fmt, fmtNum, valorNumerico, baixarBase64 } from '@/lib/rateio/format'
 import { deleteRateioExecucao, type RateioEmpresa } from '@/services/rateio/rateio-service'
 
@@ -338,20 +339,7 @@ function RateioInner() {
               )}
             </GlassCard>
 
-            {pendencias.length > 0 && (
-              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-5">
-                <h3 className="mb-2 text-sm font-semibold text-amber-600">
-                  ⚠ {pendencias.length} pendência{pendencias.length > 1 ? 's' : ''} — revise o cadastro
-                </h3>
-                <ul className="max-h-40 space-y-1 overflow-y-auto text-xs text-amber-600/90">
-                  {pendencias.map((p, i) => (
-                    <li key={i}>
-                      • <span className="font-medium">{p.tipo}</span>: {p.referencia}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            <RateioPendencias pendencias={pendencias} resumo={r} />
 
             <Button
               variant="outline"

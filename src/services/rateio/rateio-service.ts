@@ -20,11 +20,21 @@ export interface RateioResumo {
   adicionais?: RateioAdicional[]
   adicional_total?: number
   adicional_n_unidades?: number
+  // Conferência do portal: quantos a planilha da Mobilemed cobra x quantas unidades
+  // receberam portal (portal_qtde_cadastro) e de onde veio essa lista
+  // ('LISTA_MOBILEMED' = aba PORTAL, 'CADASTRO' = rateio_unidades).
+  portal_valor_unitario?: number
+  portal_qtde_planilha?: number | null
+  portal_total_planilha?: number
+  portal_qtde_cadastro?: number
+  portal_fonte?: string
 }
 
 export interface RateioPendencia {
   tipo: string
   referencia: string
+  // Explicação do motor (n8n): o que aconteceu e como corrigir.
+  descricao?: string
 }
 
 export interface RateioResultado {
