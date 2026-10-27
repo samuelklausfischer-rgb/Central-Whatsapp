@@ -1,5 +1,6 @@
 // Relatório de UMA unidade (ExcelJS, roda no navegador), no formato que o financeiro usa (pedido de 13/10/2026):
 // uma aba só, com a lista de todos os exames e, no fim, a tabela MODALIDADE · QUANTIDADE · VALOR com o TOTAL.
+// Desde 27/10/2026 a tabela separa urgência e rotina ("CT - URGÊNCIA", "CT - ROTINA"; ver separarUrgenciaRotina).
 // Os valores fixos (mensalidade, locação, responsável técnico…) entram como linhas da tabela.
 // As instruções de emissão da nota ficam na aba "Agenda de NF" do Excel consolidado.
 import { CABECALHO, type ExameLinha } from './excel'
@@ -59,7 +60,7 @@ export async function faturaUnidadeXlsx(_rel: Relatorio, _competencia: string, r
   })
   ws.getRow(r).height = 22
   r++
-  // o resumo já vem somado por modalidade (juntarResumo); os fixos vêm depois, com quantidade 1
+  // o resumo já vem somado por modalidade × urgência/rotina (separarUrgenciaRotina); os fixos vêm depois, com quantidade 1
   for (const l of resumo) {
     ;[l.rotulo, l.quantidade, l.total].forEach((v, i) => {
       const x = ws.getCell(r, i + 1)

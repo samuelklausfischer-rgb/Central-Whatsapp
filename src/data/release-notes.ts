@@ -34,6 +34,16 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.230',
+    date: '2026-10-27 12:00',
+    title: 'Faturamento: urgência e rotina separadas no relatório da unidade',
+    details: [
+      '🧾 A tabela do fim do relatório de cada unidade agora tem uma linha por modalidade e prioridade ("CT - URGÊNCIA", "CT - ROTINA"), cada uma com a sua quantidade e o seu valor',
+      '📋 Conta como urgência a prioridade listada na configuração (padrão: URGENCIA, EMERGENCIA, PLANTAO); o resto é rotina. Os valores fixos e o TOTAL continuam iguais',
+    ],
+    usabilidade: 'Gere o ZIP "Faturas por unidade" como antes e role até o fim da lista de exames: a modalidade aparece em duas linhas, urgência e rotina.',
+  },
+  {
     version: '0.0.229',
     date: '2026-10-13 12:00',
     title: 'Faturamento: relatório de cada unidade numa aba só',
