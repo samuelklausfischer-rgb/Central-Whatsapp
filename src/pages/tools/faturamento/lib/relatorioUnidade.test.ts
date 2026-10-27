@@ -1,11 +1,12 @@
-// Tabela do fim do relatório da unidade com urgência e rotina separadas (pedido de 27/10/2026).
+// Tabela do fim do relatório da unidade com urgência e rotina separadas (pedido de 27/10/2026) — só nas pastas da
+// config separar_urgencia_pastas (hoje Santarém); as outras unidades ficam exatamente como antes.
 // Rodar: bun test src/pages/tools/faturamento   (o projeto não tem runner de teste; o bun lê o TS direto)
 // Com FAT_EXEMPLO=<pasta> grava um Excel de exemplo (dados fictícios) nessa pasta.
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { writeFileSync } from 'node:fs'
 import { faturaUnidadeXlsx } from './faturaUnidadeXlsx'
-import { juntarResumo, lerPrioridadesUrgencia, separarUrgenciaRotina, URGENCIA_PADRAO, type ResumoLinhaRel } from './relatorioUnidade'
+import { juntarResumo, lerPrioridadesUrgencia, lerRegraUrgencia, resumoDoRelatorio, separaUrgencia, separarUrgenciaRotina, URGENCIA_PADRAO, type ResumoLinhaRel } from './relatorioUnidade'
 import type { ExameLinha } from './excel'
 
 const exame = (modalidade: string, prioridade: string, valor: number, quantidade = 1, nome = 'SANTAREM - PA'): ExameLinha =>
@@ -24,6 +25,8 @@ const resumoMotor = juntarResumo([
   { rotulo: 'CT', quantidade: 41, valor_unitario: 30.22, total: 41 * 30.22, fixo: false },
   { rotulo: 'RESPONSÁVEL TÉCNICO', quantidade: 1, valor_unitario: 1602.96, total: 1602.96, fixo: true },
 ])
+// config como deve ficar em produção (chave nova separar_urgencia_pastas)
+const regra = lerRegraUrgencia({ prioridades_urgencia: 'URGENCIA,EMERGENCIA,PLANTAO', separar_urgencia_pastas: 'SANTAREM - PA' })
 const soma = (xs: ResumoLinhaRel[]) => Math.round(xs.reduce((s, x) => s + x.total, 0) * 100) / 100
 
 describe('separarUrgenciaRotina', () => {
@@ -83,17 +86,11 @@ describe('separarUrgenciaRotina', () => {
     assert.equal(separarUrgenciaRotina(resumo, [exame('CR', 'URGENCIA', 10)], URGENCIA_PADRAO), resumo)
   })
 
-  it('o Excel mostra MOD - URGÊNCIA e MOD - ROTINA na tabela do fim, com o TOTAL de antes', { timeout: 60_000 }, async () => {
-    const ExcelJS = (await import('exceljs')).default
-    const resumo = separarUrgenciaRotina(resumoMotor, santarem, URGENCIA_PADRAO)
+  it('o Excel de Santarém mostra MOD - URGÊNCIA e MOD - ROTINA na tabela do fim, com o TOTAL de antes', { timeout: 60_000 }, async () => {
+    const resumo = resumoDoRelatorio({ pasta: 'SANTAREM - PA' }, resumoMotor, santarem, regra)
     const bytes = await faturaUnidadeXlsx({} as never, '2026-06', resumo, santarem)
     if (process.env.FAT_EXEMPLO) writeFileSync(`${process.env.FAT_EXEMPLO}/EXEMPLO SANTAREM - PA 14.06 A 13.07.2026.xlsx`, bytes)
-    const wb = new ExcelJS.Workbook()
-    await wb.xlsx.load(bytes as unknown as ArrayBuffer)
-    const ws = wb.getWorksheet('Relatório')!
-    const fim: unknown[][] = []
-    for (let r = santarem.length + 3; r <= ws.rowCount; r++) fim.push([1, 2, 3].map(c => ws.getCell(r, c).value))
-    assert.deepEqual(fim, [
+    assert.deepEqual(await tabelaDoFim(bytes, santarem.length), [
       ['MODALIDADE', 'QUANTIDADE', 'VALOR'],
       ['CT - ROTINA', 44, 1192.4],
       ['CT - URGÊNCIA', 1241, 37503.02],
@@ -101,4 +98,52 @@ describe('separarUrgenciaRotina', () => {
       ['TOTAL', 1286, 40298.38],
     ])
   })
+
+  it('o Excel de outra unidade sai igual ao de antes (só por modalidade)', { timeout: 60_000 }, async () => {
+    const exames = [exame('CR', 'ROTINA', 12.5, 1, 'OUTRA'), exame('CR', 'URGENCIA', 15, 1, 'OUTRA'), exame('CT', 'URGENCIA', 90, 1, 'OUTRA')]
+    const resumo = juntarResumo([
+      { rotulo: 'CR', quantidade: 2, valor_unitario: null, total: 27.5, fixo: false },
+      { rotulo: 'CT', quantidade: 1, valor_unitario: 90, total: 90, fixo: false },
+      { rotulo: 'LOCAÇÃO', quantidade: 1, valor_unitario: 500, total: 500, fixo: true },
+    ])
+    const antes = await faturaUnidadeXlsx({} as never, '2026-06', resumo, exames)
+    const agora = await faturaUnidadeXlsx({} as never, '2026-06', resumoDoRelatorio({ pasta: 'FAEPU - MG' }, resumo, exames, regra), exames)
+    const esperado = [
+      ['MODALIDADE', 'QUANTIDADE', 'VALOR'], ['CR', 2, 27.5], ['CT', 1, 90], ['LOCAÇÃO', 1, 500], ['TOTAL', 4, 617.5],
+    ]
+    assert.deepEqual(await tabelaDoFim(antes, exames.length), esperado)
+    assert.deepEqual(await tabelaDoFim(agora, exames.length), esperado)
+  })
 })
+
+describe('resumoDoRelatorio (só as pastas de separar_urgencia_pastas separam)', () => {
+  it('Santarém separa; as outras unidades recebem o resumo exatamente como veio', () => {
+    assert.deepEqual(resumoDoRelatorio({ pasta: 'SANTAREM - PA' }, resumoMotor, santarem, regra).map(l => l.rotulo),
+      ['CT - ROTINA', 'CT - URGÊNCIA', 'RESPONSÁVEL TÉCNICO'])
+    for (const pasta of ['FAEPU - MG', 'SANTAREM - PA - HOSPITAL', null]) {
+      assert.equal(resumoDoRelatorio({ pasta }, resumoMotor, santarem, regra), resumoMotor, String(pasta))
+    }
+  })
+
+  it('sem a chave na config ninguém separa (inclusive Santarém); pasta comparada sem acento e sem caixa', () => {
+    const semChave = lerRegraUrgencia({ prioridades_urgencia: 'URGENCIA' })
+    assert.deepEqual(semChave.pastas, [])
+    assert.equal(resumoDoRelatorio({ pasta: 'SANTAREM - PA' }, resumoMotor, santarem, semChave), resumoMotor)
+    const lista = lerRegraUrgencia({ separar_urgencia_pastas: ' Santarém - PA ,  OUTRA - UF ' })
+    assert.deepEqual(lista, { prioridades: URGENCIA_PADRAO, pastas: ['Santarém - PA', 'OUTRA - UF'] })
+    assert.equal(separaUrgencia({ pasta: 'SANTAREM - PA' }, lista), true)
+    assert.equal(separaUrgencia({ pasta: 'outra - uf' }, lista), true)
+    assert.equal(separaUrgencia({ pasta: 'TERCEIRA - UF' }, lista), false)
+  })
+})
+
+/** Linhas da tabela do fim (MODALIDADE · QUANTIDADE · VALOR … TOTAL) do Excel gerado. */
+async function tabelaDoFim(bytes: Uint8Array, nExames: number): Promise<unknown[][]> {
+  const ExcelJS = (await import('exceljs')).default
+  const wb = new ExcelJS.Workbook()
+  await wb.xlsx.load(bytes as unknown as ArrayBuffer)
+  const ws = wb.getWorksheet('Relatório')!
+  const fim: unknown[][] = []
+  for (let r = nExames + 3; r <= ws.rowCount; r++) fim.push([1, 2, 3].map(c => ws.getCell(r, c).value))
+  return fim
+}

@@ -110,10 +110,32 @@ export function lerPrioridadesUrgencia(valor: string | null | undefined): string
   return xs.length ? xs : URGENCIA_PADRAO
 }
 
+/**
+ * Quais relatórios separam urgência e rotina na tabela do fim: as pastas da chave separar_urgencia_pastas da config
+ * ("SANTAREM - PA, OUTRA - UF"), comparadas sem acento e sem caixa. Sem a chave, nenhum separa (o padrão é por modalidade).
+ */
+export interface RegraUrgencia { prioridades: string[]; pastas: string[] }
+
+export function lerRegraUrgencia(cfg: Record<string, string | null | undefined>): RegraUrgencia {
+  return {
+    prioridades: lerPrioridadesUrgencia(cfg.prioridades_urgencia),
+    pastas: (cfg.separar_urgencia_pastas ?? '').split(',').map(s => s.trim()).filter(Boolean),
+  }
+}
+
+export const separaUrgencia = (rel: Pick<Relatorio, 'pasta'>, regra: RegraUrgencia): boolean =>
+  !!rel.pasta && regra.pastas.some(p => normNome(p) === normNome(rel.pasta!))
+
+/** Resumo da tabela do fim do relatório: separado por urgência/rotina só nas pastas da regra; nas outras, como veio. */
+export function resumoDoRelatorio(rel: Pick<Relatorio, 'pasta'>, resumo: ResumoLinhaRel[], exames: ExameLinha[], regra: RegraUrgencia): ResumoLinhaRel[] {
+  return separaUrgencia(rel, regra) ? separarUrgenciaRotina(resumo, exames, regra.prioridades) : resumo
+}
+
 const centavos = (v: number) => Math.round(v * 100)
 
 /**
- * Tabela do fim do relatório com urgência e rotina separadas (pedido de 27/10/2026): uma linha por modalidade ×
+ * Tabela do fim com urgência e rotina separadas (pedido de 27/10/2026, só para as pastas da regra — hoje Santarém;
+ * ver resumoDoRelatorio): uma linha por modalidade ×
  * prioridade ("CT - ROTINA", "CT - URGÊNCIA"), somada dos exames do próprio relatório. É urgência a prioridade que
  * está em prioridades_urgencia (mesma comparação do motor, sem acento e sem caixa); o resto é rotina. Só aparecem as
  * classes que existem no período. Os fixos (RT, mensalidade, locação…) seguem como vieram, depois dos exames.

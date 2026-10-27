@@ -36,12 +36,12 @@ export const releaseNotes: ReleaseNote[] = [
   {
     version: '0.0.230',
     date: '2026-10-27 12:00',
-    title: 'Faturamento: urgência e rotina separadas no relatório da unidade',
+    title: 'Faturamento: urgência e rotina separadas no relatório de Santarém',
     details: [
-      '🧾 A tabela do fim do relatório de cada unidade agora tem uma linha por modalidade e prioridade ("CT - URGÊNCIA", "CT - ROTINA"), cada uma com a sua quantidade e o seu valor',
-      '📋 Conta como urgência a prioridade listada na configuração (padrão: URGENCIA, EMERGENCIA, PLANTAO); o resto é rotina. Os valores fixos e o TOTAL continuam iguais',
+      '🧾 No relatório de Santarém, a tabela do fim agora tem uma linha por modalidade e prioridade ("CT - URGÊNCIA", "CT - ROTINA"), cada uma com a sua quantidade e o seu valor. As outras unidades continuam só por modalidade',
+      '📋 Conta como urgência a prioridade listada na configuração (padrão: URGENCIA, EMERGENCIA, PLANTAO); o resto é rotina. Os valores fixos e o TOTAL continuam iguais. As unidades que separam ficam na configuração separar_urgencia_pastas',
     ],
-    usabilidade: 'Gere o ZIP "Faturas por unidade" como antes e role até o fim da lista de exames: a modalidade aparece em duas linhas, urgência e rotina.',
+    usabilidade: 'Gere o ZIP "Faturas por unidade" como antes e abra o arquivo de Santarém: no fim da lista de exames, a modalidade aparece em duas linhas, urgência e rotina.',
   },
   {
     version: '0.0.229',
