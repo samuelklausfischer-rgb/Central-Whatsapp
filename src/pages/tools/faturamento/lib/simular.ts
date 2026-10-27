@@ -10,7 +10,7 @@ import type { InstrucaoNF, RespostaSimular, Simulacao, SimulacaoNome, SimulacaoP
 import { agregar, type ResumoLinha, type UnidadeEntrada } from './consolidado'
 import { gerarConsolidado, nomeArquivoConsolidado } from './consolidadoXlsx'
 import { normNome } from '../nucleo/motor'
-import { faturaUnidadeXlsx, grupoDoNome, grupoDoRelatorioPorNome, juntarResumo, type InfoAlias, type Relatorio } from './relatorioUnidade'
+import { faturaUnidadeXlsx, grupoDoNome, grupoDoRelatorioPorNome, juntarResumo, lerRegraUrgencia, resumoDoRelatorio, type InfoAlias, type RegraUrgencia, type Relatorio } from './relatorioUnidade'
 
 export type ModoCalculo = 'servidor' | 'local'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -84,7 +84,22 @@ export async function xlsxDoRelatorio(simulacaoId: string, competencia: string, 
     valor_unitario: r.valor_unitario == null ? null : Number(r.valor_unitario),
   })))
   const numerico = exames.map(e => ({ ...e, quantidade: Number(e.quantidade), valor_unitario: Number(e.valor_unitario), valor_total: Number(e.valor_total) }))
-  return faturaUnidadeXlsx(rel, competencia, resumo, numerico)
+  // tabela do fim com urgência e rotina separadas só nas pastas da config separar_urgencia_pastas (os fixos e o TOTAL não mudam)
+  return faturaUnidadeXlsx(rel, competencia, resumoDoRelatorio(rel, resumo, numerico, await carregarRegraUrgencia()), numerico)
+}
+
+// Regra de urgência (config prioridades_urgencia e separar_urgencia_pastas): uma leitura serve para o ZIP inteiro, vale por 5 minutos.
+let cacheUrg: { em: number; dados: Promise<RegraUrgencia> } | null = null
+export function carregarRegraUrgencia(): Promise<RegraUrgencia> {
+  if (cacheUrg && Date.now() - cacheUrg.em < 5 * 60_000) return cacheUrg.dados
+  const dados = Promise.resolve(db.from('config').select('chave, valor').in('chave', ['prioridades_urgencia', 'separar_urgencia_pastas']))
+    .then(({ data, error }) => {
+      if (error) throw new Error(error.message)
+      return lerRegraUrgencia(Object.fromEntries(((data ?? []) as { chave: string; valor: string }[]).map(c => [c.chave, c.valor])))
+    })
+    .catch(e => { cacheUrg = null; throw e })
+  cacheUrg = { em: Date.now(), dados }
+  return dados
 }
 
 // Instruções de emissão de NF por unidade (tabela instrucao_nf). Mudam pouco: uma leitura

@@ -4,6 +4,7 @@
 // um arquivo por grupo da Mobilemed. Os 4 grupos (PRN, PRN Apice Tele, Medimagem, Medimagem Apice Tele)
 // seguem valendo para saber de onde veio cada nome e para separar as pastas do ZIP.
 import { normNome } from '../nucleo/motor'
+import type { ExameLinha } from './excel'
 
 /** Os 4 grupos, na ordem de apresentação. */
 export const GRUPOS = ['PRN', 'PRN Apice Tele', 'Medimagem', 'Medimagem Apice Tele'] as const
@@ -98,6 +99,75 @@ export function juntarResumo(partes: ResumoLinhaRel[]): ResumoLinhaRel[] {
   return [...m.values()]
     .map(({ vs, ...g }) => ({ ...g, valor_unitario: vs.size === 1 ? [...vs][0] : null }))
     .sort((a, b) => Number(a.fixo) - Number(b.fixo) || a.rotulo.localeCompare(b.rotulo))
+}
+
+/** Prioridades tratadas como urgência quando a config não diz nada (o mesmo padrão do motor). */
+export const URGENCIA_PADRAO = ['URGENCIA', 'EMERGENCIA', 'PLANTAO']
+
+/** Lê a chave prioridades_urgencia da config ("URGENCIA, EMERGENCIA, PLANTAO"); vazia → padrão. */
+export function lerPrioridadesUrgencia(valor: string | null | undefined): string[] {
+  const xs = (valor ?? '').split(',').map(s => s.trim()).filter(Boolean)
+  return xs.length ? xs : URGENCIA_PADRAO
+}
+
+/**
+ * Quais relatórios separam urgência e rotina na tabela do fim: as pastas da chave separar_urgencia_pastas da config
+ * ("SANTAREM - PA, OUTRA - UF"), comparadas sem acento e sem caixa. Sem a chave, nenhum separa (o padrão é por modalidade).
+ */
+export interface RegraUrgencia { prioridades: string[]; pastas: string[] }
+
+export function lerRegraUrgencia(cfg: Record<string, string | null | undefined>): RegraUrgencia {
+  return {
+    prioridades: lerPrioridadesUrgencia(cfg.prioridades_urgencia),
+    pastas: (cfg.separar_urgencia_pastas ?? '').split(',').map(s => s.trim()).filter(Boolean),
+  }
+}
+
+export const separaUrgencia = (rel: Pick<Relatorio, 'pasta'>, regra: RegraUrgencia): boolean =>
+  !!rel.pasta && regra.pastas.some(p => normNome(p) === normNome(rel.pasta!))
+
+/** Resumo da tabela do fim do relatório: separado por urgência/rotina só nas pastas da regra; nas outras, como veio. */
+export function resumoDoRelatorio(rel: Pick<Relatorio, 'pasta'>, resumo: ResumoLinhaRel[], exames: ExameLinha[], regra: RegraUrgencia): ResumoLinhaRel[] {
+  return separaUrgencia(rel, regra) ? separarUrgenciaRotina(resumo, exames, regra.prioridades) : resumo
+}
+
+const centavos = (v: number) => Math.round(v * 100)
+
+/**
+ * Tabela do fim com urgência e rotina separadas (pedido de 27/10/2026, só para as pastas da regra — hoje Santarém;
+ * ver resumoDoRelatorio): uma linha por modalidade ×
+ * prioridade ("CT - ROTINA", "CT - URGÊNCIA"), somada dos exames do próprio relatório. É urgência a prioridade que
+ * está em prioridades_urgencia (mesma comparação do motor, sem acento e sem caixa); o resto é rotina. Só aparecem as
+ * classes que existem no período. Os fixos (RT, mensalidade, locação…) seguem como vieram, depois dos exames.
+ * Se a soma dos exames não bater com o resumo do motor, devolve o resumo como veio: o TOTAL nunca muda.
+ */
+export function separarUrgenciaRotina(resumo: ResumoLinhaRel[], exames: ExameLinha[], prioridadesUrgencia: string[]): ResumoLinhaRel[] {
+  const urg = new Set(prioridadesUrgencia.map(p => normNome(p)))
+  const m = new Map<string, { mod: string; urgente: boolean; q: number; t: number; vs: Set<number> }>()
+  for (const e of exames) {
+    const mod = (e.modalidade ?? '').trim().toUpperCase() || '—'
+    const urgente = urg.has(normNome(e.prioridade ?? ''))
+    const k = `${mod}|${urgente ? 'U' : 'R'}`
+    const g = m.get(k) ?? { mod, urgente, q: 0, t: 0, vs: new Set<number>() }
+    g.q += e.quantidade; g.t += e.valor_total; g.vs.add(e.valor_unitario)
+    m.set(k, g)
+  }
+  const doExame = resumo.filter(l => !l.fixo)
+  const fixos = resumo.filter(l => l.fixo)
+  const q = (xs: { quantidade: number }[]) => xs.reduce((s, x) => s + x.quantidade, 0)
+  const somaExames = [...m.values()].reduce((s, g) => s + g.t, 0)
+  if (centavos(somaExames) !== centavos(doExame.reduce((s, l) => s + l.total, 0)) ||
+      [...m.values()].reduce((s, g) => s + g.q, 0) !== q(doExame)) {
+    console.warn('[faturamento] exames não batem com o resumo do motor: tabela fica só por modalidade')
+    return resumo
+  }
+  const separadas = [...m.values()]
+    .sort((a, b) => a.mod.localeCompare(b.mod) || Number(a.urgente) - Number(b.urgente))
+    .map(g => ({
+      rotulo: `${g.mod} - ${g.urgente ? 'URGÊNCIA' : 'ROTINA'}`, quantidade: g.q,
+      valor_unitario: g.vs.size === 1 ? [...g.vs][0] : null, total: Math.round(g.t * 100) / 100, fixo: false,
+    }))
+  return [...separadas, ...fixos]
 }
 
 export { faturaUnidadeXlsx } from './faturaUnidadeXlsx'
