@@ -102,9 +102,19 @@ export function juntarResumo(partes: ResumoLinhaRel[]): ResumoLinhaRel[] {
 
 export { faturaUnidadeXlsx } from './faturaUnidadeXlsx'
 
+/**
+ * Nome de pasta que o Windows aceita dentro do .zip. PRN, CON, AUX, NUL, COM1… e LPT1… são nomes
+ * reservados (dispositivos): a pasta "PRN" do grupo saía no zip e o Excel não abria nada dentro dela
+ * ("não pode acessar o arquivo"). Esses nomes ganham "_" no fim (PRN → PRN_); ponto e espaço no fim saem.
+ */
+export function nomeSeguroWindows(s: string): string {
+  const n = s.replace(/[. ]+$/, '')
+  return /^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])$/i.test(n.replace(/\..*$/, '').trimEnd()) ? `${n}_` : n
+}
+
 export function caminhoRelatorio(rel: Relatorio, competencia: string): string {
   const [aaaa, mm] = competencia.split('-')
   const limpa = (s: string) => s.replace(/[/\\:*?"<>|]/g, '').replace(/\s+/g, ' ').trim()
   const base = rel.pasta ? rel.pasta + (rel.subunidade ? ` - ${rel.subunidade}` : '') : `SEM CONTRATO - ${rel.nomes[0]}`
-  return `${limpa(rel.rotuloGrupo)}/${limpa(base)} ${mm}.${aaaa}${rel.periodo ? ' ' + limpa(rel.periodo) : ''}.xlsx`
+  return `${nomeSeguroWindows(limpa(rel.rotuloGrupo))}/${limpa(base)} ${mm}.${aaaa}${rel.periodo ? ' ' + limpa(rel.periodo) : ''}.xlsx`
 }
