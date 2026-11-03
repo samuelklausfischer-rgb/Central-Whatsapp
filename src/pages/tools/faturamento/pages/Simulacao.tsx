@@ -4,7 +4,7 @@ import JSZip from 'jszip'
 import { db } from '../lib/supabase'
 import { paginar, executarEmPool } from '../lib/pool'
 import { baixarArquivo, baixarConsolidado, carregarInfoAlias, xlsxDoNome, xlsxDoRelatorio } from '../lib/simular'
-import { agruparRelatorios, caminhoRelatorio, grupoDoNome, GRUPOS, ordemDoGrupo, type InfoAlias, type Relatorio } from '../lib/relatorioUnidade'
+import { agruparRelatorios, caminhoRelatorio, grupoDoNome, GRUPOS, nomeSeguroWindows, ordemDoGrupo, type InfoAlias, type Relatorio } from '../lib/relatorioUnidade'
 import { normNome } from '../nucleo/motor'
 import { TIPO_PENDENCIA } from '../lib/consolidado'
 import { nomeArquivo } from '../lib/excel'
@@ -166,7 +166,7 @@ export default function Simulacao() {
         let nome = nomeArquivo(n.nome_bruto, competencia, n.periodo)
         for (let k = 2; usados.has(nome.toLowerCase()); k++) nome = nomeArquivo(`${n.nome_bruto} (${k})`, competencia, n.periodo)
         usados.add(nome.toLowerCase())
-        arq.file(`${grupoDe(n)}/${nome}`, bytes) // uma pasta por grupo da Mobilemed
+        arq.file(`${nomeSeguroWindows(grupoDe(n))}/${nome}`, bytes) // uma pasta por grupo da Mobilemed (PRN → PRN_)
         setZip({ feitos: ++feitos, total: nomes.length })
       })
       const blob = await arq.generateAsync({ type: 'blob', compression: 'DEFLATE' })
