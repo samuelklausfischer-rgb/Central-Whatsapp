@@ -75,7 +75,29 @@ type ImportJob = {
   finished_at: string | null
   created_at: string
   updated_at: string
+  /** Período fechado do buscador (ISO). Nulos nos jobs antigos, por páginas. */
+  range_from?: string | null
+  range_to?: string | null
 }
+
+/**
+ * Período do "Buscar mensagens": início e fim em ISO, os dois inclusivos.
+ *
+ * A Evolution v2.3.7 filtra por `where.messageTimestamp.gte/lte`, e faz
+ * `new Date(valor)` em cada um. Por isso vai ISO, e não segundos: em
+ * 04/11/2026 o mesmo filtro com segundos voltou `total: 0`, porque
+ * `new Date(1793800000)` é janeiro de 1970. Com ISO, "hoje" voltou as 123
+ * mensagens do Financeiro PRN.
+ */
+type Periodo = { from: string; to: string }
+
+/**
+ * Tamanho de página do buscador. É o que a Evolution SEMPRE devolveu na prática:
+ * ela lê o tamanho de `offset`, e o `limit` que este arquivo mandava era
+ * ignorado (medido em 04/11/2026: `limit: 5` voltou 50 registros, `offset: 5`
+ * voltou 5). Os "lotes de 25" da tela antiga eram, na verdade, de 50.
+ */
+const RANGE_PAGE_SIZE = 50
 
 function json(data: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -563,10 +585,49 @@ async function countMessages(deviceId: string) {
   return Number.isFinite(total) ? total : 0
 }
 
-async function fetchEvolutionPage(instanceName: string, page: number, pageSize: number) {
+/**
+ * Lê e valida o período vindo do cliente. Lança com frase legível — quem
+ * chama transforma em 400 pelo `catch` do `Deno.serve`.
+ *
+ * O fim é cortado em "agora": pedir até 23:59 de hoje às 13h não faz sentido, e
+ * um fim fixo no passado deixa a paginação estável enquanto mensagens novas
+ * continuam chegando (elas ficam fora do período e não empurram as páginas).
+ */
+function periodoDoCorpo(body: JsonRecord): Periodo {
+  const fromRaw = stringFrom(body.from)
+  const toRaw = stringFrom(body.to)
+  const from = Date.parse(fromRaw)
+  let to = Date.parse(toRaw)
+  if (!fromRaw || !Number.isFinite(from)) throw new Error('Informe a data inicial do período')
+  if (!toRaw || !Number.isFinite(to)) throw new Error('Informe a data final do período')
+  const agora = Date.now()
+  if (to > agora) to = agora
+  if (from >= to) throw new Error('A data inicial precisa ser antes da final')
+  return { from: new Date(from).toISOString(), to: new Date(to).toISOString() }
+}
+
+function periodoDoJob(job: ImportJob): Periodo | null {
+  return job.range_from && job.range_to ? { from: job.range_from, to: job.range_to } : null
+}
+
+async function countMessagesInRange(deviceId: string, periodo: Periodo) {
+  const resp = await fetch(
+    `${SUPABASE_URL}/rest/v1/messages?device_id=eq.${encodeURIComponent(deviceId)}` +
+      `&created_at=gte.${encodeURIComponent(periodo.from)}&created_at=lte.${encodeURIComponent(periodo.to)}&select=id`,
+    { headers: { ...serviceHeaders, Prefer: 'count=exact', Range: '0-0' }, method: 'HEAD' },
+  )
+  const contentRange = resp.headers.get('content-range') || ''
+  const total = Number(contentRange.split('/')[1] || 0)
+  return Number.isFinite(total) ? total : 0
+}
+
+async function fetchEvolutionPage(instanceName: string, page: number, pageSize: number, periodo: Periodo | null = null) {
+  // `offset` é o TAMANHO da página na Evolution v2 (nome enganoso, mas é o que
+  // ela lê) — ver `RANGE_PAGE_SIZE`. `where` vazio = histórico inteiro.
   const result = await evolutionRequest('POST', `/chat/findMessages/${encodeURIComponent(instanceName)}`, {
+    where: periodo ? { messageTimestamp: { gte: periodo.from, lte: periodo.to } } : {},
     page,
-    limit: pageSize,
+    offset: pageSize,
   })
 
   if (!result.ok) {
@@ -893,6 +954,40 @@ async function previewAction(body: JsonRecord) {
   })
 }
 
+/**
+ * "Verificar" do buscador: quantas mensagens a Evolution tem no período e
+ * quantas o sistema tem no MESMO período, para o atendente decidir se vale
+ * sincronizar.
+ *
+ * A diferença é uma ESTIMATIVA, e a tela diz isso: o sistema grava a hora em
+ * que a mensagem chegou ao webhook, a Evolution a hora do WhatsApp. Mensagem
+ * que ficou presa e chegou atrasada (04/11: as 6 que entraram às 11:44 eram de
+ * 10:09 a 10:25) cai num minuto diferente de cada lado. A conta exata só sai
+ * na sincronização, que compara mensagem por mensagem pelo id do WhatsApp.
+ */
+async function rangePreviewAction(body: JsonRecord) {
+  const instanceName = stringFrom(body.instanceName) || ALLOWED_INSTANCES[0]
+  validateInstance(instanceName)
+  const periodo = periodoDoCorpo(body)
+  const device = await getDevice(instanceName)
+  const [evolution, localMessages, activeJob] = await Promise.all([
+    fetchEvolutionPage(instanceName, 1, RANGE_PAGE_SIZE, periodo),
+    countMessagesInRange(String(device.id), periodo),
+    getActiveJob(instanceName),
+  ])
+
+  return json({
+    instanceName,
+    deviceId: device.id,
+    from: periodo.from,
+    to: periodo.to,
+    totalEvolution: evolution.total,
+    totalLocal: localMessages,
+    estimatedMissing: Math.max(0, evolution.total - localMessages),
+    activeJob,
+  })
+}
+
 async function startAction(body: JsonRecord, userId: string) {
   const instanceName = stringFrom(body.instanceName) || ALLOWED_INSTANCES[0]
   validateInstance(instanceName)
@@ -929,13 +1024,21 @@ async function startAction(body: JsonRecord, userId: string) {
     })
   }
 
-  const pageSize = clampInt(body.pageSize, DEFAULT_PAGE_SIZE, 1, 50)
   const mode = stringFrom(body.mode) || 'test'
+  // Período: só no modo `range` (buscador). Os modos por páginas seguem iguais.
+  const periodo = mode === 'range' ? periodoDoCorpo(body) : null
+  const pageSize = periodo ? RANGE_PAGE_SIZE : clampInt(body.pageSize, DEFAULT_PAGE_SIZE, 1, 50)
   const recentMediaDays = clampInt(body.recentMediaDays, DEFAULT_RECENT_MEDIA_DAYS, 0, 90)
   const device = await getDevice(instanceName)
-  const evolution = await fetchEvolutionPage(instanceName, 1, pageSize)
+  const evolution = await fetchEvolutionPage(instanceName, 1, pageSize, periodo)
+
+  if (periodo && evolution.total === 0) {
+    // Nada no período: não cria job (um job vazio "concluído" só polui a lista).
+    return json({ job: null, empty: true, from: periodo.from, to: periodo.to })
+  }
+
   const totalPages = evolution.pages || 1
-  const targetPages = mode === 'all'
+  const targetPages = periodo || mode === 'all'
     ? totalPages
     : mode === 'last_1000'
       ? Math.min(totalPages, Math.ceil(1000 / pageSize))
@@ -954,6 +1057,7 @@ async function startAction(body: JsonRecord, userId: string) {
     recent_media_days: recentMediaDays,
     started_by: userId,
     started_at: new Date().toISOString(),
+    ...(periodo ? { range_from: periodo.from, range_to: periodo.to } : {}),
   })
 
   return json({ job })
@@ -1002,7 +1106,7 @@ async function runAction(body: JsonRecord) {
 
   try {
     while (processedPages < pagesPerRun && currentPage <= targetPages) {
-      const page = await fetchEvolutionPage(job.instance_name, currentPage, job.page_size || DEFAULT_PAGE_SIZE)
+      const page = await fetchEvolutionPage(job.instance_name, currentPage, job.page_size || DEFAULT_PAGE_SIZE, periodoDoJob(job))
       const normalized = page.records
         .map((record) => normalizeMessage(record, job!.device_id, job!.instance_name, job!))
         .filter(Boolean) as NonNullable<ReturnType<typeof normalizeMessage>>[]
@@ -1120,7 +1224,7 @@ async function cancelAction(body: JsonRecord) {
  * Trocar a cada deploy. Sem isto não há como provar que o isolate do Deno
  * recarregou — conferir o arquivo no container mostra o disco, não o que roda.
  */
-const BUILD_MARKER = 'import-erro-falante-2026-08-14'
+const BUILD_MARKER = 'buscador-por-periodo-2026-11-04'
 
 Deno.serve(async (req: Request) => {
   /**
@@ -1162,6 +1266,7 @@ Deno.serve(async (req: Request) => {
     etapa = `acao:${action || '(vazia)'}`
     switch (action) {
       case 'preview': return await previewAction(body)
+      case 'range_preview': return await rangePreviewAction(body)
       case 'start': return await startAction(body, userId)
       case 'run': return await runAction(body)
       case 'status': return await statusAction(body)

@@ -34,6 +34,19 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.230',
+    date: '2026-11-04 16:00',
+    title: 'Conexão WhatsApp: Reiniciar e Buscar mensagens por período',
+    details: [
+      '🔄 Botão Reiniciar em cada número: reinicia a conexão sem pedir QR, igual ao Restart do painel da Evolution. Serve para o número que aparece "Conectado" mas parou de receber',
+      '🔎 "Histórico" virou "Buscar mensagens": escolha Hoje, Ontem, Últimos 7 dias ou um período de/até, clique em Verificar para ver quantas mensagens existem na Evolution e no sistema, e em Sincronizar para trazer só as que faltam',
+      '🛡️ A busca nunca duplica: cada mensagem é comparada pelo id do WhatsApp antes de entrar. Rodar o mesmo período de novo é seguro',
+      '🐛 Corrigido: o tamanho do lote da importação antiga era ignorado pela Evolution (pedia 25, vinham 50), o que deixava a contagem de páginas confusa',
+    ],
+    usabilidade:
+      'Número parou de receber? Conexão WhatsApp → Reiniciar. Depois, Buscar mensagens → Hoje → Sincronizar para recuperar o que ficou preso.',
+  },
+  {
     version: '0.0.229',
     date: '2026-10-13 12:00',
     title: 'Faturamento: relatório de cada unidade numa aba só',

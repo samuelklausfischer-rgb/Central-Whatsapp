@@ -754,6 +754,65 @@ async function reconnectDeviceAction(body: JsonRecord) {
   return await connectInstanceAction({ instanceName: device.instance_key })
 }
 
+/**
+ * Reiniciar a conexão — o mesmo botão "Restart" do painel da Evolution.
+ *
+ * Fecha o socket do WhatsApp e abre de novo com a MESMA sessão: não pede QR,
+ * não desfaz o pareamento, não apaga nada. Em 04/11/2026 o Financeiro PRN ficou
+ * de 09:58 a 11:44 enviando sem receber, com a Evolution dizendo `open`; o
+ * restart pelo painel destravou e entregou 6 mensagens presas. Até aqui isso
+ * só existia no painel da Evolution, que o atendente não tem.
+ *
+ * Por isso é ação de APARELHO (mesma classe de `reconnect_device`): quem tem o
+ * número liberado pode reiniciar sem esperar um admin. O nome da instância sai
+ * do banco pelo `deviceId` — o cliente nunca escolhe o que reiniciar por nome.
+ *
+ * Evolution v2 expõe `POST /instance/restart/{nome}`; a v1 usava PUT. Tenta os
+ * dois, como `connectInstanceAction` faz com o connect.
+ */
+async function restartInstanceAction(instanceName: string) {
+  const encodedName = encodeURIComponent(instanceName)
+  let result = await evolutionRequest('POST', `/instance/restart/${encodedName}`)
+  const attempts: JsonRecord[] = [{ method: 'POST', status: result.status, ok: result.ok }]
+
+  if (!result.ok && (result.status === 404 || result.status === 405)) {
+    result = await evolutionRequest('PUT', `/instance/restart/${encodedName}`)
+    attempts.push({ method: 'PUT', status: result.status, ok: result.ok })
+  }
+
+  if (!result.ok) {
+    const details = typeof result.payload === 'object' ? result.payload : { raw: String(result.payload) }
+    return json({
+      error: 'A Evolution não reiniciou a conexão. Se o número estiver desconectado, use Conectar e leia o QR.',
+      details,
+      diagnostics: { attempts },
+    }, 400)
+  }
+
+  const payload = typeof result.payload === 'object' ? result.payload as JsonRecord : {}
+  const instance = (payload.instance && typeof payload.instance === 'object') ? payload.instance as JsonRecord : payload
+  const state = String(instance.state ?? instance.status ?? '')
+
+  return json({ instanceName, restarted: true, state: state || null })
+}
+
+async function restartDeviceAction(body: JsonRecord) {
+  const deviceId = String(body.deviceId || '').trim()
+
+  const resp = await fetch(
+    `${SUPABASE_URL}/rest/v1/devices?id=eq.${encodeURIComponent(deviceId)}&select=instance_key,deleted_at`,
+    { headers: serviceHeaders },
+  )
+  if (!resp.ok) return json({ error: 'Unable to load device' }, 500)
+  const rows = await resp.json()
+  const device = Array.isArray(rows) ? rows[0] : null
+  if (!device?.instance_key || device.deleted_at) {
+    return json({ error: 'Device not found' }, 404)
+  }
+
+  return await restartInstanceAction(String(device.instance_key))
+}
+
 async function disconnectInstanceAction(body: JsonRecord) {
   const instanceName = String(body.instanceName || '').trim()
   if (!instanceName) return json({ error: 'instanceName is required' }, 400)
@@ -864,6 +923,8 @@ Deno.serve(async (req: Request) => {
       // Reconectar o WhatsApp que caiu — ver o comentário em
       // `reconnectDeviceAction`. Entrou aqui em 01/09/2026.
       'reconnect_device',
+      // Reiniciar sem QR — ver `restartInstanceAction`. Entrou em 04/11/2026.
+      'restart_device',
     ])
 
     if (acoesDeAparelho.has(action)) {
@@ -885,6 +946,8 @@ Deno.serve(async (req: Request) => {
           return await groupUpdateParticipantAction(body, 'demote')
         case 'reconnect_device':
           return await reconnectDeviceAction(body)
+        case 'restart_device':
+          return await restartDeviceAction(body)
       }
     }
 
@@ -900,6 +963,13 @@ Deno.serve(async (req: Request) => {
         return await connectInstanceAction(body)
       case 'disconnect':
         return await disconnectInstanceAction(body)
+      case 'restart': {
+        // Admin, pela tela de Conexão: vale também para instância ainda sem
+        // aparelho importado (sem `deviceId`).
+        const instanceName = String(body.instanceName || '').trim()
+        if (!instanceName) return json({ error: 'instanceName is required' }, 400)
+        return await restartInstanceAction(instanceName)
+      }
       case 'delete':
         return await deleteInstanceAction(body)
       case 'rename_display':
