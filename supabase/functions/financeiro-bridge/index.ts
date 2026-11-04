@@ -1,13 +1,12 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 
-// Public config for the MAIN "Central Whats" Supabase project (self-hosted).
-// Non-secret: this is the same anon key already shipped in the app's client
-// bundle (VITE_SUPABASE_PUBLISHABLE_KEY). Safe to embed here since this
-// function lives in a different Supabase project (Financeiro) with no shared
-// env/secrets store with the main project.
+// Config do projeto principal "Central Whats" (self-hosted). A URL é pública; a
+// anon key NÃO fica no código: vem do secret MAIN_SUPABASE_ANON_KEY, cadastrado
+// neste projeto Supabase (esta function vive em outro projeto, sem env
+// compartilhada com o principal). Assim a rotação do JWT_SECRET do principal
+// exige só atualizar o secret, sem republicar a function.
 const MAIN_SUPABASE_URL = 'https://apps-supabase.srofjl.easypanel.host'
-const MAIN_SUPABASE_ANON_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzUyNzAwMDAwLCJleHAiOjIzODQ1MDAwMDB9.Gseqw0-_o6Nmwmz3mCWvgxjjCfJB1LhVgTV83uJe-F4'
+const MAIN_SUPABASE_ANON_KEY = Deno.env.get('MAIN_SUPABASE_ANON_KEY') || ''
 
 const FINANCEIRO_SUPABASE_URL = Deno.env.get('SUPABASE_URL') || ''
 const FINANCEIRO_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
@@ -58,6 +57,10 @@ function decodeJwtClaims(authHeader: string): Record<string, unknown> | null {
 type CallerResult = { email: string; id: string } | { error: Response }
 
 async function verifyMainCaller(authHeader: string): Promise<CallerResult> {
+  if (!MAIN_SUPABASE_ANON_KEY) {
+    console.error('MAIN_SUPABASE_ANON_KEY ausente: cadastre o secret neste projeto Supabase')
+    return { error: json({ error: 'MAIN_SUPABASE_ANON_KEY ausente' }, 500) }
+  }
   if (!authHeader) return { error: json({ error: 'Authorization header required' }, 401) }
 
   const claims = decodeJwtClaims(authHeader)

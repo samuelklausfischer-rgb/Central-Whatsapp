@@ -10,12 +10,15 @@
 //
 // 2. Destino — o alvo é o Hub, não o "Supabase do app". Hoje é o mesmo
 //    projeto self-hosted, mas se o Central Whats um dia apontar para outro,
-//    os reports devem continuar chegando no Hub. Por isso URL e chave ficam
-//    fixas aqui (ambas já são públicas no repo do PRN-hub).
+//    os reports devem continuar chegando no Hub. Hoje URL e anon key vêm do
+//    mesmo ambiente do app (`appEnv`, lido em runtime na web); a chave NÃO fica
+//    fixa no código para poder ser rotacionada sem rebuild. Se um dia o Hub for
+//    outro projeto, trocar aqui por variáveis próprias (VITE_HUB_SUPABASE_*).
 
-const HUB_SUPABASE_URL = 'https://apps-supabase.srofjl.easypanel.host'
-const HUB_SUPABASE_ANON_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzUyNzAwMDAwLCJleHAiOjIzODQ1MDAwMDB9.Gseqw0-_o6Nmwmz3mCWvgxjjCfJB1LhVgTV83uJe-F4'
+import { appEnv } from '@/lib/env'
+
+const HUB_SUPABASE_URL = appEnv.VITE_SUPABASE_URL
+const HUB_SUPABASE_ANON_KEY = appEnv.VITE_SUPABASE_PUBLISHABLE_KEY
 
 /**
  * Projeto padrão quando ninguém disser de onde veio.
