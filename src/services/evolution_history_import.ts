@@ -33,6 +33,22 @@ export interface EvolutionHistoryImportJob {
   finished_at: string | null
   created_at: string
   updated_at: string
+  /** Período do buscador (ISO). Nulos nos jobs antigos, por páginas. */
+  range_from?: string | null
+  range_to?: string | null
+}
+
+/** Resultado do "Verificar" do buscador de mensagens. */
+export interface BuscaPorPeriodoPreview {
+  instanceName: string
+  deviceId: string
+  from: string
+  to: string
+  totalEvolution: number
+  totalLocal: number
+  /** Estimativa: a conta exata só sai na sincronização. */
+  estimatedMissing: number
+  activeJob: EvolutionHistoryImportJob | null
 }
 
 export interface EvolutionHistoryPreview {
@@ -90,6 +106,29 @@ export const startHistoryImport = (params: {
     mode: params.mode,
     recentMediaDays: params.recentMediaDays ?? 7,
     pageSize: params.pageSize ?? 50,
+  })
+
+/** Quantas mensagens a Evolution e o sistema têm no período (sem gravar nada). */
+export const verificarPeriodo = (params: { instanceName: string; from: string; to: string }) =>
+  invoke<BuscaPorPeriodoPreview>({ action: 'range_preview', ...params })
+
+/**
+ * Cria o job de sincronização do período. `job: null` + `empty: true` quando a
+ * Evolution não tem nada no intervalo (nenhum job é criado).
+ */
+export const iniciarSincronizacaoDoPeriodo = (params: {
+  instanceName: string
+  from: string
+  to: string
+  recentMediaDays?: number
+}) =>
+  invoke<{ job: EvolutionHistoryImportJob | null; empty?: boolean }>({
+    action: 'start',
+    mode: 'range',
+    instanceName: params.instanceName,
+    from: params.from,
+    to: params.to,
+    recentMediaDays: params.recentMediaDays ?? 7,
   })
 
 export const runHistoryImport = (params: {

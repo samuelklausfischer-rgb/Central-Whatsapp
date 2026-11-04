@@ -84,6 +84,24 @@ export const connectEvolutionInstance = (instanceName: string) => {
   })
 }
 
+/**
+ * Reinicia a conexão do WhatsApp sem QR — o "Restart" do painel da Evolution.
+ * Mesma sessão, mesmo pareamento: serve para o número que está "conectado" mas
+ * parou de receber. Admin, pela tela de Conexão (vai por nome).
+ */
+export const restartEvolutionInstance = (instanceName: string) => {
+  requireInstanceName(instanceName)
+  return invoke<{ instanceName: string; restarted: boolean; state: string | null }>({
+    action: 'restart', instanceName,
+  })
+}
+
+/** Mesmo reinício, para quem só tem o aparelho liberado (vai por `deviceId`). */
+export const reiniciarAparelho = (deviceId: string) =>
+  invoke<{ instanceName: string; restarted: boolean; state: string | null }>({
+    action: 'restart_device', deviceId,
+  })
+
 export const disconnectEvolutionInstance = (instanceName: string) => {
   requireInstanceName(instanceName)
   return invoke<{ instanceName: string; status: string }>({
