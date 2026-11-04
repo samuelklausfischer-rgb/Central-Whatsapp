@@ -34,6 +34,17 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.232',
+    date: '2026-11-04 17:00',
+    title: 'Faturamento: relatórios em PDF de Unaí e Abdon Batista',
+    details: [
+      '🧾 Unaí: além do Excel, saem dois PDFs, um só com os laudos de ROTINA (R$ 20,00) e outro só com os de URGÊNCIA E EMERGÊNCIA (R$ 33,98). Cada um tem a lista, o subtotal e, no fim, o resumo da competência com o PACS e o TOTAL a faturar',
+      '📄 Abdon Batista: além do Excel, saem a lista de exames em PDF e o demonstrativo que era feito no Word (quantidade × valor do RX, RT e PACS com o VALOR TOTAL, local e data, e o quadro de itens), também em PDF',
+      '⚙️ As unidades com PDF ficam nas chaves pdf_prioridade_pastas e pdf_demonstrativo_pastas da configuração (sem a chave: Unaí e Abdon Batista). Se os exames não baterem com o resumo do cálculo, o PDF não sai e o Excel continua sendo a referência',
+    ],
+    usabilidade: 'Gere o ZIP "Faturas por unidade" como antes: na pasta Medimagem, Unaí e Abdon Batista vêm com os PDFs ao lado do Excel. O botão Baixar da unidade traz um .zip com o Excel e os PDFs.',
+  },
+  {
     version: '0.0.231',
     date: '2026-10-27 12:00',
     title: 'Faturamento: urgência e rotina separadas no relatório de Santarém',
