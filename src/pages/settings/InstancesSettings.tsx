@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   RefreshCw,
   Plus,
@@ -10,9 +10,8 @@ import {
   CheckCircle2,
   Smartphone,
   QrCode,
-  History,
-  Play,
-  Square,
+  CalendarSearch,
+  RotateCw,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -41,13 +40,13 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import { Progress } from '@/components/ui/progress'
 import { useToast } from '@/hooks/use-toast'
 import {
   listEvolutionInstances,
   createEvolutionInstance,
   connectEvolutionInstance,
   disconnectEvolutionInstance,
+  restartEvolutionInstance,
   deleteEvolutionInstance,
   renameEvolutionDisplay,
   configureInstanceWebhook,
@@ -55,18 +54,8 @@ import {
   type EvolutionInstance,
   type QrCodeData,
 } from '@/services/evolution_instances'
-import {
-  FINANCEIRO_MEDIMAGEM_INSTANCE,
-  ALLOWED_HISTORY_INSTANCES,
-  previewHistoryImport,
-  startHistoryImport,
-  runHistoryImport,
-  getHistoryImportStatus,
-  cancelHistoryImport,
-  EvolutionHistoryImportError,
-  type EvolutionHistoryImportJob,
-  type EvolutionHistoryPreview,
-} from '@/services/evolution_history_import'
+import { EvolutionHistoryImportError } from '@/services/evolution_history_import'
+import { BuscadorDeMensagensDialog } from '@/components/conexao/BuscadorDeMensagensDialog'
 
 // Rótulo em texto puro do status da instância — antes vinha dentro de um
 // `Badge` colorido (`statusBadge`, removido); agora a cor já é o ponto de
@@ -84,36 +73,6 @@ const instanceStatusLabel = (normalizedStatus: string) => {
       return normalizedStatus
   }
 }
-
-/**
- * AJUSTES DA IMPORTAÇÃO DE HISTÓRICO — todos existem por uma razão medida.
- *
- * O worker da edge function morria com `memory limit reached for the worker`,
- * confirmado no log do container em 14/08. O padrão era sempre o mesmo: dois jobs
- * distintos morreram na página 26, um tendo inserido 24 mensagens e o outro 3.
- * Conteúdo diferente, MESMA quantidade de páginas — ou seja, não era um dado
- * específico, era ACUMULAÇÃO. O worker é reaproveitado entre requisições, e o laço
- * abaixo dispara uma atrás da outra: a memória sobe a cada chamada até estourar.
- *
- * Os três números atacam a mesma coisa por ângulos diferentes. Mexer neles para
- * cima "para ir mais rápido" traz o problema de volta.
- */
-
-/** Metade do que era. Menos objetos vivos por chamada. */
-const HISTORY_PAGE_SIZE = 25
-
-/** Uma página por chamada (era 2): o pico de memória cai pela metade. */
-const HISTORY_PAGES_PER_RUN = 1
-
-/** Dias de mídia real nos modos curtos. Na carga em massa vai 0 — ver `startHistory`. */
-const HISTORY_MEDIA_DAYS = 7
-
-/**
- * Respiro entre chamadas. Era 250 ms, o que emendava uma invocação na outra e não
- * dava janela para o runtime reciclar o worker. É o único ajuste que ataca a
- * acumulação em si, e não apenas o tamanho de cada lote.
- */
-const HISTORY_INTERVALO_MS = 1500
 
 function formatError(err: unknown): string {
   if (err instanceof EvolutionHistoryImportError) {
@@ -143,21 +102,6 @@ function formatError(err: unknown): string {
   }
   return err instanceof Error ? err.message : 'Erro desconhecido'
 }
-
-const historyStatusLabel = (status?: string | null) => {
-  switch (status) {
-    case 'pending': return 'Pendente'
-    case 'running': return 'Rodando'
-    case 'paused': return 'Pausado'
-    case 'completed': return 'Concluído'
-    case 'failed': return 'Falhou'
-    case 'cancelled': return 'Cancelado'
-    default: return 'Sem job'
-  }
-}
-
-const isActiveHistoryJob = (job: EvolutionHistoryImportJob | null) =>
-  Boolean(job && ['pending', 'running', 'paused'].includes(job.status))
 
 export default function InstancesSettings() {
   const { toast } = useToast()
@@ -191,15 +135,8 @@ export default function InstancesSettings() {
   const [deleteConfirm, setDeleteConfirm] = useState<EvolutionInstance | null>(null)
   const [deleting, setDeleting] = useState(false)
 
-  // History import modal
-  const [historyOpen, setHistoryOpen] = useState(false)
-  const [historyInstance, setHistoryInstance] = useState(FINANCEIRO_MEDIMAGEM_INSTANCE)
-  const [historyPreview, setHistoryPreview] = useState<EvolutionHistoryPreview | null>(null)
-  const [historyJob, setHistoryJob] = useState<EvolutionHistoryImportJob | null>(null)
-  const [historyLoading, setHistoryLoading] = useState(false)
-  const [historyRunning, setHistoryRunning] = useState(false)
-  const [historyAutoRunning, setHistoryAutoRunning] = useState(false)
-  const historyAutoStopRef = useRef(false)
+  // Buscar mensagens (substitui o antigo "Importar histórico" por lotes)
+  const [buscaAlvo, setBuscaAlvo] = useState<{ instanceName: string; nomeExibido: string } | null>(null)
 
   const loadInstances = useCallback(async () => {
     setLoading(true)
@@ -291,6 +228,28 @@ export default function InstancesSettings() {
     }
   }
 
+  /**
+   * Reiniciar = o "Restart" do painel da Evolution: mesma sessão, sem QR. Para o
+   * número que aparece "Conectado" mas parou de receber (Financeiro PRN em
+   * 04/11/2026). Depois, vale abrir "Buscar mensagens" em "Hoje" para trazer o
+   * que ficou preso.
+   */
+  const handleRestart = async (instanceName: string) => {
+    setActionLoading(instanceName)
+    try {
+      await restartEvolutionInstance(instanceName)
+      toast({
+        title: 'Conexão reiniciada',
+        description: `${instanceName}: mande uma mensagem de teste e, se faltar algo, use "Buscar mensagens".`,
+      })
+      await loadInstances()
+    } catch (err: unknown) {
+      toast({ title: 'Erro ao reiniciar', description: formatError(err), variant: 'destructive' })
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
   const handleDelete = async () => {
     if (!deleteConfirm) return
     setDeleting(true)
@@ -356,172 +315,6 @@ export default function InstancesSettings() {
       setActionLoading(null)
     }
   }
-
-  const openHistoryImport = async (instanceName: string) => {
-    setHistoryInstance(instanceName)
-    setHistoryOpen(true)
-    setHistoryLoading(true)
-    setHistoryPreview(null)
-    setHistoryJob(null)
-    try {
-      const [preview, status] = await Promise.all([
-        previewHistoryImport(instanceName),
-        getHistoryImportStatus({ instanceName }),
-      ])
-      setHistoryPreview(preview)
-      setHistoryJob(status.job || preview.latestJob)
-    } catch (err: unknown) {
-      toast({ title: 'Erro ao carregar preview', description: formatError(err), variant: 'destructive' })
-    } finally {
-      setHistoryLoading(false)
-    }
-  }
-
-  const refreshHistory = async () => {
-    setHistoryLoading(true)
-    try {
-      const [preview, status] = await Promise.all([
-        previewHistoryImport(historyInstance),
-        getHistoryImportStatus({ instanceName: historyInstance, jobId: historyJob?.id }),
-      ])
-      setHistoryPreview(preview)
-      setHistoryJob(status.job || preview.latestJob)
-    } catch (err: unknown) {
-      toast({ title: 'Erro ao atualizar histórico', description: formatError(err), variant: 'destructive' })
-    } finally {
-      setHistoryLoading(false)
-    }
-  }
-
-  const startHistory = async (mode: 'test' | 'last_1000' | 'all') => {
-    historyAutoStopRef.current = true
-    setHistoryRunning(true)
-    try {
-      const result = await startHistoryImport({
-        instanceName: historyInstance,
-        mode,
-        pageSize: HISTORY_PAGE_SIZE,
-        // Carga em massa NÃO baixa mídia (ver HISTORY_MEDIA_DAYS). Modos curtos
-        // continuam trazendo a mídia recente, porque ali o volume é pequeno.
-        recentMediaDays: mode === 'all' ? 0 : HISTORY_MEDIA_DAYS,
-      })
-      setHistoryJob(result.job)
-      toast({ title: 'Importação criada', description: `${historyStatusLabel(result.job.status)} - página ${result.job.current_page}` })
-    } catch (err: unknown) {
-      if (err instanceof EvolutionHistoryImportError && err.job) setHistoryJob(err.job)
-      toast({ title: 'Erro ao iniciar importação', description: formatError(err), variant: 'destructive' })
-    } finally {
-      setHistoryRunning(false)
-    }
-  }
-
-  const processHistoryBatch = async () => {
-    if (!historyJob) return
-    historyAutoStopRef.current = true
-    setHistoryRunning(true)
-    try {
-      const result = await runHistoryImport({
-        instanceName: historyInstance,
-        jobId: historyJob.id,
-        pagesPerRun: HISTORY_PAGES_PER_RUN,
-      })
-      setHistoryJob(result.job)
-      toast({
-        title: result.done ? 'Importação concluída' : 'Lote processado',
-        description: `Inseridas: ${result.inserted} | Duplicadas: ${result.skipped} | Falhas: ${result.failed}`,
-      })
-      if (result.done) await refreshHistory()
-    } catch (err: unknown) {
-      if (err instanceof EvolutionHistoryImportError && err.job) setHistoryJob(err.job)
-      toast({ title: 'Erro ao processar lote', description: formatError(err), variant: 'destructive' })
-    } finally {
-      setHistoryRunning(false)
-    }
-  }
-
-  const processHistoryUntilDone = async () => {
-    if (!historyJob) return
-    historyAutoStopRef.current = false
-    setHistoryAutoRunning(true)
-    setHistoryRunning(true)
-
-    let currentJob = historyJob
-    let totalInserted = 0
-    let totalSkipped = 0
-    let totalFailed = 0
-
-    try {
-      while (!historyAutoStopRef.current && isActiveHistoryJob(currentJob) && currentJob.current_page <= currentJob.target_pages) {
-        const result = await runHistoryImport({
-          instanceName: historyInstance,
-          jobId: currentJob.id,
-          pagesPerRun: HISTORY_PAGES_PER_RUN,
-        })
-
-        totalInserted += result.inserted
-        totalSkipped += result.skipped
-        totalFailed += result.failed
-        currentJob = result.job
-        setHistoryJob(result.job)
-
-        if (result.failed > 0 || result.job.failed_count > 0 || result.job.status === 'failed') {
-          toast({
-            title: 'Processamento pausado por falha',
-            description: `Inseridas: ${totalInserted} | Duplicadas: ${totalSkipped} | Falhas: ${totalFailed}`,
-            variant: 'destructive',
-          })
-          return
-        }
-
-        if (result.done || result.job.status === 'completed') {
-          await refreshHistory()
-          toast({
-            title: 'Importação concluída',
-            description: `Inseridas: ${totalInserted} | Duplicadas: ${totalSkipped} | Falhas: ${totalFailed}`,
-          })
-          return
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, HISTORY_INTERVALO_MS))
-      }
-
-      if (historyAutoStopRef.current) {
-        toast({ title: 'Processamento automático interrompido' })
-      }
-    } catch (err: unknown) {
-      if (err instanceof EvolutionHistoryImportError && err.job) setHistoryJob(err.job)
-      toast({ title: 'Erro ao processar automaticamente', description: formatError(err), variant: 'destructive' })
-    } finally {
-      historyAutoStopRef.current = true
-      setHistoryAutoRunning(false)
-      setHistoryRunning(false)
-    }
-  }
-
-  const cancelHistory = async () => {
-    if (!historyJob) return
-    historyAutoStopRef.current = true
-    setHistoryRunning(true)
-    try {
-      const result = await cancelHistoryImport({ instanceName: historyInstance, jobId: historyJob.id })
-      setHistoryJob(result.job)
-      toast({ title: 'Importação cancelada' })
-    } catch (err: unknown) {
-      toast({ title: 'Erro ao cancelar importação', description: formatError(err), variant: 'destructive' })
-    } finally {
-      setHistoryRunning(false)
-    }
-  }
-
-  const historyDerived = useMemo(() => {
-    const targetPages = historyJob?.target_pages || historyPreview?.totalPages || 0
-    const processedPages = historyJob ? Math.max(0, Math.min(targetPages, historyJob.current_page - 1)) : 0
-    const progress = targetPages > 0 ? Math.round((processedPages / targetPages) * 100) : 0
-    const canStart = !isActiveHistoryJob(historyJob)
-    const canProcess = Boolean(historyJob && isActiveHistoryJob(historyJob) && historyJob.current_page <= historyJob.target_pages)
-    return { targetPages, processedPages, progress, canStart, canProcess }
-  }, [historyJob, historyPreview])
-  const { targetPages: historyTargetPages, processedPages: historyProcessedPages, progress: historyProgress, canStart: canStartHistory, canProcess: canProcessHistory } = historyDerived
 
   return (
     <div className="space-y-6">
@@ -652,16 +445,30 @@ export default function InstancesSettings() {
                           <span className="hidden sm:inline">Conectar</span>
                         </Button>
                       )}
+                      {name && instance.normalizedStatus !== 'disconnected' && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs gap-1"
+                          disabled={isActionLoading}
+                          onClick={() => handleRestart(name)}
+                          title="Reinicia a conexão sem pedir QR (o Restart da Evolution)"
+                        >
+                          {isActionLoading ? <RefreshCw className="h-3 w-3 animate-spin" /> : <RotateCw className="h-3 w-3" />}
+                          <span className="hidden sm:inline">Reiniciar</span>
+                        </Button>
+                      )}
                       {name && instance.device && (
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-7 text-xs gap-1"
-                          disabled={!name || isActionLoading}
-                          onClick={() => openHistoryImport(name)}
+                          disabled={isActionLoading}
+                          onClick={() => setBuscaAlvo({ instanceName: name, nomeExibido: displayName })}
+                          title="Busca as mensagens de um período e grava só as que faltam"
                         >
-                          <History className="h-3 w-3" />
-                          <span className="hidden sm:inline">Histórico</span>
+                          <CalendarSearch className="h-3 w-3" />
+                          <span className="hidden sm:inline">Buscar mensagens</span>
                         </Button>
                       )}
                     </div>
@@ -770,126 +577,14 @@ export default function InstancesSettings() {
         </GlassDialogContent>
       </Dialog>
 
-      {/* History Import Modal */}
-      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
-        <GlassDialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Importar histórico</DialogTitle>
-            <DialogDescription>
-              Instância: <strong>{historyInstance}</strong>. Mensagens serão sincronizadas; mídia real somente dos últimos 7 dias.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-2">
-            {historyLoading ? (
-              <div className="py-8 flex flex-col items-center gap-3 text-muted-foreground">
-                <RefreshCw className="h-6 w-6 animate-spin" />
-                Carregando dados do histórico...
-              </div>
-            ) : (
-              <>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <div className="rounded-lg border border-border bg-muted p-3">
-                    <p className="text-xs text-muted-foreground">Evolution</p>
-                    <p className="text-xl font-semibold">{historyPreview?.totalEvolution ?? '-'}</p>
-                  </div>
-                  <div className="rounded-lg border border-border bg-muted p-3">
-                    <p className="text-xs text-muted-foreground">Sistema</p>
-                    <p className="text-xl font-semibold">{historyPreview?.totalLocal ?? '-'}</p>
-                  </div>
-                  <div className="rounded-lg border border-border bg-muted p-3">
-                    <p className="text-xs text-muted-foreground">Faltantes</p>
-                    <p className="text-xl font-semibold">{historyPreview?.estimatedMissing ?? '-'}</p>
-                  </div>
-                  <div className="rounded-lg border border-border bg-muted p-3">
-                    <p className="text-xs text-muted-foreground">Páginas</p>
-                    <p className="text-xl font-semibold">{historyPreview?.totalPages ?? '-'}</p>
-                  </div>
-                </div>
-
-                <div className="rounded-lg border border-border p-4 space-y-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                    <div>
-                      <p className="font-medium">Status do job</p>
-                      <p className="text-sm text-muted-foreground">
-                        {historyStatusLabel(historyJob?.status)}
-                        {historyJob ? ` - página ${historyProcessedPages}/${historyTargetPages}` : ''}
-                      </p>
-                    </div>
-                    <Badge variant={historyJob?.status === 'completed' ? 'default' : historyJob?.status === 'failed' ? 'destructive' : 'outline'}>
-                      {historyStatusLabel(historyJob?.status)}
-                    </Badge>
-                  </div>
-
-                  <Progress value={historyProgress} />
-
-                  <div className="grid grid-cols-3 gap-2 text-sm">
-                    <div>
-                      <p className="text-muted-foreground">Inseridas</p>
-                      <p className="font-medium">{historyJob?.inserted_count ?? 0}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Duplicadas</p>
-                      <p className="font-medium">{historyJob?.skipped_count ?? 0}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Falhas</p>
-                      <p className="font-medium">{historyJob?.failed_count ?? 0}</p>
-                    </div>
-                  </div>
-
-                  {historyJob?.error_message && (
-                    <p className="rounded-md border border-red-500/20 bg-red-500/10 p-2 text-sm text-red-400">
-                      {historyJob.error_message}
-                    </p>
-                  )}
-
-                  {historyAutoRunning && (
-                    <p className="rounded-md border border-blue-500/20 bg-blue-500/10 p-2 text-sm text-blue-400">
-                      Processando automaticamente. Pode fazer outras coisas, mas mantenha esta aba aberta.
-                    </p>
-                  )}
-                </div>
-
-                <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/10 p-3 text-sm text-muted-foreground">
-                  Mensagens históricas entram como lidas, sem notificação e sem incrementar não-lidas. Arquivos de mídia antigos ficam como placeholder.
-                </div>
-              </>
-            )}
-          </div>
-
-          <DialogFooter className="flex-col sm:flex-row sm:flex-wrap gap-2">
-            <Button variant="outline" onClick={refreshHistory} disabled={historyLoading || historyRunning || historyAutoRunning} className="gap-2 w-full sm:w-auto">
-              <RefreshCw className={`h-4 w-4 ${historyLoading ? 'animate-spin' : ''}`} />
-              Atualizar
-            </Button>
-            <Button variant="outline" onClick={() => startHistory('test')} disabled={!canStartHistory || historyLoading || historyRunning || historyAutoRunning} className="gap-2 w-full sm:w-auto">
-              <Play className="h-4 w-4" />
-              Testar 2 páginas
-            </Button>
-            <Button variant="outline" onClick={() => startHistory('last_1000')} disabled={!canStartHistory || historyLoading || historyRunning || historyAutoRunning} className="gap-2 w-full sm:w-auto">
-              <Play className="h-4 w-4" />
-              Importar 1000
-            </Button>
-            <Button variant="outline" onClick={() => startHistory('all')} disabled={!canStartHistory || historyLoading || historyRunning || historyAutoRunning} className="gap-2 w-full sm:w-auto">
-              <Play className="h-4 w-4" />
-              Importar tudo
-            </Button>
-            <Button variant="outline" onClick={processHistoryBatch} disabled={!canProcessHistory || historyLoading || historyRunning || historyAutoRunning} className="gap-2 w-full sm:w-auto">
-              {historyRunning ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              Processar lote
-            </Button>
-            <Button onClick={processHistoryUntilDone} disabled={!canProcessHistory || historyLoading || historyRunning || historyAutoRunning} className="gap-2 w-full sm:w-auto">
-              {historyAutoRunning ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              Processar até concluir
-            </Button>
-            <Button variant="destructive" onClick={cancelHistory} disabled={!isActiveHistoryJob(historyJob) || historyLoading} className="gap-2 w-full sm:w-auto">
-              <Square className="h-4 w-4" />
-              Cancelar
-            </Button>
-          </DialogFooter>
-        </GlassDialogContent>
-      </Dialog>
+      {buscaAlvo && (
+        <BuscadorDeMensagensDialog
+          open={!!buscaAlvo}
+          onOpenChange={(aberto) => !aberto && setBuscaAlvo(null)}
+          instanceName={buscaAlvo.instanceName}
+          nomeExibido={buscaAlvo.nomeExibido}
+        />
+      )}
 
       {/* Rename Modal */}
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>

@@ -34,7 +34,7 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
-    version: '0.0.230',
+    version: '0.0.231',
     date: '2026-10-27 12:00',
     title: 'Faturamento: urgência e rotina separadas no relatório de Santarém',
     details: [
@@ -42,6 +42,19 @@ export const releaseNotes: ReleaseNote[] = [
       '📋 Conta como urgência a prioridade listada na configuração (padrão: URGENCIA, EMERGENCIA, PLANTAO); o resto é rotina. Os valores fixos e o TOTAL continuam iguais. As unidades que separam ficam na configuração separar_urgencia_pastas',
     ],
     usabilidade: 'Gere o ZIP "Faturas por unidade" como antes e abra o arquivo de Santarém: no fim da lista de exames, a modalidade aparece em duas linhas, urgência e rotina.',
+  },
+  {
+    version: '0.0.230',
+    date: '2026-11-04 16:00',
+    title: 'Conexão WhatsApp: Reiniciar e Buscar mensagens por período',
+    details: [
+      '🔄 Botão Reiniciar em cada número: reinicia a conexão sem pedir QR, igual ao Restart do painel da Evolution. Serve para o número que aparece "Conectado" mas parou de receber',
+      '🔎 "Histórico" virou "Buscar mensagens": escolha Hoje, Ontem, Últimos 7 dias ou um período de/até, clique em Verificar para ver quantas mensagens existem na Evolution e no sistema, e em Sincronizar para trazer só as que faltam',
+      '🛡️ A busca nunca duplica: cada mensagem é comparada pelo id do WhatsApp antes de entrar. Rodar o mesmo período de novo é seguro',
+      '🐛 Corrigido: o tamanho do lote da importação antiga era ignorado pela Evolution (pedia 25, vinham 50), o que deixava a contagem de páginas confusa',
+    ],
+    usabilidade:
+      'Número parou de receber? Conexão WhatsApp → Reiniciar. Depois, Buscar mensagens → Hoje → Sincronizar para recuperar o que ficou preso.',
   },
   {
     version: '0.0.229',
