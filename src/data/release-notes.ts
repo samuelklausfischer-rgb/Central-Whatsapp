@@ -34,6 +34,27 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.232',
+    date: '2026-11-04 17:00',
+    title: 'Faturamento: relatórios em PDF de Unaí e Abdon Batista',
+    details: [
+      '🧾 Unaí: além do Excel, saem dois PDFs, um só com os laudos de ROTINA (R$ 20,00) e outro só com os de URGÊNCIA E EMERGÊNCIA (R$ 33,98). Cada um tem a lista, o subtotal e, no fim, o resumo da competência com o PACS e o TOTAL a faturar',
+      '📄 Abdon Batista: além do Excel, saem a lista de exames em PDF e o demonstrativo que era feito no Word (quantidade × valor do RX, RT e PACS com o VALOR TOTAL, local e data, e o quadro de itens), também em PDF',
+      '⚙️ As unidades com PDF ficam nas chaves pdf_prioridade_pastas e pdf_demonstrativo_pastas da configuração (sem a chave: Unaí e Abdon Batista). Se os exames não baterem com o resumo do cálculo, o PDF não sai e o Excel continua sendo a referência',
+    ],
+    usabilidade: 'Gere o ZIP "Faturas por unidade" como antes: na pasta Medimagem, Unaí e Abdon Batista vêm com os PDFs ao lado do Excel. O botão Baixar da unidade traz um .zip com o Excel e os PDFs.',
+  },
+  {
+    version: '0.0.231',
+    date: '2026-10-27 12:00',
+    title: 'Faturamento: urgência e rotina separadas no relatório de Santarém',
+    details: [
+      '🧾 No relatório de Santarém, a tabela do fim agora tem uma linha por modalidade e prioridade ("CT - URGÊNCIA", "CT - ROTINA"), cada uma com a sua quantidade e o seu valor. As outras unidades continuam só por modalidade',
+      '📋 Conta como urgência a prioridade listada na configuração (padrão: URGENCIA, EMERGENCIA, PLANTAO); o resto é rotina. Os valores fixos e o TOTAL continuam iguais. As unidades que separam ficam na configuração separar_urgencia_pastas',
+    ],
+    usabilidade: 'Gere o ZIP "Faturas por unidade" como antes e abra o arquivo de Santarém: no fim da lista de exames, a modalidade aparece em duas linhas, urgência e rotina.',
+  },
+  {
     version: '0.0.230',
     date: '2026-11-04 16:00',
     title: 'Conexão WhatsApp: Reiniciar e Buscar mensagens por período',

@@ -3,7 +3,7 @@ import { Link, useParams } from '../navegacao'
 import JSZip from 'jszip'
 import { db } from '../lib/supabase'
 import { paginar, executarEmPool } from '../lib/pool'
-import { baixarArquivo, baixarConsolidado, carregarInfoAlias, xlsxDoNome, xlsxDoRelatorio } from '../lib/simular'
+import { arquivosDoRelatorio, baixarArquivo, baixarConsolidado, carregarInfoAlias, xlsxDoNome } from '../lib/simular'
 import { agruparRelatorios, caminhoRelatorio, grupoDoNome, GRUPOS, nomeSeguroWindows, ordemDoGrupo, type InfoAlias, type Relatorio } from '../lib/relatorioUnidade'
 import { normNome } from '../nucleo/motor'
 import { TIPO_PENDENCIA } from '../lib/consolidado'
@@ -106,8 +106,16 @@ export default function Simulacao() {
     if (!id) return
     setBaixando(chaveRel(r)); setErro(null)
     try {
-      const bytes = await xlsxDoRelatorio(id, competencia, r)
-      baixarArquivo(new Blob([bytes as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), caminhoRelatorio(r, competencia).split('/').pop()!)
+      const arquivos = await arquivosDoRelatorio(id, competencia, r)
+      const nomeDe = (caminho: string) => caminho.split('/').pop()!
+      if (arquivos.length === 1) {
+        baixarArquivo(new Blob([arquivos[0].bytes as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), nomeDe(arquivos[0].caminho))
+      } else {
+        // unidade com PDFs (Unaí, Abdon Batista…): Excel e PDFs juntos num .zip só
+        const arq = new JSZip()
+        for (const a of arquivos) arq.file(nomeDe(a.caminho), a.bytes)
+        baixarArquivo(await arq.generateAsync({ type: 'blob', compression: 'DEFLATE' }), nomeDe(arquivos[0].caminho).replace(/\.xlsx$/i, '.zip'))
+      }
     } catch (e) { setErro(`Falha ao gerar o relatório de ${r.pasta ?? r.nomes[0]}: ${e instanceof Error ? e.message : String(e)}`) }
     finally { setBaixando(null) }
   }
@@ -119,7 +127,7 @@ export default function Simulacao() {
       const arq = new JSZip()
       let feitos = 0
       await executarEmPool(relFiltrados, 2, async r => {
-        arq.file(caminhoRelatorio(r, competencia), await xlsxDoRelatorio(id, competencia, r))
+        for (const a of await arquivosDoRelatorio(id, competencia, r)) arq.file(a.caminho, a.bytes) // Excel e, em Unaí e Abdon, os PDFs
         setZip({ feitos: ++feitos, total: relFiltrados.length })
       })
       const blob = await arq.generateAsync({ type: 'blob', compression: 'DEFLATE' })

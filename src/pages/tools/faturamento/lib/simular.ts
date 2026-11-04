@@ -10,7 +10,8 @@ import type { InstrucaoNF, RespostaSimular, Simulacao, SimulacaoNome, SimulacaoP
 import { agregar, type ResumoLinha, type UnidadeEntrada } from './consolidado'
 import { gerarConsolidado, nomeArquivoConsolidado } from './consolidadoXlsx'
 import { normNome } from '../nucleo/motor'
-import { faturaUnidadeXlsx, grupoDoNome, grupoDoRelatorioPorNome, juntarResumo, type InfoAlias, type Relatorio } from './relatorioUnidade'
+import { caminhoRelatorio, faturaUnidadeXlsx, grupoDoNome, grupoDoRelatorioPorNome, juntarResumo, lerRegraUrgencia, resumoDoRelatorio, type InfoAlias, type RegraUrgencia, type Relatorio, type ResumoLinhaRel } from './relatorioUnidade'
+import { caminhoPdf, lerRegraPdf, pdfsDoRelatorio, type RegraPdf } from './faturaUnidadePdf'
 
 export type ModoCalculo = 'servidor' | 'local'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -70,8 +71,8 @@ export async function carregarInfoAlias(): Promise<Map<string, InfoAlias>> {
   return new Map(linhas.map(a => [normNome(a.nome_bruto), { grupo: a.grupo, subunidade: a.subunidade }]))
 }
 
-/** Relatório "Fatura de unidade": junta todos os nomes da unidade daquele grupo e período. */
-export async function xlsxDoRelatorio(simulacaoId: string, competencia: string, rel: Relatorio): Promise<Uint8Array> {
+/** Exames e resumo (juntado) do relatório da unidade: todos os nomes dela naquele período. */
+async function dadosDoRelatorio(simulacaoId: string, rel: Relatorio): Promise<{ resumo: ResumoLinhaRel[]; exames: ExameLinha[] }> {
   const exames = await paginar<ExameLinha>((de, ate) =>
     db.from('simulacao_exame').select(COLUNAS_EXAME)
       .eq('simulacao_id', simulacaoId).in('nome_bruto', rel.nomes).eq('periodo', rel.periodo)
@@ -84,8 +85,52 @@ export async function xlsxDoRelatorio(simulacaoId: string, competencia: string, 
     valor_unitario: r.valor_unitario == null ? null : Number(r.valor_unitario),
   })))
   const numerico = exames.map(e => ({ ...e, quantidade: Number(e.quantidade), valor_unitario: Number(e.valor_unitario), valor_total: Number(e.valor_total) }))
-  return faturaUnidadeXlsx(rel, competencia, resumo, numerico)
+  return { resumo, exames: numerico }
 }
+
+/** Relatório "Fatura de unidade": junta todos os nomes da unidade daquele grupo e período. */
+export async function xlsxDoRelatorio(simulacaoId: string, competencia: string, rel: Relatorio): Promise<Uint8Array> {
+  const { resumo, exames } = await dadosDoRelatorio(simulacaoId, rel)
+  // tabela do fim com urgência e rotina separadas só nas pastas da config separar_urgencia_pastas (os fixos e o TOTAL não mudam)
+  return faturaUnidadeXlsx(rel, competencia, resumoDoRelatorio(rel, resumo, exames, (await carregarRegrasRelatorio()).urgencia), exames)
+}
+
+export interface ArquivoRelatorio { caminho: string; bytes: Uint8Array }
+
+/**
+ * Todos os arquivos do relatório da unidade: o Excel e, nas pastas da config (pdf_prioridade_pastas e
+ * pdf_demonstrativo_pastas; padrão Unaí e Abdon Batista), os PDFs. Caminhos iguais aos do ZIP. Se algum PDF não pôde
+ * sair (exames que não batem com o resumo), vai junto um "LEIA-ME" com o motivo, para ninguém mandar o relatório sem ele.
+ */
+export async function arquivosDoRelatorio(simulacaoId: string, competencia: string, rel: Relatorio): Promise<ArquivoRelatorio[]> {
+  const [{ resumo, exames }, regras] = await Promise.all([dadosDoRelatorio(simulacaoId, rel), carregarRegrasRelatorio()])
+  const caminho = caminhoRelatorio(rel, competencia)
+  const xlsx = await faturaUnidadeXlsx(rel, competencia, resumoDoRelatorio(rel, resumo, exames, regras.urgencia), exames)
+  const { pdfs, avisos } = await pdfsDoRelatorio(rel, competencia, resumo, exames, regras.pdf, regras.urgencia.prioridades)
+  const leiame = avisos.length
+    ? [{ caminho: caminho.replace(/\.xlsx$/i, ' - LEIA-ME.txt'), bytes: new TextEncoder().encode(['PDF NÃO GERADO', '', ...avisos, ''].join('\r\n')) }]
+    : []
+  return [{ caminho, bytes: xlsx }, ...pdfs.map(p => ({ caminho: caminhoPdf(caminho, p.sufixo), bytes: p.bytes })), ...leiame]
+}
+
+// Regras do relatório na config (prioridades_urgencia, separar_urgencia_pastas e as chaves pdf_*): uma leitura serve
+// para o ZIP inteiro, vale por 5 minutos.
+const CHAVES_RELATORIO = ['prioridades_urgencia', 'separar_urgencia_pastas', 'pdf_prioridade_pastas', 'pdf_demonstrativo_pastas', 'pdf_demonstrativo_cidade']
+let cacheRegras: { em: number; dados: Promise<{ urgencia: RegraUrgencia; pdf: RegraPdf }> } | null = null
+export function carregarRegrasRelatorio(): Promise<{ urgencia: RegraUrgencia; pdf: RegraPdf }> {
+  if (cacheRegras && Date.now() - cacheRegras.em < 5 * 60_000) return cacheRegras.dados
+  const dados = Promise.resolve(db.from('config').select('chave, valor').in('chave', CHAVES_RELATORIO))
+    .then(({ data, error }) => {
+      if (error) throw new Error(error.message)
+      const cfg = Object.fromEntries(((data ?? []) as { chave: string; valor: string }[]).map(c => [c.chave, c.valor]))
+      return { urgencia: lerRegraUrgencia(cfg), pdf: lerRegraPdf(cfg) }
+    })
+    .catch(e => { cacheRegras = null; throw e })
+  cacheRegras = { em: Date.now(), dados }
+  return dados
+}
+/** Só a regra de urgência (compatibilidade). */
+export const carregarRegraUrgencia = (): Promise<RegraUrgencia> => carregarRegrasRelatorio().then(r => r.urgencia)
 
 // Instruções de emissão de NF por unidade (tabela instrucao_nf). Mudam pouco: uma leitura
 // serve para o ZIP inteiro (106 relatórios), e vale por 5 minutos.
