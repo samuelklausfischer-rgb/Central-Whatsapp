@@ -14,7 +14,8 @@ const CHAVES: Record<string, keyof LinhaBruto> = {
 export interface BrutoLido { linhas: LinhaBruto[]; nomes: Map<string, LinhaBruto[]>; grupo: string }
 /** `mes`: mês do Bruto ('AAAA-MM-01'); null = não deu para saber (arquivo de mais de um mês). */
 export interface ArquivoLido { nome: string; grupo: string; exames: number; repetidos: number; mes: string | null }
-export interface BrutosLidos extends Omit<BrutoLido, 'grupo'> { arquivos: ArquivoLido[] }
+/** `porArquivo`: as linhas de CADA arquivo, como vieram (o acervo registra em quais Brutos cada exame veio). */
+export interface BrutosLidos extends Omit<BrutoLido, 'grupo'> { arquivos: ArquivoLido[]; porArquivo: { nome: string; linhas: LinhaBruto[] }[] }
 
 export async function lerBruto(file: File): Promise<BrutoLido> {
   const wb = XLSX.read(await file.arrayBuffer())
@@ -77,8 +78,10 @@ export async function lerBrutos(files: File[]): Promise<BrutosLidos> {
   const linhas: LinhaBruto[] = []
   const arquivos: ArquivoLido[] = []
   const posicoes = new Map<string, number[]>() // chave -> posições em `linhas`
+  const porArquivo: BrutosLidos['porArquivo'] = []
   for (const f of files) {
     const lido = await lerBruto(f)
+    porArquivo.push({ nome: f.name, linhas: [...lido.linhas] })
     const mes = mesDoArquivo(f.name)
     const doArquivo = new Map<string, LinhaBruto[]>() // cópias de cada exame neste arquivo, na ordem
     for (const l of lido.linhas) {
@@ -116,7 +119,7 @@ export async function lerBrutos(files: File[]): Promise<BrutosLidos> {
     const g = nomes.get(l.unidade)
     if (g) g.push(l); else nomes.set(l.unidade, [l])
   }
-  return { linhas, nomes, arquivos }
+  return { linhas, nomes, arquivos, porArquivo }
 }
 
 /**

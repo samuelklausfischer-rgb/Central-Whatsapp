@@ -24,6 +24,30 @@ export interface LinhaBruto {
   mes_arquivo?: string | null
   /** Arquivo de onde a linha veio (leitura no navegador; vai para o acervo). */
   arquivo_nome?: string
+  /** Bruto(s) registrado(s) em que o exame veio (arquivo_bruto.id), guardados no acervo. Ver limitesDoLaudo. */
+  arquivos?: string[] | null
+  /** Dos `arquivos`, aqueles em que o exame já veio COM laudo. */
+  arquivos_com_laudo?: string[] | null
+}
+
+/**
+ * Um Bruto que subiu para o acervo (tabela arquivo_bruto). Serve para achar o dia do 1º laudo do reassinado.
+ * - `modo` 'laudo': o arquivo só traz exame com o 1º laudo no período. É o caso do FHEMIG 27/09 a 26/10 que a
+ *   Ketlin exportou em 03/11/2026: nenhum exame sem laudo, nenhum laudo fora do período (fora a reassinatura),
+ *   4.547 exames transferidos antes de 27/09.
+ * - `modo` 'transferencia': traz o exame transferido OU laudado no período (o mensal de set/2026 e o 21/09 a
+ *   20/10, que tem 419 exames transferidos em 20/10 e laudados em 21/10).
+ * - `exportado_em`: o último horário (transferência ou conclusão) que aparece no arquivo, 'AAAA-MM-DDTHH:MM'.
+ *   A exportação foi depois dele, então o arquivo cobre por inteiro até a véspera desse dia.
+ * - `nomes`: as Unidades que vieram no arquivo (a Mobilemed exporta por grupo). Só elas são cobertas.
+ */
+export interface ArquivoBruto {
+  id: string
+  periodo_de: string
+  periodo_ate: string
+  exportado_em: string | null
+  modo: 'laudo' | 'transferencia'
+  nomes: string[]
 }
 
 export type Papel = 'normal' | 'urgencia' | 'fixo' | 'excedente'
@@ -146,6 +170,7 @@ export function normModalidade(m: string | undefined | null): string {
 }
 
 function iso(d: Date): string { return d.toISOString().slice(0, 10) }
+function ddmm(d: Date): string { return `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}` }
 function fimDoDia(a: number, m: number, d: number): Date { return new Date(Date.UTC(a, m, d, 23, 59, 59)) }
 function ultimoDia(a: number, m: number): number { return new Date(Date.UTC(a, m + 1, 0)).getUTCDate() }
 
@@ -177,6 +202,152 @@ export function intervaloDoLaudo(l: LinhaBruto): { de: Date; ate: Date; transfer
   return { de: transferidoNoMes ? t! : inicio, ate: fim, transferidoNoMes }
 }
 
+const DIA = 86_400_000
+const soDia = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+const diaISO = (s: string) => { const [a, m, d] = s.slice(0, 10).split('-').map(Number); return Date.UTC(a, m - 1, d) }
+/** 'AAAA-MM-DDTHH:MM[:SS]' sem fuso (hora da Mobilemed, como o parseDataBR). */
+const dataISO = (s: string) => new Date(/[zZ]$|[+-]\d\d:?\d\d$/.test(s) ? s : `${s.length === 16 ? `${s}:00` : s}Z`)
+
+/**
+ * Dias possíveis do 1º laudo de um exame REASSINADO, cruzando todos os Brutos registrados (dia de corte exato:
+ * FHEMIG 27→26, corte_NN, quinzena, mês). Começa entre a transferência e a conclusão (a reassinatura) e aperta:
+ * - veio COM laudo num arquivo: modo 'laudo' → o 1º laudo é do período; modo 'transferencia' → também, se a
+ *   transferência é de fora do período (só o laudo explica ele ter vindo). Em qualquer caso, foi antes da exportação;
+ * - veio SEM laudo: o 1º laudo foi depois da exportação;
+ * - NÃO veio num arquivo que cobre a Unidade: o 1º laudo não é dos dias que esse arquivo cobre por inteiro
+ *   (FHEMIG out/2026: exame de 26/09 reassinado em 28/09 que não está no 27/09 a 26/10 → 1º laudo em 26/09).
+ * Sem nada dos arquivos, aproveita o mês do Bruto (intervaloDoLaudo) e devolve null: vale a regra de antes.
+ * Também null quando os arquivos se contradizem.
+ */
+export function limitesDoLaudo(l: LinhaBruto, arquivos: ArquivoBruto[]): { de: Date; ate: Date } | null {
+  if (!arquivos.length || normNome(l.status ?? '') !== 'REASSINADO') return null
+  const concl = parseDataBR(l.data_conclusao)
+  const ini = parseDataBR(l.data_transferencia) ?? parseDataBR(l.data_exame)
+  if (!concl || !ini) return null
+  const transf = soDia(ini)
+  let lo = transf, hi = soDia(concl), usou = false
+  const iv = intervaloDoLaudo(l)
+  if (iv && !iv.transferidoNoMes) { lo = Math.max(lo, soDia(iv.de)); hi = Math.min(hi, soDia(iv.ate)) }
+  const veio = new Set(l.arquivos ?? []), comLaudo = new Set(l.arquivos_com_laudo ?? [])
+  const unidade = normNome(l.unidade ?? '')
+  const js = arquivos.map(a => {
+    const de = diaISO(a.periodo_de), ate = diaISO(a.periodo_ate)
+    const exp = a.exportado_em ? soDia(dataISO(a.exportado_em)) : null
+    return {
+      a, de, ate, exp,
+      // dias cobertos por inteiro: exportado depois do fim do período, senão só até a véspera da exportação
+      cobreAte: exp === null || exp > ate ? ate : exp - DIA,
+      vaiAte: exp === null ? ate : Math.min(ate, exp),
+      cobreNome: a.nomes.some(n => normNome(n) === unidade),
+    }
+  })
+  for (const j of js) {
+    if (comLaudo.has(j.a.id)) {
+      usou = true
+      if (j.a.modo === 'laudo' || transf < j.de || transf > j.ate) { lo = Math.max(lo, j.de); hi = Math.min(hi, j.vaiAte) }
+      else if (j.exp !== null) hi = Math.min(hi, j.exp)
+    } else if (veio.has(j.a.id)) {
+      usou = true
+      if (j.exp !== null) lo = Math.max(lo, j.exp)
+    }
+  }
+  for (let volta = 0; volta < 2; volta++) {
+    for (const j of js) {
+      if (veio.has(j.a.id) || !j.cobreNome || j.cobreAte < j.de) continue
+      if (lo >= j.de && lo <= j.cobreAte) { lo = j.cobreAte + DIA; usou = true }
+      if (hi >= j.de && hi <= j.cobreAte) { hi = j.de - DIA; usou = true }
+    }
+  }
+  if (!usou || lo > hi) return null
+  return { de: new Date(lo), ate: new Date(hi) }
+}
+
+/** Período do relatório pelo nome do arquivo da Mobilemed (relatorio_descritivo_27_09_2026_26_10_2026.xlsx), ISO. */
+export function periodoDoArquivo(nome: string): { de: string; ate: string } | null {
+  const ds = [...nome.matchAll(/(0[1-9]|[12]\d|3[01])_(0[1-9]|1[0-2])_(20\d{2})/g)].map(m => `${m[3]}-${m[2]}-${m[1]}`)
+  return ds.length === 2 && ds[0] <= ds[1] ? { de: ds[0], ate: ds[1] } : null
+}
+
+/**
+ * Descreve um Bruto para o registro do acervo (ArquivoBruto sem id), olhando o nome e as linhas dele.
+ * Null = nome sem o período (arquivo renomeado, ex.: "RELATÓRIO UNIDADES POR DATA DE EXAME_OUTUBRO"): não entra
+ * na conta do dia do 1º laudo. Modo 'laudo' só quando dá para ter certeza: nenhum exame sem laudo, nenhum laudo
+ * (fora reassinatura) fora do período e exportado pelo menos um dia depois do fim — senão 'transferencia'.
+ */
+export function descreverArquivo(nome: string, linhas: LinhaBruto[]): (Omit<ArquivoBruto, 'id'> & { linhas: number }) | null {
+  const p = periodoDoArquivo(nome)
+  if (!p || !linhas.length) return null
+  const de = diaISO(p.de), ateFim = diaISO(p.ate) + DIA - 1
+  let ultimo: Date | null = null, semLaudo = false, laudoFora = false
+  const nomes = new Set<string>()
+  for (const l of linhas) {
+    if (l.unidade) nomes.add(l.unidade)
+    const t = parseDataBR(l.data_transferencia), c = parseDataBR(l.data_conclusao)
+    for (const x of [t, c]) if (x && (!ultimo || x > ultimo)) ultimo = x
+    if (!c) semLaudo = true
+    else if (normNome(l.status ?? '') !== 'REASSINADO' && (c.getTime() < de || c.getTime() > ateFim)) laudoFora = true
+  }
+  if (!ultimo) return null
+  const exportado_em = ultimo.toISOString().slice(0, 16)
+  const modo = !semLaudo && !laudoFora && soDia(ultimo) > diaISO(p.ate) ? 'laudo' : 'transferencia'
+  return { periodo_de: p.de, periodo_ate: p.ate, exportado_em, modo, nomes: [...nomes].sort(), linhas: linhas.length }
+}
+
+/**
+ * Junta o mesmo exame guardado com o nome do paciente de antes e de depois de corrigido na Mobilemed (FHEMIG
+ * out/2026: "Bruna De Jesus Silva." → sem o ponto, "Joao" → "Jose"; o acervo guarda pelo nome e cobrava 2 vezes).
+ * Mesmo exame = mesma Unidade, accession, estudo, data do exame e data da transferência, e nomes iguais ou com
+ * pelo menos 2 palavras em comum. Fica a versão com laudo e a conclusão mais nova; os arquivos em que veio somam.
+ */
+export function juntarRenomeados(linhas: LinhaBruto[]): LinhaBruto[] {
+  const grupos = new Map<string, LinhaBruto[]>()
+  for (const l of linhas) {
+    const k = [l.unidade, l.accession_number, l.estudo_descricao, l.data_exame, l.data_transferencia].map(v => (v ?? '').trim()).join('|')
+    const g = grupos.get(k)
+    if (g) g.push(l); else grupos.set(k, [l])
+  }
+  const palavras = (n?: string) => new Set(normNome(n ?? '').split(' ').filter(p => p.length >= 3))
+  const parecidos = (a: LinhaBruto, b: LinhaBruto) => {
+    if (normNome(a.nome_paciente ?? '') === normNome(b.nome_paciente ?? '')) return true
+    const pa = palavras(a.nome_paciente), pb = palavras(b.nome_paciente)
+    return [...pa].filter(p => pb.has(p)).length >= 2
+  }
+  const melhor = (a: LinhaBruto, b: LinhaBruto) => {
+    if (!!a.data_conclusao !== !!b.data_conclusao) return a.data_conclusao ? a : b
+    return (parseDataBR(b.data_conclusao)?.getTime() ?? 0) > (parseDataBR(a.data_conclusao)?.getTime() ?? 0) ? b : a
+  }
+  const out: LinhaBruto[] = []
+  for (const g of grupos.values()) {
+    if (g.length === 1) { out.push(g[0]); continue }
+    const usados = new Set<LinhaBruto>()
+    for (const l of g) {
+      if (usados.has(l)) continue
+      // só junta nomes DIFERENTES: o mesmo nome repetido é exame repetido de verdade (ocorrência 1, 2…)
+      const iguais = g.filter(o => o !== l && !usados.has(o) && (o.nome_paciente ?? '').trim() !== (l.nome_paciente ?? '').trim() && parecidos(l, o))
+      if (!iguais.length) { out.push(l); usados.add(l); continue }
+      const todos = [l, ...iguais]
+      todos.forEach(o => usados.add(o))
+      const fica = todos.reduce(melhor)
+      out.push({
+        ...fica,
+        arquivos: [...new Set(todos.flatMap(o => o.arquivos ?? []))],
+        arquivos_com_laudo: [...new Set(todos.flatMap(o => o.arquivos_com_laudo ?? []))],
+        mes_arquivo: todos.map(o => o.mes_arquivo).filter(Boolean).sort().at(-1) ?? fica.mes_arquivo ?? null,
+      })
+    }
+  }
+  return out
+}
+
+/** Início do período seguinte ao do dia `d` na janela da unidade (ms). Dois dias no mesmo período = mesmo valor. */
+export function inicioDoProximoPeriodo(d: Date, janela: Janela): number {
+  const a = d.getUTCFullYear(), m = d.getUTCMonth(), dia = d.getUTCDate()
+  const corte = diaDeCorte(janela)
+  if (corte) return dia >= corte ? Date.UTC(a, m + 1, corte) : Date.UTC(a, m, corte)
+  if (janela === 'quinzena') return dia <= 15 ? Date.UTC(a, m, 16) : Date.UTC(a, m + 1, 1)
+  return Date.UTC(a, m + 1, 1)
+}
+
 /** Data do laudo que vale para faturar: a do 1º laudo do reassinado (início do intervalo) ou a conclusão. */
 export function dataDoLaudo(l: LinhaBruto): Date | null {
   return intervaloDoLaudo(l)?.de ?? parseDataBR(l.data_conclusao)
@@ -186,6 +357,8 @@ export function dataDoLaudo(l: LinhaBruto): Date | null {
 export interface OpcoesCalculo {
   /** O acervo já tem o Bruto do mês seguinte à competência (tira a dúvida do reassinado, ver intervaloDoLaudo). */
   mesSeguinteNoAcervo?: boolean
+  /** Brutos registrados no acervo (dia do 1º laudo do reassinado, ver limitesDoLaudo). */
+  arquivos?: ArquivoBruto[]
   /**
    * Exames dos OUTROS nomes do Bruto da mesma unidade (ex.: RIO GRANDE PRN e RIO GRANDE - APICE TELE).
    * Só servem para a franquia, que é da unidade: o exame é franquia ou excedente pela posição dele entre
@@ -275,8 +448,17 @@ export function escolherItem(linha: LinhaBruto, candidatos: ItemPreco[], urgente
   if (!candidatos.length) return null
   if (precoUnico && candidatos.length === 1) return candidatos[0]
   const mod = normModalidade(linha.modalidade)
-  const porMod = candidatos.filter(c => !c.modalidade || c.modalidade === mod)
+  let porMod = candidatos.filter(c => !c.modalidade || c.modalidade === mod)
   if (!porMod.length) return null // nunca empresta preço de outra modalidade (sem item → pendência sem_preco)
+  // contrato que cobra o exame SEM laudo e o COM laudo por preços diferentes (Nova Mutum: "Radiografia sem laudo"
+  // R$ 32,30 × "Radiografia com laudo" R$ 32,31): o item vai pelo laudo do exame (Assinado/Reassinado = com laudo).
+  // Só liga quando há item "sem laudo"; nome com "com laudo" sozinho (Cuiabá, Ipatinga) não muda nada.
+  const tipoLaudo = (c: ItemPreco) => /\bSEM LAUDO\b/.test(normNome(c.exame)) ? 'sem' : /\bCOM LAUDO\b/.test(normNome(c.exame)) ? 'com' : null
+  if (porMod.some(c => tipoLaudo(c) === 'sem')) {
+    const temLaudo = ['ASSINADO', 'REASSINADO'].includes(normNome(linha.status ?? ''))
+    const doLaudo = porMod.filter(c => tipoLaudo(c) === (temLaudo ? 'com' : 'sem') || tipoLaudo(c) === null)
+    if (doLaudo.length) porMod = doLaudo
+  }
   if (porMod.length === 1) return porMod[0]
   const papelDesejado: Papel = urgente ? 'urgencia' : 'normal'
   const te = tokens(linha.estudo_descricao ?? '')
@@ -299,6 +481,8 @@ export function escolherItem(linha: LinhaBruto, candidatos: ItemPreco[], urgente
 
 // ---------------------------------------------------------------- cálculo de um nome do Bruto
 export function calcular(nomeBruto: string, linhas: LinhaBruto[], ctx: ContextoUnidade | null, competencia: string, cfg: Config, opcoes: OpcoesCalculo = {}): Resultado {
+  linhas = juntarRenomeados(linhas)
+  if (opcoes.linhasDosOutrosNomes?.length) opcoes = { ...opcoes, linhasDosOutrosNomes: juntarRenomeados(opcoes.linhasDosOutrosNomes) }
   if (!ctx) {
     return {
       exames: [], resumo: [], fora_do_periodo: 0,
@@ -337,7 +521,17 @@ export function calcular(nomeBruto: string, linhas: LinhaBruto[], ctx: ContextoU
   // quinzena, o intervalo pode atravessar a divisa do período: aí não se chuta — vai para o período que começa na
   // divisa (o mesmo de antes, pela reassinatura) e vira pendência. Também é pendência a dúvida do mês seguinte.
   const divisa = diaDeCorte(ctx.janela) ?? (ctx.janela === 'quinzena' ? 16 : null)
+  // com os Brutos registrados, o dia do 1º laudo sai deles (limitesDoLaudo): todos os dias possíveis no mesmo
+  // período = certo; senão é pendência e fica como antes (dia de corte/quinzena: o período depois da divisa; mês: o 1º)
+  const limites = new Map<LinhaBruto, { de: Date; ate: Date } | null>()
   const laudo = (l: LinhaBruto): { data: Date | null; incerto: boolean } => {
+    if (!limites.has(l)) limites.set(l, limitesDoLaudo(l, opcoes.arquivos ?? []))
+    const lim = limites.get(l)
+    if (lim) {
+      const prox = inicioDoProximoPeriodo(lim.de, ctx.janela)
+      if (prox === inicioDoProximoPeriodo(lim.ate, ctx.janela)) return { data: new Date(lim.de.getTime() + 12 * 3600_000), incerto: false }
+      return { data: divisa ? new Date(prox) : lim.de, incerto: true }
+    }
     const iv = intervaloDoLaudo(l)
     if (!iv) return { data: parseDataBR(l.data_conclusao), incerto: false }
     if (divisa && iv.de.getUTCDate() < divisa && iv.ate.getUTCDate() >= divisa)
@@ -346,21 +540,44 @@ export function calcular(nomeBruto: string, linhas: LinhaBruto[], ctx: ContextoU
   }
   const dataDoCriterio = (l: LinhaBruto) => criterio === 'laudo' ? laudo(l).data : parseDataBR(l.data_exame)
 
-  for (const p of periodos(competencia, ctx.janela)) {
+  const periodosDaCompetencia = periodos(competencia, ctx.janela)
+  // fechamento da competência: fim do último período (na quinzena, o fim do mês — o laudo do dia 16 de um exame do
+  // dia 15 continua na 1ª quinzena)
+  const fechamento = periodosDaCompetencia[periodosDaCompetencia.length - 1].fim
+  for (const p of periodosDaCompetencia) {
     const itens = (ctx.itensPorPeriodo[p.rotulo] ?? []).filter(doSub)
     const fixos = itens.filter(i => i.papel === 'fixo' && i.valor != null)
     const cobraveis = itens.filter(i => (i.papel === 'normal' || i.papel === 'urgencia') && i.valor != null)
     const excedente = itens.find(i => i.papel === 'excedente' && i.valor != null) ?? null
 
+    // mês fechado (decisão do usuário em 03/11/2026, conferência da Ketlin de out/2026): na unidade por exame que conta
+    // pela data do EXAME, o laudo tem que ter saído até o fechamento da competência. O laudo que sai depois não entra, venha o
+    // Bruto exportado até quando vier (o de out/2026 foi até 02/11 e trouxe 6 a mais em Nova Mutum). Fixo não muda:
+    // o valor é o mesmo e a lista segue com todos os exames do período.
+    const laudoDepoisDoFechamento = (l: LinhaBruto) => {
+      if (fixo || criterio !== 'exame') return false
+      const dl = laudo(l).data
+      return !!dl && dl > fechamento
+    }
+    let foraDoFechamento = 0
     const entra = (l: LinhaBruto) => {
       const d = dataDoCriterio(l)
       const dentro = !!d && d >= p.inicio && d <= p.fim
-      const statusPassa = fixo || !!ctx.todos_status || statusOk.has(normNome(l.status ?? ''))
+      // fixo pela data do exame: todos os status; fixo pela data do laudo: só laudado (Matinhos, 03/11/2026)
+      const statusPassa = (fixo && criterio === 'exame') || !!ctx.todos_status || statusOk.has(normNome(l.status ?? ''))
       const dupPassa = cfg.duplicadoEntra || normNome(l.duplicado ?? '') !== 'SIM'
       return dentro && statusPassa && dupPassa
     }
-    const selPeriodo = linhas.filter(entra)
+    const selPeriodo = linhas.filter(l => {
+      if (!entra(l)) return false
+      if (laudoDepoisDoFechamento(l)) { foraDoFechamento++; return false }
+      return true
+    })
     selPeriodo.forEach(l => usadas.add(l))
+    if (foraDoFechamento) pend.push({
+      tipo: 'laudo_apos_fechamento', qtd_exames: foraDoFechamento,
+      detalhe: `${foraDoFechamento} exame(s) do período laudado(s) depois do fechamento${p.rotulo ? ` (${p.rotulo})` : ''}: pela data do exame, não entram (mês fechado)`,
+    })
     // ação intensificada: o exame do fim de semana vai para um relatório à parte (período próprio, mesmo preço)
     const grupos = ctx.acao_intensificada
       ? [
@@ -376,14 +593,22 @@ export function calcular(nomeBruto: string, linhas: LinhaBruto[], ctx: ContextoU
       const chaveOrdem = (l: LinhaBruto) => [l.unidade, l.data_exame, l.nome_paciente, l.estudo_descricao, l.accession_number].map(v => v ?? '').join('|')
       const posicaoNaFranquia = new Map<LinhaBruto, number>()
       if (ctx.franquia_mensal && excedente) {
-        const daUnidade = [...sel, ...(opcoes.linhasDosOutrosNomes ?? []).filter(entra)]
+        const daUnidade = [...sel, ...(opcoes.linhasDosOutrosNomes ?? []).filter(l => entra(l) && !laudoDepoisDoFechamento(l))]
         daUnidade.sort((a, b) => (dataDoCriterio(a)?.getTime() ?? 0) - (dataDoCriterio(b)?.getTime() ?? 0) || chaveOrdem(a).localeCompare(chaveOrdem(b)))
         daUnidade.forEach((l, i) => posicaoNaFranquia.set(l, i))
       }
-      const incertos = criterio === 'laudo' ? sel.filter(l => laudo(l).incerto).length : 0
+      // incerto = o 1º laudo pode ser deste período ou do vizinho: conta também o que foi para o vizinho
+      const tocaPeriodo = (l: LinhaBruto) => {
+        const lim = limites.get(l)
+        return !!lim && lim.de <= p.fim && lim.ate >= p.inicio && statusOk.has(normNome(l.status ?? '')) &&
+          (!ctx.acao_intensificada || !ehAcaoIntensificada(l, ctx.acao_intensificada))
+      }
+      const incertos = criterio !== 'laudo' ? 0 : doRelatorioPrincipal
+        ? (() => { const s = new Set(sel); return linhas.filter(l => (s.has(l) || tocaPeriodo(l)) && laudo(l).incerto).length })()
+        : sel.filter(l => laudo(l).incerto).length
       if (incertos) pend.push({
         tipo: 'reassinado_incerto', qtd_exames: incertos,
-        detalhe: `${incertos} laudo(s) reassinado(s) sem a data do 1º laudo${rotulo ? ` (${rotulo})` : ''}: suba o Bruto do mês seguinte (do dia 1 até hoje) com "Só guardar no acervo" e gere de novo; se continuar, confira o 1º laudo na Mobilemed`,
+        detalhe: `${incertos} laudo(s) reassinado(s) sem a data do 1º laudo${rotulo ? ` (${rotulo})` : ''}: exporte da Mobilemed o relatório descritivo do período exato (${ddmm(p.inicio)} a ${ddmm(p.fim)}) e o do período seguinte, suba com "Só guardar no acervo" e gere de novo; se continuar, confira o 1º laudo na Mobilemed`,
       })
 
       let semPreco = 0

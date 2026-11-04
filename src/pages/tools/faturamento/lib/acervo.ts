@@ -8,8 +8,8 @@
 // dia de corte também pegam daqui os dias fora do mês (21→20 vai até o mês seguinte; FHEMIG 27→26 vem do anterior).
 import { db } from './supabase'
 import { executarEmPool, paginar } from './pool'
-import { chaveExame } from './bruto'
-import { diaDeCorte, normNome, parseDataBR, periodos, type Janela, type LinhaBruto } from '../nucleo/motor'
+import { chaveExame, type BrutosLidos } from './bruto'
+import { descreverArquivo, diaDeCorte, normNome, parseDataBR, periodos, type Janela, type LinhaBruto } from '../nucleo/motor'
 
 const CAMPOS = [
   'unidade', 'nome_paciente', 'estudo_descricao', 'accession_number', 'modalidade', 'prioridade', 'medico',
@@ -20,12 +20,43 @@ const iso = (d: Date) => d.toISOString().slice(0, 10)
 const dataISO = (s?: string) => { const d = parseDataBR(s); return d ? iso(d) : null }
 
 /**
- * Guarda (ou atualiza) os exames lidos. Linhas idênticas no mesmo envio são exames
- * repetidos de verdade: a `ocorrencia` (1ª, 2ª…) mantém cada uma.
+ * Registra o Bruto (tabela arquivo_bruto: período, jeito da exportação, Unidades que vieram). É o que deixa o cálculo
+ * achar o DIA do 1º laudo do reassinado e cortar no dia certo (FHEMIG 27→26, corte_NN…). Null = sem período no nome
+ * (arquivo renomeado) ou banco ainda sem a tabela: os exames entram como antes.
+ */
+async function registrarArquivo(nome: string, linhas: LinhaBruto[]): Promise<string | null> {
+  const d = descreverArquivo(nome, linhas)
+  if (!d) return null
+  const { data, error } = await db.rpc('registrar_arquivo', {
+    p_nome: nome, p_de: d.periodo_de, p_ate: d.periodo_ate, p_exportado_em: d.exportado_em, p_modo: d.modo, p_nomes: d.nomes, p_linhas: d.linhas,
+  })
+  if (error) {
+    if (/registrar_arquivo|schema cache|does not exist/i.test(error.message)) return null
+    throw new Error(`acervo: ${error.message}`)
+  }
+  return (data as string | null) ?? null
+}
+
+/**
+ * Guarda (ou atualiza) os exames de cada arquivo, um arquivo por vez, do exportado há mais tempo para o mais
+ * novo (a versão mais nova do exame fica por último). Linhas idênticas no mesmo arquivo são exames repetidos
+ * de verdade: a `ocorrencia` (1ª, 2ª…) mantém cada uma. Cada exame leva o registro do arquivo em que veio.
  */
 export async function guardarNoAcervo(
-  linhas: LinhaBruto[], arquivoNome: string, aoProgredir?: (feitos: number, total: number) => void,
+  lido: Pick<BrutosLidos, 'porArquivo'>, aoProgredir?: (feitos: number, total: number) => void,
 ): Promise<number> {
+  const total = lido.porArquivo.reduce((s, a) => s + a.linhas.length, 0)
+  const ordem = [...lido.porArquivo].sort((a, b) =>
+    (descreverArquivo(a.nome, a.linhas)?.exportado_em ?? '').localeCompare(descreverArquivo(b.nome, b.linhas)?.exportado_em ?? ''))
+  let feitos = 0
+  for (const arq of ordem) {
+    const arquivoId = await registrarArquivo(arq.nome, arq.linhas)
+    await guardarLinhas(arq.linhas, arq.nome, arquivoId, n => { feitos += n; aoProgredir?.(feitos, total) })
+  }
+  return total
+}
+
+async function guardarLinhas(linhas: LinhaBruto[], arquivoNome: string, arquivoId: string | null, aoGravar: (n: number) => void) {
   const ocorrencias = new Map<string, number>()
   const agora = new Date().toISOString()
   const registros = linhas.map(l => {
@@ -38,19 +69,17 @@ export async function guardarNoAcervo(
     r.data_laudo_d = dataISO(l.data_conclusao)
     // mês do Bruto em que o exame veio: diz o mês do 1º laudo do reassinado (sem ele, o banco tenta pelo nome do arquivo)
     r.mes_arquivo = l.mes_arquivo ?? null
+    if (arquivoId) { r.arquivo_id = arquivoId; r.com_laudo = !!l.data_conclusao }
     return r
   })
   const lotes: Record<string, unknown>[][] = []
   for (let i = 0; i < registros.length; i += 500) lotes.push(registros.slice(i, i + 500))
-  let feitos = 0
   await executarEmPool(lotes, 3, async lote => {
     // guardar_exames atualiza o que já estava guardado, mas não troca versão COM laudo por uma sem laudo
     const { error } = await db.rpc('guardar_exames', { p_linhas: lote })
     if (error) throw new Error(`acervo: ${error.message}`)
-    feitos += lote.length
-    aoProgredir?.(feitos, registros.length)
+    aoGravar(lote.length)
   })
-  return registros.length
 }
 
 /** Janela de cada nome do Bruto (pela unidade de contrato ligada a ele). Chave = normNome(nome). */
@@ -90,7 +119,24 @@ export async function nomesNoAcervo(desde: string, ate: string): Promise<Map<str
  * Pelo laudo, e não pela data do exame, porque o Bruto novo também traz exame antigo
  * laudado agora — contar pela data do exame daria "coberto" sem aquele mês ter subido.
  */
-export async function acervoCobre(desde: string, ate: string): Promise<boolean> {
+export async function acervoCobre(desde: string, ate: string, nomes: string[] = []): Promise<boolean> {
+  // com os Brutos registrados (desde 04/11/2026): cada dia tem que estar num Bruto exportado depois dele, dos que
+  // trazem a Unidade (a Mobilemed exporta por grupo); unidade que não veio em nenhum deles → vale qualquer Bruto
+  const { data: regs, error: e1 } = await db.from('arquivo_bruto').select('periodo_de, periodo_ate, exportado_em, nomes')
+    .lte('periodo_de', ate).gte('periodo_ate', desde)
+  if (!e1 && regs?.length) {
+    const alvo = new Set(nomes.map(normNome))
+    const daUnidade = regs.filter(r => (r.nomes ?? []).some((n: string) => alvo.has(normNome(n))))
+    const uteis = daUnidade.length ? daUnidade : regs
+    const vespera = (d: string) => new Date(Date.parse(`${d}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10)
+    const cobreAte = (r: { periodo_ate: string; exportado_em: string }) => {
+      const exp = r.exportado_em.slice(0, 10)
+      return exp > r.periodo_ate ? r.periodo_ate : vespera(exp)
+    }
+    for (let d = desde; d <= ate; d = new Date(Date.parse(`${d}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10))
+      if (!uteis.some(r => r.periodo_de <= d && d <= cobreAte(r))) return false
+    return true
+  }
   const { count, error } = await db.from('exame_bruto').select('chave', { count: 'exact', head: true })
     .gte('data_laudo_d', desde).lte('data_laudo_d', ate)
   if (error) throw new Error(`acervo: ${error.message}`)

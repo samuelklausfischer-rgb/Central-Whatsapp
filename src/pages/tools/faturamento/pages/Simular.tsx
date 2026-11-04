@@ -72,8 +72,7 @@ export default function Simular() {
     setErro(null); setSoGuardado(null)
     try {
       setFase('guardando')
-      const { linhas } = lido ?? await lerBrutos(arquivos)
-      const n = await guardarNoAcervo(linhas, arquivos.map(f => f.name).join(' + '), (f, t) => setGuardando({ feitos: f, total: t }))
+      const n = await guardarNoAcervo(lido ?? await lerBrutos(arquivos), (f, t) => setGuardando({ feitos: f, total: t }))
       setSoGuardado(n)
     } catch (e) { setErro(e instanceof Error ? e.message : String(e)) }
     finally { setFase('parado'); setGuardando(null) }
@@ -91,7 +90,8 @@ export default function Simular() {
     setErro(null); setResultados([]); setFeitos(0); setSimulacaoId(null); setResumoLeitura(null)
     try {
       setFase('lendo')
-      const { linhas, nomes, arquivos: lidos } = lido ?? await lerBrutos(arquivos)
+      const brutos = lido ?? await lerBrutos(arquivos)
+      const { linhas, nomes, arquivos: lidos } = brutos
       if (nomes.size === 0) throw new Error('Nenhuma linha com Unidade preenchida foi encontrada no arquivo.')
       setResumoLeitura({ exames: linhas.length, nomes: nomes.size, arquivos: lidos })
 
@@ -99,7 +99,7 @@ export default function Simular() {
       // laudo (ou do exame), venha de qual Bruto vier; unidades com dia de corte pegam os dias
       // fora do mês que já estavam guardados.
       setFase('guardando')
-      await guardarNoAcervo(linhas, arquivos.map(f => f.name).join(' + '), (f, t) => setGuardando({ feitos: f, total: t }))
+      await guardarNoAcervo(brutos, (f, t) => setGuardando({ feitos: f, total: t }))
       // Dia de corte: o período sai do mês da competência — corte_NN vai até o dia NN−1 do mês SEGUINTE (setembro de
       // Lebon Régis = 21/09 a 20/10) e o ciclo da FHEMIG vem do dia 27 do mês ANTERIOR. Confere se o acervo tem esses dias.
       const corte = nomesComCorte([...nomes.keys()], await janelasPorNome(), competencia)
@@ -115,7 +115,7 @@ export default function Simular() {
         for (const [k, quem] of [...trechos].sort()) {
           const [de, ate] = k.split('|')
           if (ate >= hoje) { for (const n of quem) faltando.push(`• ${n}: o período só fecha em ${ddmm(ate)} (ainda incompleto)`); continue }
-          if (await acervoCobre(de, ate)) continue
+          if (await acervoCobre(de, ate, quem)) continue
           for (const n of quem) faltando.push(`• ${n}: precisa de ${ddmm(de)} a ${ddmm(ate)}`)
         }
         if (faltando.length && !confirm(`Estas unidades fecham com dia de corte e o acervo ainda não tem todos os dias do período:\n\n${faltando.join('\n')}\n\nSuba antes o Bruto que falta com "Só guardar no acervo". Gerar mesmo assim (essas unidades sairão com o período incompleto)?`)) {
