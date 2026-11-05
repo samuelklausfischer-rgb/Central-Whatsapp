@@ -49,16 +49,27 @@ jobs:
       # O binário do Electron não é necessário aqui e é o download mais pesado
       # do `npm install` — por isso o `--ignore-scripts` acima.
 
+      # A anon key do Supabase NÃO tem valor padrão no repositório: cadastre o
+      # secret VITE_SUPABASE_PUBLISHABLE_KEY (Settings > Secrets and variables >
+      # Actions). Sem ele o build falha aqui, com mensagem clara.
+      - name: Conferir secret da chave anon do Supabase
+        env:
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          if [ -z "$VITE_SUPABASE_PUBLISHABLE_KEY" ]; then
+            echo "::error::Secret VITE_SUPABASE_PUBLISHABLE_KEY ausente. Cadastre em Settings > Secrets and variables > Actions (anon key do Supabase self-hosted) e rode de novo."
+            exit 1
+          fi
+
       # As variáveis são EMBUTIDAS no bundle em tempo de build. Sem elas o app
       # instala, abre e fica sem backend, SEM erro de build — a armadilha já
-      # documentada do release do Windows. Os valores padrão são os mesmos que o
-      # `Dockerfile` do repo já usa (chaves publicáveis); defina os secrets para
-      # sobrescrever.
+      # documentada do release do Windows. As URLs têm valor padrão; a chave anon do
+      # Supabase não (ver o passo acima).
       - name: Montar .env.local
         run: |
           cat > .env.local <<EOF
           VITE_SUPABASE_URL=${{ secrets.VITE_SUPABASE_URL || 'https://apps-supabase.srofjl.easypanel.host' }}
-          VITE_SUPABASE_PUBLISHABLE_KEY=${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzUyNzAwMDAwLCJleHAiOjIzODQ1MDAwMDB9.Gseqw0-_o6Nmwmz3mCWvgxjjCfJB1LhVgTV83uJe-F4' }}
+          VITE_SUPABASE_PUBLISHABLE_KEY=${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_FINANCEIRO_SUPABASE_URL=${{ secrets.VITE_FINANCEIRO_SUPABASE_URL || 'https://afwrsrnzmqzteojbeeei.supabase.co' }}
           VITE_FINANCEIRO_SUPABASE_ANON_KEY=${{ secrets.VITE_FINANCEIRO_SUPABASE_ANON_KEY || 'sb_publishable_f0HmcgxIyRvw0e6pA_q6GQ_EF6t-k5W' }}
           EOF

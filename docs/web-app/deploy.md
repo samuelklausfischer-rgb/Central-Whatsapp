@@ -32,7 +32,7 @@ RUN npm run build        # Gera dist/
 FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-# Entrypoint injeta variáveis em /env-config.js e inicia Nginx
+# docker-entrypoint.d/40-config.sh gera /env-config.js na subida do container e o Nginx inicia
 ```
 
 ### nginx.conf

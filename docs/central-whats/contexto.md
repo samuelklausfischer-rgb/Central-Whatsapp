@@ -32,7 +32,7 @@ VITE_SUPABASE_URL=https://seu-projeto.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_sua_chave_aqui
 ```
 
-No Dockerfile, as variáveis `VITE_*` possuem defaults de produção e também podem ser sobrescritas por build args. A build gera `/env-config.js` dentro da imagem com esses valores.
+No Dockerfile, a URL do Supabase e as URLs públicas dos apps têm defaults de produção. O `/env-config.js` é gerado na SUBIDA do container (`docker-entrypoint.d/40-config.sh`) a partir das variáveis do serviço; a chave anon (`VITE_SUPABASE_PUBLISHABLE_KEY`) não tem default e precisa estar no Environment do EasyPanel.
 
 ## Estrutura Principal
 
@@ -69,14 +69,14 @@ npm run preview
 1. Crie um novo app a partir do repositório GitHub.
 2. Selecione deploy por `Dockerfile`.
 3. Use porta interna `80`.
-4. Faça rebuild da imagem. O Dockerfile já possui defaults de produção para:
+4. Cadastre as variáveis abaixo no Environment do serviço e faça deploy. O Dockerfile tem default só para as URLs:
 
 | Variável | Obrigatória | Observação |
 | --- | --- | --- |
 | `VITE_SUPABASE_URL` | Sim | URL do projeto Supabase |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | Sim | Chave publishable/anon do Supabase |
 
-Se o EasyPanel oferecer build args, você pode sobrescrever esses valores. Caso contrário, o rebuild usa os defaults do Dockerfile. Depois do rebuild, verifique `/env-config.js` no navegador e confirme que os valores não estão vazios.
+As variáveis são lidas em runtime (sem rebuild para trocar a chave). Se `VITE_SUPABASE_PUBLISHABLE_KEY` faltar, o log do container mostra `[40-config] ERRO`. Depois do deploy, verifique `/env-config.js` no navegador e confirme que os valores não estão vazios.
 
 ## Backend e Funções
 

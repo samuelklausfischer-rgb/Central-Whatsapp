@@ -18,7 +18,13 @@
  */
 import { loadEnv } from 'vite'
 
-const OBRIGATORIAS = [
+// Na imagem Docker (web) a URL e a chave anon do Supabase principal chegam em
+// RUNTIME, via `docker-entrypoint.d/40-config.sh` -> `/env-config.js`; por isso
+// o Dockerfile liga `ENV_EM_RUNTIME=1` e estas duas saem do portão. Nos builds
+// do Electron e do Android continuam obrigatórias (vão gravadas no bundle).
+const SUPABASE_EM_RUNTIME = process.env.ENV_EM_RUNTIME === '1'
+
+const OBRIGATORIAS_TODAS = [
   ['VITE_SUPABASE_URL', 'URL do Supabase principal'],
   ['VITE_SUPABASE_PUBLISHABLE_KEY', 'chave publicável do Supabase principal'],
   ['VITE_FINANCEIRO_SUPABASE_URL', 'URL do Supabase financeiro (Análise PRN, Rateio)'],
@@ -33,6 +39,10 @@ const OBRIGATORIAS = [
  * ganhar padrão (04/09/2026), quando a ferramenta virou iframe — antes ela
  * tinha um caminho local de reserva que tornava o vazio aceitável.
  */
+
+const OBRIGATORIAS = SUPABASE_EM_RUNTIME
+  ? OBRIGATORIAS_TODAS.filter(([nome]) => !nome.startsWith('VITE_SUPABASE_'))
+  : OBRIGATORIAS_TODAS
 
 const modo = process.env.NODE_ENV || 'production'
 const env = loadEnv(modo, process.cwd(), 'VITE_')
