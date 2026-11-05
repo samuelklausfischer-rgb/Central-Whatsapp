@@ -99,8 +99,8 @@ export async function xlsxDoRelatorio(simulacaoId: string, competencia: string, 
 export interface ArquivoRelatorio { caminho: string; bytes: Uint8Array }
 
 /**
- * Todos os arquivos do relatório da unidade: o Excel e, nas pastas da config (pdf_prioridade_pastas e
- * pdf_demonstrativo_pastas; padrão Unaí e Abdon Batista), os PDFs. Caminhos iguais aos do ZIP. Se algum PDF não pôde
+ * Todos os arquivos do relatório da unidade: o Excel e, nas pastas da config (pdf_prioridade_pastas,
+ * pdf_demonstrativo_pastas e pdf_upa_vitoria_pastas; padrão Unaí, Abdon Batista e VITORIA UPAS ES), os PDFs. Caminhos iguais aos do ZIP. Se algum PDF não pôde
  * sair (exames que não batem com o resumo), vai junto um "LEIA-ME" com o motivo, para ninguém mandar o relatório sem ele.
  */
 export async function arquivosDoRelatorio(simulacaoId: string, competencia: string, rel: Relatorio): Promise<ArquivoRelatorio[]> {
@@ -116,7 +116,7 @@ export async function arquivosDoRelatorio(simulacaoId: string, competencia: stri
 
 // Regras do relatório na config (prioridades_urgencia, separar_urgencia_pastas, desdobrar_quantidade_pastas e as
 // chaves pdf_*): uma leitura serve para o ZIP inteiro, vale por 5 minutos.
-const CHAVES_RELATORIO = ['prioridades_urgencia', 'separar_urgencia_pastas', 'desdobrar_quantidade_pastas', 'pdf_prioridade_pastas', 'pdf_demonstrativo_pastas', 'pdf_demonstrativo_cidade']
+const CHAVES_RELATORIO = ['prioridades_urgencia', 'separar_urgencia_pastas', 'desdobrar_quantidade_pastas', 'pdf_prioridade_pastas', 'pdf_demonstrativo_pastas', 'pdf_demonstrativo_cidade', 'pdf_upa_vitoria_pastas']
 type RegrasRelatorio = { urgencia: RegraUrgencia; pdf: RegraPdf; desdobrar: string[] }
 let cacheRegras: { em: number; dados: Promise<RegrasRelatorio> } | null = null
 export function carregarRegrasRelatorio(): Promise<RegrasRelatorio> {

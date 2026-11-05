@@ -1,12 +1,13 @@
-// PDFs de Unaí (rotina × urgência) e Abdon Batista (lista + demonstrativo) — pedido da Ketlin em 04/11/2026.
+// PDFs de Unaí (rotina × urgência) e Abdon Batista (lista + demonstrativo) — pedido da Ketlin em 04/11/2026 — e das
+// UPAs de Vitória/ES (lista + resumo para a AGIR, 05/11/2026).
 // Rodar: bun test src/pages/tools/faturamento   (o projeto não tem runner de teste; o bun lê o TS direto)
 // Com FAT_EXEMPLO=<pasta> grava os PDFs de exemplo (dados fictícios) nessa pasta, para conferir o visual.
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { writeFileSync } from 'node:fs'
 import {
-  caminhoPdf, dataDoDemonstrativo, dividirPorPrioridade, examesBatemComResumo, lerRegraPdf, linhasDemonstrativo,
-  pdfsDaUnidade, pdfsDoRelatorio, PDF_PADRAO, textoPeriodo,
+  caminhoPdf, cartaUpa, dataDoDemonstrativo, dividirPorPrioridade, examesBatemComResumo, lerRegraPdf, linhasDemonstrativo,
+  linhasResumoUpa, mesPorExtenso, ordenarPorDataExameDesc, pdfsDaUnidade, pdfsDoRelatorio, PDF_PADRAO, textoPeriodo, upaDoRelatorio,
 } from './faturaUnidadePdf'
 import { caminhoRelatorio, juntarResumo, URGENCIA_PADRAO, type Relatorio, type ResumoLinhaRel } from './relatorioUnidade'
 import type { ExameLinha } from './excel'
@@ -37,6 +38,7 @@ const resumoAbdon: ResumoLinhaRel[] = [
   { rotulo: 'Responsabilidade técnica radiologista - mensal', quantidade: 1, valor_unitario: 1600, total: 1600, fixo: true },
   { rotulo: 'Sistema de gerenciamento de imagem PACS - mensal', quantidade: 1, valor_unitario: 500, total: 500, fixo: true },
 ]
+const r2 = (v: number) => Math.round(v * 100) / 100
 const ehPdf = (b: Uint8Array) => new TextDecoder().decode(b.slice(0, 5)) === '%PDF-'
 
 describe('regra dos PDFs (config)', () => {
@@ -131,5 +133,76 @@ describe('pdfsDoRelatorio', () => {
     const { pdfs } = await pdfsDoRelatorio({ ...rel('ABDON BATISTA - SC', ['MEDIMAGEM ABDON BATISTA - SC', 'MEDIMAGEM ABDON BATISTA - SC APICE TELE COM UM NOME BEM COMPRIDO']), subunidade: 'HOSPITAL', periodo: '1ª QUINZENA' },
       '2026-10', resumoAbdon, abdon.map(e => ({ ...e, estudo_descricao: 'TORAX\nPA' })), regra, URGENCIA_PADRAO)
     assert.equal(pdfs.length, 2)
+  })
+})
+
+// UPAs de Vitória/ES (pedido de 05/11/2026): lista + resumo por UPA, dados fictícios
+describe('UPAs de Vitória (AGIR)', () => {
+  const regra = lerRegraPdf({})
+  const upaRel = (subunidade: string | null, nomes: string[]): Relatorio => ({ ...rel('VITORIA UPAS ES', nomes), subunidade })
+  // 23 exames a 14,10 (DX e CR), datas embaralhadas; dois no mesmo minuto
+  const dataDe = (i: number) => `${String(1 + ((i * 7) % 31)).padStart(2, '0')}/10/2026 ${String((i * 5) % 24).padStart(2, '0')}:${String((i * 13) % 60).padStart(2, '0')}`
+  const examesSP: ExameLinha[] = Array.from({ length: 23 }, (_, i) => ({
+    ...exame('MEDIMAGEM UPA SÃO PEDRO', i % 2 ? 'Tórax Pa' : 'ABDÔMEN ORTOSTASE', i % 5 ? 'DX' : 'CR', 'ROTINA', 14.1, i), data_exame: dataDe(i),
+  }))
+  const resumoSP = juntarResumo([
+    { rotulo: 'DX', quantidade: examesSP.filter(e => e.modalidade === 'DX').length, valor_unitario: 14.1, total: r2(examesSP.filter(e => e.modalidade === 'DX').length * 14.1), fixo: false },
+    { rotulo: 'CR', quantidade: examesSP.filter(e => e.modalidade === 'CR').length, valor_unitario: 14.1, total: r2(examesSP.filter(e => e.modalidade === 'CR').length * 14.1), fixo: false },
+  ])
+
+  it('regra: VITORIA UPAS ES por padrão; chave vazia desliga; as outras unidades não mudam', () => {
+    assert.deepEqual(regra.upaVitoria, ['VITORIA UPAS ES'])
+    assert.deepEqual(pdfsDaUnidade({ pasta: 'Vitória UPAs ES' }, regra), ['upa_lista', 'upa_resumo'])
+    assert.deepEqual(pdfsDaUnidade({ pasta: 'VITORIA UPAS ES' }, lerRegraPdf({ pdf_upa_vitoria_pastas: '' })), [])
+    assert.deepEqual(pdfsDaUnidade({ pasta: 'UNAI' }, regra), ['rotina', 'urgencia'])
+    assert.deepEqual(pdfsDaUnidade({ pasta: 'ABDON BATISTA - SC' }, regra), ['lista', 'demonstrativo'])
+  })
+  it('E-Doc por subunidade (sem acento e sem caixa)', () => {
+    assert.equal(upaDoRelatorio({ subunidade: 'UPA SÃO PEDRO' })?.edoc, '20250002.04431')
+    assert.equal(upaDoRelatorio({ subunidade: 'upa praia do sua' })?.edoc, '20250002.04430')
+    assert.equal(upaDoRelatorio({ subunidade: 'UPA OUTRA' }), null)
+    assert.equal(upaDoRelatorio({ subunidade: null }), null)
+  })
+  it('lista do exame mais recente ao mais antigo (data do EXAME), data fora do formato por último', () => {
+    const l = ordenarPorDataExameDesc([...examesSP, { ...examesSP[0], data_exame: null }])
+    const chave = (s: string) => s.replace(/^(\d\d)\/(\d\d)\/(\d{4}) (\d\d):(\d\d)$/, '$3$2$1$4$5')
+    const ks = l.slice(0, -1).map(e => chave(e.data_exame!))
+    assert.deepEqual(ks, [...ks].sort().reverse())
+    assert.equal(l.at(-1)!.data_exame, null)
+    assert.equal(ordenarPorDataExameDesc([{ ...examesSP[0], data_exame: '01/10/2026 10:00' }, { ...examesSP[1], data_exame: '31/10/2026 09:00' }])[0].data_exame, '31/10/2026 09:00')
+  })
+  it('resumo: DX e CR a 14,10 numa linha "Exame" com o Cód. PMV; soma = Excel', () => {
+    const l = linhasResumoUpa(examesSP, [], upaDoRelatorio({ subunidade: 'UPA SÃO PEDRO' })!)
+    assert.equal(l.length, 1)
+    assert.deepEqual([l[0].item, l[0].unid, l[0].quantidade, l[0].valor_unitario, l[0].total], [1, 'Exame', 23, 14.1, 324.3])
+    assert.equal(l[0].descricao.at(-1), 'Cód. PMV: 7.22.42.0007-8')
+    assert.equal(l[0].total, resumoSP.reduce((s, x) => s + x.total, 0))
+  })
+  it('carta e caixa do resumo', () => {
+    const c = cartaUpa(upaDoRelatorio({ subunidade: 'UPA PRAIA DO SUÁ' })!, '2026-10', '')
+    assert.equal(c.assunto, 'Assunto: Prestação de serviços médicos PRONTO ATENDIMENTO DE UPA PRAIA DO SUÁ – PAPS')
+    assert.equal(c.processo, 'Processo E-Doc nº: 20250002.04430')
+    assert.match(c.corpo, /no mês de Outubro de 2026, no período de 01 a 31\.$/)
+    assert.equal(mesPorExtenso('2026-09'), 'SETEMBRO')
+    assert.match(cartaUpa(upaDoRelatorio({ subunidade: 'UPA SÃO PEDRO' })!, '2026-02', '').corpo, /Fevereiro de 2026, no período de 01 a 28\./)
+  })
+  it('pdfsDoRelatorio: 2 PDFs por UPA (lista e RESUMO), caminhos ao lado do Excel', async () => {
+    for (const [sub, nomeBruto] of [['UPA SÃO PEDRO', 'MEDIMAGEM UPA SÃO PEDRO'], ['UPA PRAIA DO SUÁ', 'MEDIMAGEM UPA SUA']] as const) {
+      const r = upaRel(sub, [nomeBruto])
+      const { pdfs, avisos } = await pdfsDoRelatorio(r, '2026-10', resumoSP, examesSP, regra, URGENCIA_PADRAO)
+      assert.deepEqual(avisos, [])
+      assert.deepEqual(pdfs.map(p => p.tipo), ['upa_lista', 'upa_resumo'])
+      assert.ok(pdfs.every(p => ehPdf(p.bytes)))
+      const c = caminhoRelatorio(r, '2026-10')
+      assert.equal(c, `Medimagem/VITORIA UPAS ES - ${sub} 10.2026.xlsx`)
+      assert.deepEqual(pdfs.map(p => caminhoPdf(c, p.sufixo)), [`Medimagem/VITORIA UPAS ES - ${sub} 10.2026.pdf`, `Medimagem/VITORIA UPAS ES - ${sub} 10.2026 RESUMO.pdf`])
+      if (process.env.FAT_EXEMPLO) for (const p of pdfs) writeFileSync(`${process.env.FAT_EXEMPLO}/${caminhoPdf(c, p.sufixo).split('/')[1]}`, p.bytes)
+    }
+  })
+  it('UPA sem E-Doc ou exames que não batem: sem PDF, com aviso', async () => {
+    const semEdoc = await pdfsDoRelatorio(upaRel('UPA NOVA', ['X']), '2026-10', resumoSP, examesSP, regra, URGENCIA_PADRAO)
+    assert.deepEqual(semEdoc.pdfs, []); assert.equal(semEdoc.avisos.length, 1); assert.match(semEdoc.avisos[0], /E-Doc/)
+    const naoBate = await pdfsDoRelatorio(upaRel('UPA SÃO PEDRO', ['X']), '2026-10', resumoSP, examesSP.slice(1), regra, URGENCIA_PADRAO)
+    assert.deepEqual(naoBate.pdfs, []); assert.equal(naoBate.avisos.length, 1)
   })
 })

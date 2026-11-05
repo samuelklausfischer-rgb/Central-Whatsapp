@@ -127,7 +127,7 @@ export default function Simulacao() {
       const arq = new JSZip()
       let feitos = 0
       await executarEmPool(relFiltrados, 2, async r => {
-        for (const a of await arquivosDoRelatorio(id, competencia, r)) arq.file(a.caminho, a.bytes) // Excel e, em Unaí e Abdon, os PDFs
+        for (const a of await arquivosDoRelatorio(id, competencia, r)) arq.file(a.caminho, a.bytes) // Excel e, em Unaí, Abdon e nas UPAs de Vitória, os PDFs
         setZip({ feitos: ++feitos, total: relFiltrados.length })
       })
       const blob = await arq.generateAsync({ type: 'blob', compression: 'DEFLATE' })
