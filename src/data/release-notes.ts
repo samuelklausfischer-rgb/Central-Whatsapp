@@ -34,6 +34,16 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.234',
+    date: '2026-11-05 17:00',
+    title: 'Faturamento: PDFs da AGIR para as UPAs de Vitória',
+    details: [
+      '🧾 UPA São Pedro e UPA Praia do Suá: além do Excel, cada uma sai com os dois PDFs que vão para a AGIR. A lista tem a carta com o Processo E-Doc da UPA e os exames (paciente, estudo, quantidade, valor e data do exame, do mais recente ao mais antigo) com o total. O resumo tem 1 página: "DESCRIÇÃO DOS SERVIÇOS, QUANTITATIVOS E VALORES", com o item do contrato, o Cód. PMV, a quantidade, o valor unitário e o total',
+      '⚙️ Vale para a pasta da chave pdf_upa_vitoria_pastas da configuração (sem a chave: VITORIA UPAS ES). O E-Doc de cada UPA fica no código (UPAS_VITORIA). Se os exames não baterem com o resumo do cálculo, os PDFs não saem e o Excel continua sendo a referência. As outras unidades continuam como antes',
+    ],
+    usabilidade: 'Gere o ZIP "Faturas por unidade" como antes: na pasta Medimagem, cada UPA de Vitória vem com o Excel, o PDF da lista e o PDF "RESUMO". Os dois PDFs vão sem assinatura, para assinar digitalmente antes de mandar.',
+  },
+  {
     version: '0.0.233',
     date: '2026-11-05 15:00',
     title: 'Faturamento: Marabá com uma linha por laudo',
