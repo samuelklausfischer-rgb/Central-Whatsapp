@@ -188,3 +188,39 @@ export function caminhoRelatorio(rel: Relatorio, competencia: string): string {
   const base = rel.pasta ? rel.pasta + (rel.subunidade ? ` - ${rel.subunidade}` : '') : `SEM CONTRATO - ${rel.nomes[0]}`
   return `${nomeSeguroWindows(limpa(rel.rotuloGrupo))}/${limpa(base)} ${mm}.${aaaa}${rel.periodo ? ' ' + limpa(rel.periodo) : ''}.xlsx`
 }
+
+/**
+ * Pastas cuja lista de exames sai "desdobrada" (pedido de 05/11/2026, só Marabá): o exame que conta N pela regra de
+ * quantidade (ex.: abdome total = 2) vira N linhas iguais de quantidade 1, em vez de uma linha de quantidade N.
+ * Vem da chave desdobrar_quantidade_pastas da config ("MARABA, OUTRA - UF"), comparada sem acento e sem caixa.
+ * Sem a chave, nenhuma pasta desdobra. Só muda a lista: a tabela do fim e o TOTAL continuam iguais.
+ */
+export function lerDesdobrarPastas(cfg: Record<string, string | null | undefined>): string[] {
+  return (cfg.desdobrar_quantidade_pastas ?? '').split(',').map(s => s.trim()).filter(Boolean)
+}
+
+export const desdobraQuantidade = (rel: Pick<Relatorio, 'pasta'>, pastas: string[]): boolean =>
+  !!rel.pasta && pastas.some(p => normNome(p) === normNome(rel.pasta!))
+
+/**
+ * Cada exame de quantidade N (N > 1) vira N linhas de quantidade 1, com o mesmo valor unitário. O valor total de
+ * cada linha é o unitário em centavos; a última fica com o que sobrar, para a soma ser exatamente a do motor
+ * (que arredonda unitário × N uma vez só).
+ */
+export function desdobrarQuantidade(exames: ExameLinha[]): ExameLinha[] {
+  return exames.flatMap(e => {
+    const n = Math.round(Number(e.quantidade))
+    if (!(n > 1)) return [e]
+    const totalCent = centavos(Number(e.valor_total))
+    const cada = centavos(Number(e.valor_unitario))
+    return Array.from({ length: n }, (_, i) => ({
+      ...e, quantidade: 1,
+      valor_total: (i < n - 1 ? cada : totalCent - cada * (n - 1)) / 100,
+    }))
+  })
+}
+
+/** Lista de exames do relatório: desdobrada só nas pastas da regra; nas outras, como veio. */
+export function examesDoRelatorio(rel: Pick<Relatorio, 'pasta'>, exames: ExameLinha[], pastas: string[]): ExameLinha[] {
+  return desdobraQuantidade(rel, pastas) ? desdobrarQuantidade(exames) : exames
+}

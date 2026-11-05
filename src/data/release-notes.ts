@@ -34,6 +34,16 @@ export function classificarNota(detalhe: string): CategoriaNota {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: '0.0.233',
+    date: '2026-11-05 15:00',
+    title: 'Faturamento: Marabá com uma linha por laudo',
+    details: [
+      '📋 Marabá: o exame que conta 2 (abdome total e trifásico) sai em 2 linhas iguais de quantidade 1, em vez de uma linha de quantidade 2. A tabela do fim e o TOTAL não mudam',
+      '⚙️ A regra vale só para as unidades da chave desdobrar_quantidade_pastas da configuração (hoje só Marabá). As outras unidades continuam como antes',
+    ],
+    usabilidade: 'Gere o ZIP "Faturas por unidade" como antes: no Excel de Marabá, cada abdome total aparece duas vezes, cada uma com quantidade 1.',
+  },
+  {
     version: '0.0.232',
     date: '2026-11-04 17:00',
     title: 'Faturamento: relatórios em PDF de Unaí e Abdon Batista',

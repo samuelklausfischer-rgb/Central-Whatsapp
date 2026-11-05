@@ -10,7 +10,7 @@ import type { InstrucaoNF, RespostaSimular, Simulacao, SimulacaoNome, SimulacaoP
 import { agregar, type ResumoLinha, type UnidadeEntrada } from './consolidado'
 import { gerarConsolidado, nomeArquivoConsolidado } from './consolidadoXlsx'
 import { normNome } from '../nucleo/motor'
-import { caminhoRelatorio, faturaUnidadeXlsx, grupoDoNome, grupoDoRelatorioPorNome, juntarResumo, lerRegraUrgencia, resumoDoRelatorio, type InfoAlias, type RegraUrgencia, type Relatorio, type ResumoLinhaRel } from './relatorioUnidade'
+import { caminhoRelatorio, examesDoRelatorio, faturaUnidadeXlsx, grupoDoNome, grupoDoRelatorioPorNome, juntarResumo, lerDesdobrarPastas, lerRegraUrgencia, resumoDoRelatorio, type InfoAlias, type RegraUrgencia, type Relatorio, type ResumoLinhaRel } from './relatorioUnidade'
 import { caminhoPdf, lerRegraPdf, pdfsDoRelatorio, type RegraPdf } from './faturaUnidadePdf'
 
 export type ModoCalculo = 'servidor' | 'local'
@@ -90,9 +90,10 @@ async function dadosDoRelatorio(simulacaoId: string, rel: Relatorio): Promise<{ 
 
 /** Relatório "Fatura de unidade": junta todos os nomes da unidade daquele grupo e período. */
 export async function xlsxDoRelatorio(simulacaoId: string, competencia: string, rel: Relatorio): Promise<Uint8Array> {
-  const { resumo, exames } = await dadosDoRelatorio(simulacaoId, rel)
-  // tabela do fim com urgência e rotina separadas só nas pastas da config separar_urgencia_pastas (os fixos e o TOTAL não mudam)
-  return faturaUnidadeXlsx(rel, competencia, resumoDoRelatorio(rel, resumo, exames, (await carregarRegrasRelatorio()).urgencia), exames)
+  const [{ resumo, exames }, regras] = await Promise.all([dadosDoRelatorio(simulacaoId, rel), carregarRegrasRelatorio()])
+  // tabela do fim com urgência e rotina separadas só nas pastas da config separar_urgencia_pastas (os fixos e o TOTAL não mudam);
+  // lista com o exame de quantidade N em N linhas só nas pastas de desdobrar_quantidade_pastas (Marabá)
+  return faturaUnidadeXlsx(rel, competencia, resumoDoRelatorio(rel, resumo, exames, regras.urgencia), examesDoRelatorio(rel, exames, regras.desdobrar))
 }
 
 export interface ArquivoRelatorio { caminho: string; bytes: Uint8Array }
@@ -105,7 +106,7 @@ export interface ArquivoRelatorio { caminho: string; bytes: Uint8Array }
 export async function arquivosDoRelatorio(simulacaoId: string, competencia: string, rel: Relatorio): Promise<ArquivoRelatorio[]> {
   const [{ resumo, exames }, regras] = await Promise.all([dadosDoRelatorio(simulacaoId, rel), carregarRegrasRelatorio()])
   const caminho = caminhoRelatorio(rel, competencia)
-  const xlsx = await faturaUnidadeXlsx(rel, competencia, resumoDoRelatorio(rel, resumo, exames, regras.urgencia), exames)
+  const xlsx = await faturaUnidadeXlsx(rel, competencia, resumoDoRelatorio(rel, resumo, exames, regras.urgencia), examesDoRelatorio(rel, exames, regras.desdobrar))
   const { pdfs, avisos } = await pdfsDoRelatorio(rel, competencia, resumo, exames, regras.pdf, regras.urgencia.prioridades)
   const leiame = avisos.length
     ? [{ caminho: caminho.replace(/\.xlsx$/i, ' - LEIA-ME.txt'), bytes: new TextEncoder().encode(['PDF NÃO GERADO', '', ...avisos, ''].join('\r\n')) }]
@@ -113,17 +114,18 @@ export async function arquivosDoRelatorio(simulacaoId: string, competencia: stri
   return [{ caminho, bytes: xlsx }, ...pdfs.map(p => ({ caminho: caminhoPdf(caminho, p.sufixo), bytes: p.bytes })), ...leiame]
 }
 
-// Regras do relatório na config (prioridades_urgencia, separar_urgencia_pastas e as chaves pdf_*): uma leitura serve
-// para o ZIP inteiro, vale por 5 minutos.
-const CHAVES_RELATORIO = ['prioridades_urgencia', 'separar_urgencia_pastas', 'pdf_prioridade_pastas', 'pdf_demonstrativo_pastas', 'pdf_demonstrativo_cidade']
-let cacheRegras: { em: number; dados: Promise<{ urgencia: RegraUrgencia; pdf: RegraPdf }> } | null = null
-export function carregarRegrasRelatorio(): Promise<{ urgencia: RegraUrgencia; pdf: RegraPdf }> {
+// Regras do relatório na config (prioridades_urgencia, separar_urgencia_pastas, desdobrar_quantidade_pastas e as
+// chaves pdf_*): uma leitura serve para o ZIP inteiro, vale por 5 minutos.
+const CHAVES_RELATORIO = ['prioridades_urgencia', 'separar_urgencia_pastas', 'desdobrar_quantidade_pastas', 'pdf_prioridade_pastas', 'pdf_demonstrativo_pastas', 'pdf_demonstrativo_cidade']
+type RegrasRelatorio = { urgencia: RegraUrgencia; pdf: RegraPdf; desdobrar: string[] }
+let cacheRegras: { em: number; dados: Promise<RegrasRelatorio> } | null = null
+export function carregarRegrasRelatorio(): Promise<RegrasRelatorio> {
   if (cacheRegras && Date.now() - cacheRegras.em < 5 * 60_000) return cacheRegras.dados
   const dados = Promise.resolve(db.from('config').select('chave, valor').in('chave', CHAVES_RELATORIO))
     .then(({ data, error }) => {
       if (error) throw new Error(error.message)
       const cfg = Object.fromEntries(((data ?? []) as { chave: string; valor: string }[]).map(c => [c.chave, c.valor]))
-      return { urgencia: lerRegraUrgencia(cfg), pdf: lerRegraPdf(cfg) }
+      return { urgencia: lerRegraUrgencia(cfg), pdf: lerRegraPdf(cfg), desdobrar: lerDesdobrarPastas(cfg) }
     })
     .catch(e => { cacheRegras = null; throw e })
   cacheRegras = { em: Date.now(), dados }
