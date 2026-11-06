@@ -1,5 +1,6 @@
 // Faturamento por Unidade — ferramenta do Central Whats (aberta pelo ToolHost).
-// Telas: Configuração, Unidade, Gerar relatório, Relatórios e Relatório. As telas
+// Telas: Configuração, Unidade, Nova unidade, Erros de configuração, Regras gerais,
+// Gerar relatório, Relatórios e Relatório. As telas
 // vieram do app de testes (repositório PRN-faturamento-unidades); os dados ficam
 // no schema `faturamento_unidades` e o cálculo na Edge Function fat-simular.
 // A troca de tela é estado interno (ver navegacao.tsx), não URL.
@@ -15,9 +16,14 @@ import Unidade from './pages/Unidade'
 import Simular from './pages/Simular'
 import Simulacoes from './pages/Simulacoes'
 import Simulacao from './pages/Simulacao'
+import Diagnostico from './pages/Diagnostico'
+import RegrasGerais from './pages/RegrasGerais'
+import NovaUnidade from './pages/NovaUnidade'
 
 const ABAS: { tela: Tela; label: string; ativaEm: Tela['nome'][] }[] = [
-  { tela: { nome: 'config' }, label: 'Configuração', ativaEm: ['config', 'unidade'] },
+  { tela: { nome: 'config' }, label: 'Configuração', ativaEm: ['config', 'unidade', 'nova-unidade'] },
+  { tela: { nome: 'diagnostico' }, label: 'Erros de configuração', ativaEm: ['diagnostico'] },
+  { tela: { nome: 'regras-gerais' }, label: 'Regras gerais', ativaEm: ['regras-gerais'] },
   { tela: { nome: 'gerar' }, label: 'Gerar relatório', ativaEm: ['gerar'] },
   { tela: { nome: 'relatorios' }, label: 'Relatórios', ativaEm: ['relatorios', 'relatorio'] },
 ]
@@ -28,6 +34,9 @@ function Conteudo({ tela }: { tela: Tela }) {
     case 'gerar': return <Simular />
     case 'relatorios': return <Simulacoes />
     case 'relatorio': return <Simulacao key={tela.id} />
+    case 'diagnostico': return <Diagnostico />
+    case 'regras-gerais': return <RegrasGerais />
+    case 'nova-unidade': return <NovaUnidade />
     default: return <Configuracao />
   }
 }
