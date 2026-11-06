@@ -1,16 +1,17 @@
-import { useRef, useState, type ReactNode } from 'react'
-import { Loader2, UploadCloud, Download, FileSpreadsheet, Plus, X } from 'lucide-react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Loader2, UploadCloud, Download, FileSpreadsheet, Plus, X, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { GlassCard } from '@/components/ui/surface'
 import { ListRow } from '@/components/ui/list-row'
 import { useToast } from '@/hooks/use-toast'
 import { FinanceiroAuthProvider, useFinanceiroAuth } from '@/contexts/financeiro-auth-context'
-import { useRateioUpload, useRateioHistorico } from '@/hooks/use-rateio'
+import { useRateioUpload, useRateioHistorico, useRateioUnidades } from '@/hooks/use-rateio'
 import { RateioHistoricoPanel } from '@/components/rateio/RateioHistoricoPanel'
-import { fmt, fmtNum, valorNumerico, baixarBase64 } from '@/lib/rateio/format'
-import { deleteRateioExecucao, type RateioEmpresa } from '@/services/rateio/rateio-service'
+import { fmt, fmtNum, valorNumerico, baixarBase64, rotuloPendencia } from '@/lib/rateio/format'
+import { deleteRateioExecucao, type RateioAdicional, type RateioEmpresa } from '@/services/rateio/rateio-service'
 
 const EMPRESAS: { key: RateioEmpresa; label: string }[] = [
   { key: 'PRN', label: 'PRN' },
@@ -54,10 +55,13 @@ function FinanceiroLoginGate({ children }: { children: ReactNode }) {
 }
 
 // Linha do formulário de serviço adicional. `valor` fica como texto enquanto o
-// usuário digita; só vira número na hora de enviar.
-type LinhaAdicional = { nome: string; valor: string }
+// usuário digita; só vira número na hora de enviar. `unidade` é '' (ainda não
+// escolhida), UNIDADE_TODAS (dividir entre as ativas) ou o nome exato da unidade.
+type LinhaAdicional = { nome: string; valor: string; unidade: string }
 
-const LINHA_ADICIONAL_VAZIA: LinhaAdicional = { nome: '', valor: '' }
+const UNIDADE_TODAS = '__TODAS__'
+
+const LINHA_ADICIONAL_VAZIA: LinhaAdicional = { nome: '', valor: '', unidade: '' }
 
 function RateioInner() {
   const [empresa, setEmpresa] = useState<RateioEmpresa>('PRN')
@@ -69,6 +73,23 @@ function RateioInner() {
 
   const { processar, enviando, status, erro, resultado } = useRateioUpload()
   const { historico, loading: carregandoHistorico, error: erroHistorico, refetch } = useRateioHistorico(empresa)
+  const {
+    unidades,
+    loading: carregandoUnidades,
+    error: erroUnidades,
+    refetch: recarregarUnidades,
+  } = useRateioUnidades(empresa)
+
+  // A escolha de unidade só vale para a empresa/lista atual: sem lista (carregando,
+  // erro ou troca de empresa) zera as escolhas específicas; com lista, tira as que
+  // não existem nela. "Todas as unidades ativas" não depende da lista e é mantida.
+  useEffect(() => {
+    const invalida = (a: LinhaAdicional) =>
+      !!a.unidade && a.unidade !== UNIDADE_TODAS && !unidades?.includes(a.unidade)
+    setAdicionais((atual) =>
+      atual.some(invalida) ? atual.map((a) => (invalida(a) ? { ...a, unidade: '' } : a)) : atual,
+    )
+  }, [unidades])
 
   function selecionarArquivo(f: File | null | undefined) {
     if (!f) return
@@ -92,11 +113,32 @@ function RateioInner() {
   }
 
   // Só sobe o que tem valor > 0. Linha em branco é o estado normal (campo opcional).
-  const adicionaisValidos = adicionais
-    .map((a) => ({ nome: a.nome.trim(), valor: valorNumerico(a.valor) }))
-    .filter((a) => a.valor > 0)
+  // Linha com valor e sem unidade escolhida bloqueia o envio (não há padrão silencioso).
+  const linhasComValor = adicionais.filter((a) => valorNumerico(a.valor) > 0)
+  const faltaUnidade = linhasComValor.some((a) => !a.unidade)
 
-  const totalAdicionais = adicionaisValidos.reduce((s, a) => s + a.valor, 0)
+  // "Todas as ativas" → sem `unidade` no corpo: é o que o motor entende como dividir.
+  const adicionaisValidos: RateioAdicional[] = linhasComValor
+    .filter((a) => a.unidade)
+    .map((a) => ({
+      nome: a.nome.trim(),
+      valor: valorNumerico(a.valor),
+      ...(a.unidade !== UNIDADE_TODAS ? { unidade: a.unidade } : {}),
+    }))
+
+  // Resumo fiel do que vai ser enviado: soma por unidade (na ordem em que aparecem) e,
+  // à parte, o que será dividido entre as ativas.
+  const resumoAdicionais = (() => {
+    const porUnidade = new Map<string, number>()
+    let dividido = 0
+    for (const a of adicionaisValidos) {
+      if (a.unidade) porUnidade.set(a.unidade, (porUnidade.get(a.unidade) || 0) + a.valor)
+      else dividido += a.valor
+    }
+    const partes = [...porUnidade].map(([nome, valor]) => `${fmt(valor)} para ${nome}`)
+    if (dividido > 0) partes.push(`${fmt(dividido)} dividido entre as unidades ativas`)
+    return partes.join(' · ')
+  })()
 
   async function handleGerar() {
     if (!arquivo || enviando) return
@@ -217,50 +259,104 @@ function RateioInner() {
               </Button>
             </div>
 
+            {erroUnidades && (
+              <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600">
+                <span className="min-w-0 flex-1">
+                  A lista de unidades não carregou ({erroUnidades}). Só dá para escolher "Todas as unidades
+                  ativas" até tentar de novo.
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={recarregarUnidades}
+                  className="h-7 gap-1 px-2 text-xs"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  Tentar de novo
+                </Button>
+              </div>
+            )}
+            {!erroUnidades && !carregandoUnidades && unidades?.length === 0 && (
+              <p className="mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600">
+                Nenhuma unidade ativa cadastrada para esta empresa. Só dá para escolher "Todas as unidades
+                ativas".
+              </p>
+            )}
+
             <div className="space-y-2">
-              {adicionais.map((a, i) => (
-                <div key={i} className="flex gap-2">
-                  <Input
-                    value={a.nome}
-                    onChange={(e) => atualizarAdicional(i, 'nome', e.target.value)}
-                    placeholder="Nome do serviço (ex.: horas extras de setembro)"
-                    className="min-w-0 flex-1"
-                  />
-                  <Input
-                    inputMode="decimal"
-                    value={a.valor}
-                    onChange={(e) => atualizarAdicional(i, 'valor', e.target.value)}
-                    placeholder="Valor total"
-                    className="w-32 shrink-0 text-right"
-                  />
-                  {adicionais.length > 1 && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      aria-label={`Remover serviço ${i + 1}`}
-                      onClick={() => removerLinhaAdicional(i)}
-                      className="shrink-0 text-muted-foreground hover:text-destructive"
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              ))}
+              {adicionais.map((a, i) => {
+                const semUnidade = valorNumerico(a.valor) > 0 && !a.unidade
+                return (
+                  <div key={i}>
+                    <div className="flex gap-2">
+                      <Input
+                        value={a.nome}
+                        onChange={(e) => atualizarAdicional(i, 'nome', e.target.value)}
+                        placeholder="Nome do serviço (ex.: horas extras de setembro)"
+                        className="min-w-0 flex-1"
+                      />
+                      <Input
+                        inputMode="decimal"
+                        value={a.valor}
+                        onChange={(e) => atualizarAdicional(i, 'valor', e.target.value)}
+                        placeholder="Valor total"
+                        className="w-32 shrink-0 text-right"
+                      />
+                      <Select value={a.unidade} onValueChange={(v) => atualizarAdicional(i, 'unidade', v)}>
+                        <SelectTrigger
+                          aria-label={`Unidade do serviço ${i + 1}`}
+                          aria-invalid={semUnidade}
+                          className={`w-56 shrink-0 ${semUnidade ? 'border-destructive' : ''}`}
+                        >
+                          <SelectValue
+                            placeholder={carregandoUnidades ? 'Carregando unidades…' : 'Escolha a unidade'}
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(unidades || []).map((u) => (
+                            <SelectItem key={u} value={u}>
+                              {u}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value={UNIDADE_TODAS}>
+                            Todas as unidades ativas (dividir igualmente)
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {adicionais.length > 1 && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          aria-label={`Remover serviço ${i + 1}`}
+                          onClick={() => removerLinhaAdicional(i)}
+                          className="shrink-0 text-muted-foreground hover:text-destructive"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
+                    {semUnidade && (
+                      <p className="mt-1 text-xs font-medium text-destructive">
+                        Escolha a unidade deste custo para continuar.
+                      </p>
+                    )}
+                  </div>
+                )
+              })}
             </div>
 
             <p className="mt-1.5 text-xs text-muted-foreground">
-              {totalAdicionais > 0
-                ? `${fmt(totalAdicionais)} será dividido igualmente entre as unidades cadastradas e ativas de ${
-                    EMPRESAS.find((e) => e.key === empresa)?.label || empresa
-                  }.`
-                : 'Se preenchido, o valor é dividido igualmente entre as unidades cadastradas e ativas da empresa selecionada.'}
+              {resumoAdicionais
+                ? `${resumoAdicionais}.`
+                : 'Se preenchido, o valor vai inteiro para a unidade escolhida em cada linha. Se o custo é de mais de uma unidade, crie uma linha para cada.'}
             </p>
           </div>
 
           <Button
             onClick={handleGerar}
-            disabled={!arquivo || enviando}
+            disabled={!arquivo || enviando || faltaUnidade}
             className="mt-4 w-full h-11 font-semibold"
           >
             {enviando ? 'Processando…' : 'Gerar rateio'}
@@ -324,16 +420,27 @@ function RateioInner() {
                 <div className="mt-4 border-t border-border pt-3">
                   <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Serviços adicionais informados
-                    {r.adicional_n_unidades
+                    {r.adicional_n_unidades && (r.adicionais || []).some((a) => a.unidade === undefined)
                       ? ` · rateados entre ${fmtNum(r.adicional_n_unidades)} unidades`
                       : ''}
                   </p>
-                  {(r.adicionais || []).map((a, i) => (
-                    <ListRow key={i} className="justify-between">
-                      <span className="text-sm text-muted-foreground">{a.nome}</span>
-                      <span className="text-sm font-medium text-foreground">{fmt(a.valor)}</span>
-                    </ListRow>
-                  ))}
+                  {(r.adicionais || []).map((a, i) => {
+                    // `unidade` undefined = item sem o campo (formato antigo): só o nome, como antes.
+                    const nUnid = a.n_unidades ?? r.adicional_n_unidades
+                    const destino =
+                      a.unidade === undefined
+                        ? null
+                        : a.unidade || `todas as unidades ativas${nUnid ? ` (${fmtNum(nUnid)})` : ''}`
+                    return (
+                      <ListRow key={i} className="justify-between">
+                        <span className="text-sm text-muted-foreground">
+                          {a.nome}
+                          {destino && <span className="ml-1.5 text-foreground/80">→ {destino}</span>}
+                        </span>
+                        <span className="text-sm font-medium text-foreground">{fmt(a.valor)}</span>
+                      </ListRow>
+                    )
+                  })}
                 </div>
               )}
             </GlassCard>
@@ -346,7 +453,7 @@ function RateioInner() {
                 <ul className="max-h-40 space-y-1 overflow-y-auto text-xs text-amber-600/90">
                   {pendencias.map((p, i) => (
                     <li key={i}>
-                      • <span className="font-medium">{p.tipo}</span>: {p.referencia}
+                      • <span className="font-medium">{rotuloPendencia(p.tipo)}</span>: {p.referencia}
                     </li>
                   ))}
                 </ul>

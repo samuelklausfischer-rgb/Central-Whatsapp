@@ -2,11 +2,16 @@ import { supabaseFinanceiro } from '@/lib/supabase/client-financeiro'
 
 export type RateioEmpresa = 'PRN' | 'PRN_APICE' | 'MEDIMAGEM' | 'MEDIMAGEM_APICE'
 
-// Serviço avulso do mês informado na tela (ex.: horas extras). O valor total é
-// dividido pelo motor entre as unidades cadastradas e ativas da empresa.
+// Serviço avulso do mês informado na tela (ex.: horas extras). Com `unidade`, o valor
+// vai inteiro para aquela unidade (nome exatamente como veio de fetchRateioUnidades).
+// Sem `unidade`, o motor divide entre as unidades cadastradas e ativas da empresa.
+// Na resposta do motor, `unidade` vem null quando foi dividido e `n_unidades` diz entre
+// quantas; itens antigos do histórico não têm nenhum dos dois campos.
 export interface RateioAdicional {
   nome: string
   valor: number
+  unidade?: string | null
+  n_unidades?: number
 }
 
 export interface RateioResumo {
@@ -55,12 +60,31 @@ export interface RateioHistoricoItem {
 // Não é segredo (endpoint público, CORS liberado) — só evita depender de config em
 // runtime para a feature funcionar out-of-the-box; VITE_N8N_RATEIO_WEBHOOK sobrescreve.
 const WEBHOOK_FALLBACK = 'https://apps-n8n.srofjl.easypanel.host/webhook/rateio-upload'
+const UNIDADES_WEBHOOK_FALLBACK = 'https://apps-n8n.srofjl.easypanel.host/webhook/rateio-unidades'
 
 // Mesma tabela/projeto Supabase já usados pelo Dashboard Omie (histórico de rateio).
 const TABLE_RATEIO = 'dash_rateio_execucoes'
 const RATEIO_LIST_COLS =
   'id, empresa, arquivo_nome, total_variavel, total_encargos, total_geral, totais_taxa, ' +
   'n_unidades, total_exames, n_pendencias, pendencias, adicionais, adicional_total, criado_em'
+
+interface RateioUnidadesResposta {
+  ok: boolean
+  mensagem?: string
+  empresa?: string
+  unidades?: { nome: string }[]
+}
+
+// Unidades ativas da empresa (já ordenadas pelo n8n), para o seletor do serviço
+// adicional. Devolve só os nomes — é o valor que volta em `RateioAdicional.unidade`.
+export async function fetchRateioUnidades(empresa: RateioEmpresa): Promise<string[]> {
+  const base = import.meta.env.VITE_N8N_RATEIO_UNIDADES_WEBHOOK || UNIDADES_WEBHOOK_FALLBACK
+  const res = await fetch(`${base}?${new URLSearchParams({ empresa })}`)
+  if (!res.ok) throw new Error(`Falha ao carregar as unidades (HTTP ${res.status})`)
+  const json = (await res.json()) as RateioUnidadesResposta
+  if (!json.ok) throw new Error(json.mensagem || 'Falha ao carregar as unidades')
+  return (json.unidades || []).map((u) => u.nome).filter(Boolean)
+}
 
 export async function processarRateio(
   arquivo: File,
