@@ -13,6 +13,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { fmt, fmtNum, baixarBase64 } from '@/lib/rateio/format'
+import { pendenciaPortalDivergente } from '@/lib/rateio/pendencias'
 import { fetchRateioArquivo, type RateioHistoricoItem } from '@/services/rateio/rateio-service'
 import { useToast } from '@/hooks/use-toast'
 
@@ -92,7 +93,9 @@ export function RateioHistoricoPanel({ historico, loading, error, onDelete }: Ra
           </p>
         )}
 
-        {historico?.map((item) => (
+        {historico?.map((item) => {
+          const portalDivergente = pendenciaPortalDivergente(item.pendencias)
+          return (
           // Sem borda por item — só o respiro e o `hover:bg-foreground/5` do
           // `ListRow`, igual ao idioma da home. O item tem dois cliques
           // próprios (baixar/excluir) então fica `flex-col` em vez do
@@ -101,6 +104,15 @@ export function RateioHistoricoPanel({ historico, loading, error, onDelete }: Ra
             <div className="flex items-center justify-between gap-2">
               <span className="text-[11px] font-medium text-muted-foreground">{formatDataHora(item.criado_em)}</span>
               <div className="flex shrink-0 items-center gap-1">
+                {portalDivergente && (
+                  <Badge
+                    variant="outline"
+                    className="border-destructive/50 text-[10px] text-destructive"
+                    title={portalDivergente.descricao || 'O portal por unidade não bate com a fatura da Mobilemed.'}
+                  >
+                    portal divergente
+                  </Badge>
+                )}
                 {item.n_pendencias > 0 && (
                   <Badge variant="outline" className="border-amber-500/40 text-[10px] text-amber-500">
                     {item.n_pendencias} pend.
@@ -141,7 +153,8 @@ export function RateioHistoricoPanel({ historico, loading, error, onDelete }: Ra
               {baixandoId === item.id ? 'Baixando…' : 'Baixar planilha'}
             </button>
           </ListRow>
-        ))}
+          )
+        })}
       </div>
     </aside>
 
