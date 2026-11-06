@@ -67,7 +67,19 @@ type ToolFrameProps = ToolFrameComum &
          */
         watch?: (send: (credential: EmbedCredential) => void) => () => void
       }
-    | { prontidao: 'ao-carregar'; getCredential?: never; watch?: never }
+    | {
+        prontidao: 'ao-carregar'
+        /**
+         * OPCIONAL, e só para o filho que PODE falar o protocolo mas não é obrigado
+         * (Conferência de pagamentos). A prontidão continua sendo o `onLoad`; o
+         * `ready` do filho, se vier, é respondido com a credencial SEM mexer no
+         * status. Assim a versão antiga do filho (que nunca manda `ready`) segue
+         * abrindo normalmente, e a nova recebe a sessão — a ordem de publicação
+         * Hub-primeiro-filho-depois não quebra nada.
+         */
+        getCredential?: () => Promise<EmbedCredential>
+        watch?: (send: (credential: EmbedCredential) => void) => () => void
+      }
   )
 
 type Status = 'connecting' | 'ready' | 'error'
@@ -198,9 +210,10 @@ export function ToolFrame({
   )
 
   useEffect(() => {
-    // `semHandshake`: não há `ready` para esperar nem credencial para entregar.
-    // A prontidão vem do `onLoad` do iframe, lá embaixo.
-    if (!target || semHandshake) return
+    // `semHandshake`: não há `ready` para esperar. A prontidão vem do `onLoad` do
+    // iframe, lá embaixo. Só escuta se a ferramenta trouxe credencial (filho que
+    // fala o protocolo por opção); sem `getCredential`, nada a entregar.
+    if (!target || (semHandshake && !getCredentialRef.current)) return
     let mounted = true
     let stopWatching: (() => void) | undefined
     // O filho repete o `ready` até receber a credencial (ver `embed.ts` lá).
@@ -247,8 +260,11 @@ export function ToolFrame({
         const credential = await getCredentialRef.current()
         if (!mounted) return
         send(credential)
-        setStatus('ready')
-        setError(null)
+        // Em `semHandshake` quem libera a tela é o `onLoad`; aqui só se entrega a sessão.
+        if (!semHandshake) {
+          setStatus('ready')
+          setError(null)
+        }
         stopWatching?.()
         stopWatching = watchRef.current?.(send)
       } catch (err) {
