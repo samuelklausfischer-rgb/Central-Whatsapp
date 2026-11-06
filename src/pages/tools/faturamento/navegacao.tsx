@@ -17,6 +17,9 @@ export type Tela =
   | { nome: 'gerar' }
   | { nome: 'relatorios' }
   | { nome: 'relatorio'; id: string }
+  | { nome: 'diagnostico' }
+  | { nome: 'regras-gerais' }
+  | { nome: 'nova-unidade' }
 
 export function telaDoCaminho(caminho: string): Tela {
   const partes = caminho.replace(/^\/faturamento\/?/, '').split('/').filter(Boolean)
@@ -24,6 +27,9 @@ export function telaDoCaminho(caminho: string): Tela {
   if (partes[0] === 'relatorio' && partes[1]) return { nome: 'relatorio', id: partes[1] }
   if (partes[0] === 'gerar') return { nome: 'gerar' }
   if (partes[0] === 'relatorios') return { nome: 'relatorios' }
+  if (partes[0] === 'diagnostico') return { nome: 'diagnostico' }
+  if (partes[0] === 'regras-gerais') return { nome: 'regras-gerais' }
+  if (partes[0] === 'nova-unidade') return { nome: 'nova-unidade' }
   return { nome: 'config' }
 }
 

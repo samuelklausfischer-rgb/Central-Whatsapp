@@ -1,15 +1,29 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from '../navegacao'
+import { AlertTriangle, ChevronDown, ChevronRight, FilterX, Plus, SearchX } from 'lucide-react'
 import { db } from '../lib/supabase'
 import { paginar } from '../lib/pool'
-import type { Alias, PrecoVigente, RegrasUnidade, UnidadeResumo } from '../lib/tipos'
-import { MODELO, SITUACAO, brl, dataBR, hojeISO } from '../lib/format'
-import { BLOCOS_PRECO, agruparUnidades, comoFatura, etiquetasRegras, modeloComum, resumoPreco } from '../lib/config'
-import { Pill } from '../components/Pill'
+import type { PrecoVigente, RegrasUnidade, UnidadeResumo } from '../lib/tipos'
+import { MODELO, hojeISO, plural } from '../lib/format'
+import { modeloComum } from '../lib/config'
+import { useStatusPorExame } from '../components/ComoFatura'
+import { Botao, Carregando, Vazio } from '../components/ui'
+import { BarraFiltros } from './lista/BarraFiltros'
+import { SaudeCadastro } from './lista/SaudeCadastro'
+import { IndicadoresLista } from './lista/IndicadoresLista'
+import { GRADE, LinhaUnidade, type AliasLinha } from './lista/LinhaUnidade'
+import {
+  AGRUPAR_PADRAO, FILTROS_VAZIOS, agruparPor, alternarChave, contagens, filtrar, filtroAtivo, filtrosSalvos, saudeDe,
+  type Agrupar, type ChaveRegra, type ChaveSaude, type Contexto, type Filtros,
+} from './lista/filtrosLista'
 
-type AliasLinha = Pick<Alias, 'nome_bruto' | 'unidade_id' | 'subunidade' | 'principal'>
-
-const norm = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+const CHAVE_LISTA = 'fat:config:lista'
+type EstadoLista = Filtros & { agrupar: Agrupar; grupos: string[]; unidades: string[] }
+function lerEstado(): Partial<Record<keyof EstadoLista, unknown>> {
+  try { return JSON.parse(sessionStorage.getItem(CHAVE_LISTA) ?? '{}') } catch { return {} }
+}
+const lerAgrupar = (v: unknown): Agrupar => (v === 'nenhum' || v === 'contrato' || v === 'empresa') ? v : AGRUPAR_PADRAO
+const lerLista = (v: unknown): string[] => Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
 
 export default function Configuracao() {
   const [unidades, setUnidades] = useState<UnidadeResumo[]>([])
@@ -19,11 +33,19 @@ export default function Configuracao() {
   const [dataRef, setDataRef] = useState(hojeISO())
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
-  const [busca, setBusca] = useState('')
-  const [empresa, setEmpresa] = useState('')
-  const [situacao, setSituacao] = useState('')
-  const [gruposAbertos, setGruposAbertos] = useState<Set<string>>(new Set())
-  const [unidadesAbertas, setUnidadesAbertas] = useState<Set<string>>(new Set())
+  const [salvo] = useState(lerEstado)
+  const [filtros, setFiltros] = useState<Filtros>(() => filtrosSalvos(salvo))
+  const [agrupar, setAgrupar] = useState<Agrupar>(() => lerAgrupar(salvo.agrupar))
+  const [gruposAbertos, setGruposAbertos] = useState<Set<string>>(new Set(lerLista(salvo.grupos)))
+  const [unidadesAbertas, setUnidadesAbertas] = useState<Set<string>>(new Set(lerLista(salvo.unidades)))
+  const abrirResultados = useRef(false) // depois de mexer em busca/filtro, abre os grupos com resultado
+  const statusPorExame = useStatusPorExame()
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(CHAVE_LISTA, JSON.stringify({ ...filtros, agrupar, grupos: [...gruposAbertos], unidades: [...unidadesAbertas] } satisfies EstadoLista))
+    } catch { /* sem sessionStorage: segue sem lembrar */ }
+  }, [filtros, agrupar, gruposAbertos, unidadesAbertas])
 
   // Cadastro (unidades, regras e nomes) — não depende da data
   useEffect(() => {
@@ -31,8 +53,8 @@ export default function Configuracao() {
       try {
         const [us, rs, as] = await Promise.all([
           paginar<UnidadeResumo>((de, ate) => db.from('v_unidade_resumo').select('*').order('pasta').order('id').range(de, ate)),
-          paginar<RegrasUnidade>((de, ate) => db.from('unidade').select('id, janela, criterio_data, franquia_mensal').order('id').range(de, ate)),
-          paginar<AliasLinha>((de, ate) => db.from('alias').select('nome_bruto, unidade_id, subunidade, principal').order('nome_bruto').range(de, ate)),
+          paginar<RegrasUnidade>((de, ate) => db.from('unidade').select('id, janela, criterio_data, franquia_mensal, todos_status, regras_quantidade, estudos_conta_2, acao_intensificada').order('id').range(de, ate)),
+          paginar<AliasLinha>((de, ate) => db.from('alias').select('nome_bruto, unidade_id, subunidade, principal, grupo').order('nome_bruto').range(de, ate)),
         ])
         setUnidades(us)
         setRegras(new Map(rs.map(r => [r.id, r])))
@@ -64,153 +86,104 @@ export default function Configuracao() {
     return () => { cancelado = true }
   }, [dataRef])
 
-  const grupos = useMemo(() => {
-    const q = norm(busca.trim())
-    const passaFiltro = (u: UnidadeResumo) => (!empresa || u.empresa === empresa) && (!situacao || u.situacao === situacao)
-    const casaUnidade = (u: UnidadeResumo) => !q
-      || norm(`${u.pasta} ${u.orgao ?? ''}`).includes(q)
-      || (aliases.get(u.id) ?? []).some(a => norm(a.nome_bruto).includes(q))
-    return agruparUnidades(unidades)
-      .map(g => {
-        const grupoCasa = !!q && norm(g.nome).includes(q)
-        return { ...g, unidades: g.unidades.filter(u => passaFiltro(u) && (grupoCasa || casaUnidade(u))) }
-      })
-      .filter(g => g.unidades.length > 0)
-  }, [unidades, aliases, busca, empresa, situacao])
+  const ctx: Contexto = useMemo(() => ({ regras, precos, aliases, precosProntos: !carregando }), [regras, precos, aliases, carregando])
+  const contagem = useMemo(() => contagens(unidades, filtros, ctx), [unidades, filtros, ctx])
+  const visiveis = useMemo(() => filtrar(unidades, filtros, ctx), [unidades, filtros, ctx])
+  const grupos = useMemo(() => agruparPor(visiveis, agrupar), [visiveis, agrupar])
+  const ativo = filtroAtivo(filtros)
+  const resumo = useMemo(() => {
+    const atencao = unidades.filter(u => saudeDe(u, ctx).some(k => k === 'vencida_vigente' || k === 'sem_preco' || k === 'divergente')).length
+    return { vigentes: unidades.filter(u => u.situacao === 'vigente').length, atencao, pendencia: unidades.filter(u => u.n_pendencias > 0).length }
+  }, [unidades, ctx])
 
-  const totalMostradas = grupos.reduce((s, g) => s + g.unidades.length, 0)
+  useEffect(() => {
+    if (!abrirResultados.current || !grupos.length) return
+    abrirResultados.current = false
+    setGruposAbertos(new Set(grupos.map(g => g.nome)))
+  }, [grupos])
 
+  function mudar(f: Partial<Filtros>) { abrirResultados.current = true; setFiltros(a => ({ ...a, ...f })) }
+  function limparFiltros() { abrirResultados.current = false; setFiltros(FILTROS_VAZIOS) }
+
+  const itensDe = (u: UnidadeResumo) => precos.get(u.id) ?? []
   function alternar(set: Set<string>, k: string, atualizar: (s: Set<string>) => void) {
     const n = new Set(set); if (n.has(k)) n.delete(k); else n.add(k)
     atualizar(n)
   }
+  const linha = (u: UnidadeResumo) => (
+    <LinhaUnidade key={u.id} u={u} regras={regras.get(u.id)} itens={itensDe(u)} nomes={aliases.get(u.id) ?? []}
+      saude={saudeDe(u, ctx)} statusPorExame={statusPorExame} aberta={unidadesAbertas.has(u.id)} dataRef={dataRef}
+      onAlternar={() => alternar(unidadesAbertas, u.id, setUnidadesAbertas)} />
+  )
 
-  if (erro) return <p className="text-rose-700">Erro ao carregar: {erro}</p>
+  if (erro) return <p className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">Erro ao carregar: {erro}</p>
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-lg font-semibold">Configuração dos contratos</h1>
-        <p className="text-sm text-slate-600">Cada grupo reúne as unidades de um mesmo contrato. Abra uma unidade para ver os valores por exame, o valor fixo e como ela fatura.</p>
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-2xl font-bold text-[#1f4e78]">Unidades e contratos</h1>
+          <p className="mt-1 text-sm text-slate-600">Veja como cada unidade fatura e o que precisa de atenção. Abra uma unidade para ver os valores por exame, o valor fixo e editar as regras.</p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Link to="/faturamento/diagnostico" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50">
+            <AlertTriangle className="size-4" aria-hidden="true" />Erros de configuração
+          </Link>
+          <Link to="/faturamento/nova-unidade" className="inline-flex items-center gap-1.5 rounded-lg bg-[#1f4e78] px-3.5 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#173d5f]">
+            <Plus className="size-4" aria-hidden="true" />Nova unidade
+          </Link>
+        </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <input className="min-w-[240px] flex-1 rounded border bg-white px-2 py-1" placeholder="Buscar grupo, unidade, órgão ou nome do Bruto…"
-          value={busca} onChange={e => setBusca(e.target.value)} />
-        <select className="rounded border bg-white px-2 py-1" value={empresa} onChange={e => setEmpresa(e.target.value)}>
-          <option value="">Todas as empresas</option><option value="PRN">PRN</option><option value="MEDIMAGEM">MedImagem</option></select>
-        <select className="rounded border bg-white px-2 py-1" value={situacao} onChange={e => setSituacao(e.target.value)}>
-          <option value="">Qualquer situação</option>
-          {Object.entries(SITUACAO).map(([k, v]) => <option key={k} value={k}>{v.rotulo}</option>)}</select>
-        <label className="text-slate-600">valores vigentes em{' '}
-          <input type="date" className="rounded border bg-white px-1 py-0.5" value={dataRef} onChange={e => e.target.value && setDataRef(e.target.value)} /></label>
-      </div>
-
-      {carregando && !unidades.length ? <p className="text-sm text-slate-500">Carregando…</p> : (
+      {carregando && !unidades.length ? <Carregando linhas={5} /> : (
         <>
-          <div className="space-y-3">
-            {grupos.map(g => {
-              const aberto = gruposAbertos.has(g.nome)
-              const modelo = modeloComum(g.unidades)
-              return (
-                <section key={g.nome} className="overflow-hidden rounded-lg border bg-white">
-                  <button className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50" aria-expanded={aberto}
-                    onClick={() => alternar(gruposAbertos, g.nome, setGruposAbertos)}>
-                    <span className="w-4 text-slate-400">{aberto ? '▾' : '▸'}</span>
-                    <span className="font-semibold">{g.nome}</span>
-                    <span className="text-xs text-slate-500">{g.unidades.length} {g.unidades.length === 1 ? 'unidade' : 'unidades'}</span>
-                    {modelo && <span className="ml-auto rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{MODELO[modelo] ?? modelo}</span>}
-                  </button>
-                  {aberto && (
-                    <ul className="divide-y border-t">
-                      {g.unidades.map(u => (
-                        <LinhaUnidade key={u.id} u={u} regras={regras.get(u.id)} itens={precos.get(u.id) ?? []} nomes={aliases.get(u.id) ?? []}
-                          aberta={unidadesAbertas.has(u.id)} dataRef={dataRef}
-                          onAlternar={() => alternar(unidadesAbertas, u.id, setUnidadesAbertas)} />
-                      ))}
-                    </ul>
-                  )}
-                </section>
-              )
-            })}
-            {!grupos.length && <p className="rounded-lg border bg-white p-4 text-center text-sm text-slate-500">Nenhum grupo ou unidade com esses filtros.</p>}
-          </div>
-          <p className="text-xs text-slate-500">{grupos.length} grupos · {totalMostradas} de {unidades.length} unidades{carregando ? ' · atualizando valores…' : ''}</p>
+          <IndicadoresLista total={unidades.length} vigentes={resumo.vigentes} atencao={resumo.atencao} pendencia={resumo.pendencia} />
+
+          <SaudeCadastro contagem={contagem.saude} selecionadas={filtros.saude} carregandoPrecos={carregando}
+            onAlternar={(k: ChaveSaude) => mudar({ saude: alternarChave(filtros.saude, k) })} />
+
+          <BarraFiltros filtros={filtros} contagem={contagem} totalGeral={unidades.length} agrupar={agrupar} dataRef={dataRef} filtroAtivo={ativo}
+            onBusca={busca => mudar({ busca })} onEmpresa={empresa => mudar({ empresa })} onSituacao={situacao => mudar({ situacao })}
+            onRegra={(k: ChaveRegra) => mudar({ regras: alternarChave(filtros.regras, k) })}
+            onAgrupar={setAgrupar} onData={setDataRef} onLimpar={limparFiltros} />
+
+          {grupos.length > 0 && (
+            <div className="space-y-4">
+              <div className={`hidden rounded-lg bg-[#1f4e78]/10 px-4 py-2 text-xs font-bold uppercase tracking-wide text-[#1f4e78] ${GRADE} lg:grid lg:pr-[3.75rem]`} aria-hidden="true">
+                <span>Unidade</span><span>Como fatura</span><span>Preço hoje</span><span>Vigência</span><span>Alertas</span>
+              </div>
+              {grupos.map(g => {
+                if (agrupar === 'nenhum') {
+                  return <ul key="todas" className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">{g.unidades.map(linha)}</ul>
+                }
+                const aberto = gruposAbertos.has(g.nome)
+                const modelo = modeloComum(g.unidades, itensDe)
+                return (
+                  <section key={g.nome} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                    <button type="button" aria-expanded={aberto} onClick={() => alternar(gruposAbertos, g.nome, setGruposAbertos)}
+                      className="flex w-full items-center gap-3 border-l-4 border-l-[#1f4e78] bg-gradient-to-r from-sky-100 to-sky-50 px-4 py-3 text-left hover:from-sky-200 hover:to-sky-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#1f4e78]/50">
+                      {aberto ? <ChevronDown className="size-4 text-slate-600" aria-hidden="true" /> : <ChevronRight className="size-4 text-slate-600" aria-hidden="true" />}
+                      <span className="font-bold text-[#1f4e78]">{g.nome}</span>
+                      <span className="rounded-full bg-[#1f4e78] px-2 py-0.5 text-xs font-semibold text-white">{plural(g.unidades.length, 'unidade', 'unidades')}</span>
+                      {modelo && <span className="ml-auto rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-semibold text-indigo-900 ring-1 ring-inset ring-indigo-300">{MODELO[modelo] ?? modelo}</span>}
+                    </button>
+                    {aberto && <ul className="divide-y divide-slate-100 border-t border-slate-200">{g.unidades.map(linha)}</ul>}
+                  </section>
+                )
+              })}
+            </div>
+          )}
+
+          {!grupos.length && (
+            <Vazio icone={SearchX} titulo="Nenhuma unidade com esses filtros"
+              texto="Tente outra busca ou tire algum filtro."
+              acao={ativo ? <Botao icone={FilterX} onClick={limparFiltros}>Limpar filtros</Botao> : undefined} />
+          )}
+
+          <p className="text-xs text-slate-600">
+            {agrupar === 'nenhum' ? '' : `${plural(grupos.length, 'grupo', 'grupos')} · `}{visiveis.length} de {plural(unidades.length, 'unidade', 'unidades')}{carregando ? ' · atualizando valores…' : ''}
+          </p>
         </>
       )}
     </div>
-  )
-}
-
-function LinhaUnidade({ u, regras, itens, nomes, aberta, dataRef, onAlternar }: {
-  u: UnidadeResumo; regras: RegrasUnidade | undefined; itens: PrecoVigente[]; nomes: AliasLinha[]
-  aberta: boolean; dataRef: string; onAlternar: () => void
-}) {
-  const etiquetas = etiquetasRegras(regras)
-  return (
-    <li>
-      <button className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 pl-8 text-left text-sm hover:bg-slate-50" aria-expanded={aberta} onClick={onAlternar}>
-        <span className="w-4 text-slate-400">{aberta ? '▾' : '▸'}</span>
-        <span className="font-medium">{u.pasta}</span>
-        <span className="text-xs text-slate-500">{u.empresa === 'MEDIMAGEM' ? 'MedImagem' : 'PRN'}</span>
-        <Pill texto={SITUACAO[u.situacao]?.rotulo ?? u.situacao} cor={SITUACAO[u.situacao]?.cor ?? ''} />
-        <span className="text-xs text-slate-600">{MODELO[u.modelo_cobranca] ?? u.modelo_cobranca}</span>
-        <span className="text-xs font-medium text-slate-800">{resumoPreco(u, itens)}</span>
-        {etiquetas.map(e => <span key={e} className="rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] text-indigo-700">{e}</span>)}
-      </button>
-      {aberta && (
-        <div className="space-y-4 bg-slate-50 px-4 py-3 pl-12 text-sm">
-          {BLOCOS_PRECO.map(b => {
-            const linhas = itens.filter(i => i.papel === b.papel)
-            if (!linhas.length) return null
-            return (
-              <div key={b.papel}>
-                <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{b.titulo}</h3>
-                <table className="w-full rounded border bg-white">
-                  <thead className="text-left text-xs text-slate-500">
-                    <tr><th className="p-1.5">Exame</th><th>Modalidade</th><th className="text-right">Valor original</th><th className="text-right">Valor vigente</th><th className="pl-3">Vigente desde</th></tr>
-                  </thead>
-                  <tbody>
-                    {linhas.map(i => (
-                      <tr key={i.item_preco_id} className="border-t">
-                        <td className="p-1.5">{i.exame}</td><td>{i.modalidade ?? '—'}</td>
-                        <td className="text-right text-slate-500">{brl(i.valor_original)}</td>
-                        <td className="text-right font-semibold text-slate-900">{brl(i.valor)}</td>
-                        <td className="pl-3 text-slate-600">{dataBR(i.vigente_desde)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )
-          })}
-          {!itens.length && <p className="italic text-slate-500">{u.n_itens > 0 ? `Nenhum valor vigente em ${dataBR(dataRef)}.` : 'Esta unidade não tem itens de preço cadastrados.'}</p>}
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <div>
-              <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Como fatura</h3>
-              <dl className="space-y-0.5">
-                {comoFatura(u.modelo_cobranca, regras).map(l => (
-                  <div key={l.rotulo} className="flex gap-2"><dt className="w-40 shrink-0 text-slate-500">{l.rotulo}</dt><dd>{l.texto}</dd></div>
-                ))}
-              </dl>
-            </div>
-            <div>
-              <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Nomes no relatório da Mobilemed</h3>
-              {nomes.length ? (
-                <ul className="space-y-0.5">
-                  {nomes.map(a => (
-                    <li key={a.nome_bruto}>{a.nome_bruto}
-                      {a.subunidade && <span className="text-slate-500"> · {a.subunidade}</span>}
-                      {a.principal && <span className="ml-1 rounded bg-emerald-100 px-1 text-[11px] text-emerald-800">principal</span>}
-                    </li>
-                  ))}
-                </ul>
-              ) : <p className="italic text-slate-500">Nenhum nome cadastrado.</p>}
-            </div>
-          </div>
-          <Link to={`/faturamento/unidade/${u.id}`} className="inline-block text-[#1f4e78] underline">Abrir detalhes e editar →</Link>
-        </div>
-      )}
-    </li>
   )
 }
